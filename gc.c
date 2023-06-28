@@ -3261,9 +3261,11 @@ rb_vm_ccs_free(struct rb_class_cc_entries *ccs)
 
 typedef int (*visitor_func)(VALUE v, void *data);
 typedef enum rb_id_table_iterator_result (*id_table_entry_visitor_func)(VALUE v, void *data);
+typedef enum rb_id_table_iterator_result (*iter_func)(ID id, VALUE value, void *data);
 
 struct visitor_data {
-    visitor_func func;
+    visitor_func vfunc;
+    iter_func ifunc;
 };
 
 struct cc_tbl_i_data {
@@ -7174,10 +7176,10 @@ visit_value_i(VALUE reference, void *data)
 }
 
 static int
-gc_visit_m_tbl(struct rb_id_table *tbl, void *data)
+gc_visit_tbl_entries(struct rb_id_table *tbl, void *data)
 {
     rb_objspace_t *objspace = &rb_objspace;
-    visitor_func func = ((struct visitor_data *)data)->func;
+    visitor_func func = ((struct visitor_data *)data)->vfunc;
     if (tbl) {
         rb_id_table_foreach_values(tbl, (rb_id_table_foreach_values_func_t *)func, objspace);
     }
@@ -7188,7 +7190,7 @@ static enum rb_id_table_iterator_result
 gc_visit_cc_table_i(ID id, VALUE ccs_ptr, void *data)
 {
     struct rb_class_cc_entries *ccs = (struct rb_class_cc_entries *)ccs_ptr;
-    visitor_func func = ((struct cc_tbl_i_data *)data)->vdata->func;
+    visitor_func func = ((struct cc_tbl_i_data *)data)->vdata->vfunc;
 
     VM_ASSERT(vm_ccs_p(ccs));
     VM_ASSERT(id == ccs->cme->called_id);
@@ -7230,7 +7232,7 @@ gc_visit_cc_table(VALUE klass, struct visitor_data *data)
 static enum rb_id_table_iterator_result
 visit_const_entry_i(VALUE value, void *data)
 {
-    visitor_func func = ((struct visitor_data *)data)->func;
+    visitor_func func = ((struct visitor_data *)data)->vfunc;
     const rb_const_entry_t *ce = (const rb_const_entry_t *)value;
 
     (*func)(ce->value, data);
@@ -7249,18 +7251,19 @@ gc_visit_const_table(struct rb_id_table *tbl, struct visitor_data *data)
 void
 gc_visit_fields(const VALUE *obj, struct visitor_data *data)
 {
-    visitor_func func = data->func;
+    visitor_func func = data->vfunc;
 
     RB_VM_LOCK_ENTER();
     {
-        if (is_markable_object(*obj)) {
-            switch (BUILTIN_TYPE(*obj)) {
+        VALUE v = *obj;
+        if (is_markable_object(v)) {
+            switch (BUILTIN_TYPE(v)) {
               case T_REGEXP:
-                (*func)(RANY(*obj)->as.regexp.src, data);
+                (*func)(RANY(v)->as.regexp.src, data);
                 break;
               case T_STRING:
-                if (STR_SHARED_P(*obj)) {
-                    (*func)(RANY(*obj)->as.string.as.heap.aux.shared, data);
+                if (STR_SHARED_P(v)) {
+                    (*func)(RANY(v)->as.string.as.heap.aux.shared, data);
                 }
                 break;
               case T_IMEMO:
@@ -7268,33 +7271,29 @@ gc_visit_fields(const VALUE *obj, struct visitor_data *data)
                 break;
 
               case T_CLASS:
-                if (FL_TEST(*obj, FL_SINGLETON)) {
-                    (*func)(RCLASS_ATTACHED_OBJECT(obj), data);
+                if (FL_TEST(v, FL_SINGLETON)) {
+                    (*func)(RCLASS_ATTACHED_OBJECT(v), data);
                 }
                 // Continue to the shared T_CLASS/T_MODULE
               case T_MODULE:
-                if (RCLASS_SUPER(*obj)) {
-                    (*func)(RCLASS_SUPER(*obj), data);
+                if (RCLASS_SUPER(v)) {
+                    (*func)(RCLASS_SUPER(v), data);
                 }
                 if (!RCLASS_EXT(*obj)) break;
 
-                fprintf(stderr, "gc_visit_fields: marking M_TBL\n");
-                gc_visit_m_tbl(RCLASS_M_TBL(*obj), data);
-                fprintf(stderr, "gc_visit_fields: marking CVC_TBL\n");
-                gc_visit_m_tbl(RCLASS_CVC_TBL(*obj), data);
-                fprintf(stderr, "gc_visit_fields: marking CC_TBL\n");
-                gc_visit_cc_table(*obj, data);
+                gc_visit_tbl_entries(RCLASS_M_TBL(v), data);
+                gc_visit_tbl_entries(RCLASS_CVC_TBL(v), data);
+                gc_visit_cc_table(v, data);
 
-                for (attr_index_t i = 0; i < RCLASS_IV_COUNT(*obj); i++) {
-                    (*func)(RCLASS_IVPTR(*obj)[i], data);
+                for (attr_index_t i = 0; i < RCLASS_IV_COUNT(v); i++) {
+                    (*func)(RCLASS_IVPTR(v)[i], data);
                 }
-                fprintf(stderr, "gc_visit_fields: marking CONST_TBL\n");
-                gc_visit_const_table(RCLASS_CONST_TBL(*obj), data);
+                gc_visit_const_table(RCLASS_CONST_TBL(v), data);
 
-                (*func)(RCLASS_EXT(*obj)->classpath, data);
+                (*func)(RCLASS_EXT(v)->classpath, data);
                 break;
               default:
-                fprintf(stderr, "%s\n", obj_info(*obj));
+                fprintf(stderr, "%s\n", obj_info(v));
                 rb_bug("unreachable");
             }
 
@@ -7307,7 +7306,7 @@ gc_visit_fields(const VALUE *obj, struct visitor_data *data)
 void
 gc_visit_fields_from(const VALUE *obj, struct visitor_data *data)
 {
-    (*((struct visitor_data *)data)->func)(*obj, data);
+    (*((struct visitor_data *)data)->vfunc)(*obj, data);
     gc_visit_fields(obj, data);
 }
 
@@ -7347,7 +7346,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
     }
 
     gc_mark(objspace, any->as.basic.klass);
-    struct visitor_data data = { .func = gc_mark_i };
+    struct visitor_data data = { .vfunc = gc_mark_i };
 
     switch (BUILTIN_TYPE(obj)) {
       case T_CLASS:
@@ -11934,9 +11933,8 @@ field_visitor_test(VALUE self)
     VALUE regexp = rb_reg_new(".*", 2, 0);
     VALUE klass = rb_class_new(rb_cObject);
 
-    struct visitor_data vdata = { .func = visit_value_i };
+    struct visitor_data vdata = { .vfunc = visit_value_i };
     rb_define_const(klass, "Foobar", regexp);
-
 
     gc_visit_fields_from(&regexp, (void *)&vdata);
     gc_visit_fields_from(&klass, (void *)&vdata);
