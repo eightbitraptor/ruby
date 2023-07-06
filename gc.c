@@ -1254,7 +1254,7 @@ static int  gc_sweep_step(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb
 static void gc_sweep_rest(rb_objspace_t *objspace);
 static void gc_sweep_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap);
 
-static inline void gc_mark(rb_objspace_t *objspace, VALUE ptr, new_mark_func);
+static inline void gc_visit_value(rb_objspace_t *objspace, VALUE ptr, new_mark_func);
 static inline void gc_pin(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_mark_and_pin(rb_objspace_t *objspace, VALUE ptr);
 static void gc_mark_ptr(rb_objspace_t *objspace, VALUE ptr, new_mark_func);
@@ -3278,14 +3278,14 @@ cc_table_mark_i(ID id, VALUE ccs_ptr, void *data_ptr)
         return ID_TABLE_DELETE;
     }
     else {
-        gc_mark(data->objspace, (VALUE)ccs->cme, global_mark_func);
+        gc_visit_value(data->objspace, (VALUE)ccs->cme, global_mark_func);
 
         for (int i=0; i<ccs->len; i++) {
             VM_ASSERT(data->klass == ccs->entries[i].cc->klass);
             VM_ASSERT(vm_cc_check_cme(ccs->entries[i].cc, ccs->cme));
 
-            gc_mark(data->objspace, (VALUE)ccs->entries[i].ci, global_mark_func);
-            gc_mark(data->objspace, (VALUE)ccs->entries[i].cc, global_mark_func);
+            gc_visit_value(data->objspace, (VALUE)ccs->entries[i].ci, global_mark_func);
+            gc_visit_value(data->objspace, (VALUE)ccs->entries[i].cc, global_mark_func);
         }
         return ID_TABLE_CONTINUE;
     }
@@ -6434,7 +6434,7 @@ gc_mark_values(rb_objspace_t *objspace, long n, const VALUE *values)
     long i;
 
     for (i=0; i<n; i++) {
-        gc_mark(objspace, values[i], global_mark_func);
+        gc_visit_value(objspace, values[i], global_mark_func);
     }
 }
 
@@ -6472,7 +6472,7 @@ static int
 mark_value(st_data_t key, st_data_t value, st_data_t data)
 {
     rb_objspace_t *objspace = (rb_objspace_t *)data;
-    gc_mark(objspace, (VALUE)value, global_mark_func);
+    gc_visit_value(objspace, (VALUE)value, global_mark_func);
     return ST_CONTINUE;
 }
 
@@ -6539,8 +6539,8 @@ mark_keyvalue(st_data_t key, st_data_t value, st_data_t data)
 {
     rb_objspace_t *objspace = (rb_objspace_t *)data;
 
-    gc_mark(objspace, (VALUE)key, global_mark_func);
-    gc_mark(objspace, (VALUE)value, global_mark_func);
+    gc_visit_value(objspace, (VALUE)key, global_mark_func);
+    gc_visit_value(objspace, (VALUE)value, global_mark_func);
     return ST_CONTINUE;
 }
 
@@ -6560,7 +6560,7 @@ pin_key_mark_value(st_data_t key, st_data_t value, st_data_t data)
     rb_objspace_t *objspace = (rb_objspace_t *)data;
 
     gc_mark_and_pin(objspace, (VALUE)key);
-    gc_mark(objspace, (VALUE)value, global_mark_func);
+    gc_visit_value(objspace, (VALUE)value, global_mark_func);
     return ST_CONTINUE;
 }
 
@@ -6574,7 +6574,7 @@ mark_hash(rb_objspace_t *objspace, VALUE hash)
         rb_hash_stlike_foreach(hash, mark_keyvalue, (st_data_t)objspace);
     }
 
-    gc_mark(objspace, RHASH(hash)->ifnone, global_mark_func);
+    gc_visit_value(objspace, RHASH(hash)->ifnone, global_mark_func);
 }
 
 static void
@@ -6595,14 +6595,14 @@ mark_method_entry(rb_objspace_t *objspace, const rb_method_entry_t *me)
 {
     const rb_method_definition_t *def = me->def;
 
-    gc_mark(objspace, me->owner, global_mark_func);
-    gc_mark(objspace, me->defined_class, global_mark_func);
+    gc_visit_value(objspace, me->owner, global_mark_func);
+    gc_visit_value(objspace, me->defined_class, global_mark_func);
 
     if (def) {
         switch (def->type) {
           case VM_METHOD_TYPE_ISEQ:
-            if (def->body.iseq.iseqptr) gc_mark(objspace, (VALUE)def->body.iseq.iseqptr, global_mark_func);
-            gc_mark(objspace, (VALUE)def->body.iseq.cref, global_mark_func);
+            if (def->body.iseq.iseqptr) gc_visit_value(objspace, (VALUE)def->body.iseq.iseqptr, global_mark_func);
+            gc_visit_value(objspace, (VALUE)def->body.iseq.cref, global_mark_func);
 
             if (def->iseq_overload && me->defined_class) {
                 // it can be a key of "overloaded_cme" table
@@ -6612,18 +6612,18 @@ mark_method_entry(rb_objspace_t *objspace, const rb_method_entry_t *me)
             break;
           case VM_METHOD_TYPE_ATTRSET:
           case VM_METHOD_TYPE_IVAR:
-            gc_mark(objspace, def->body.attr.location, global_mark_func);
+            gc_visit_value(objspace, def->body.attr.location, global_mark_func);
             break;
           case VM_METHOD_TYPE_BMETHOD:
-            gc_mark(objspace, def->body.bmethod.proc, global_mark_func);
+            gc_visit_value(objspace, def->body.bmethod.proc, global_mark_func);
             if (def->body.bmethod.hooks) rb_hook_list_mark(def->body.bmethod.hooks);
             break;
           case VM_METHOD_TYPE_ALIAS:
-            gc_mark(objspace, (VALUE)def->body.alias.original_me, global_mark_func);
+            gc_visit_value(objspace, (VALUE)def->body.alias.original_me, global_mark_func);
             return;
           case VM_METHOD_TYPE_REFINED:
-            gc_mark(objspace, (VALUE)def->body.refined.orig_me, global_mark_func);
-            gc_mark(objspace, (VALUE)def->body.refined.owner, global_mark_func);
+            gc_visit_value(objspace, (VALUE)def->body.refined.orig_me, global_mark_func);
+            gc_visit_value(objspace, (VALUE)def->body.refined.owner, global_mark_func);
             break;
           case VM_METHOD_TYPE_CFUNC:
           case VM_METHOD_TYPE_ZSUPER:
@@ -6641,7 +6641,7 @@ mark_method_entry_i(VALUE me, void *data)
 {
     rb_objspace_t *objspace = (rb_objspace_t *)data;
 
-    gc_mark(objspace, me, global_mark_func);
+    gc_visit_value(objspace, me, global_mark_func);
     return ID_TABLE_CONTINUE;
 }
 
@@ -6659,8 +6659,8 @@ mark_const_entry_i(VALUE value, void *data)
     const rb_const_entry_t *ce = (const rb_const_entry_t *)value;
     rb_objspace_t *objspace = data;
 
-    gc_mark(objspace, ce->value, global_mark_func);
-    gc_mark(objspace, ce->file, global_mark_func);
+    gc_visit_value(objspace, ce->value, global_mark_func);
+    gc_visit_value(objspace, ce->file, global_mark_func);
     return ID_TABLE_CONTINUE;
 }
 
@@ -6974,7 +6974,7 @@ gc_mark_and_pin(rb_objspace_t *objspace, VALUE obj)
 }
 
 static inline void
-gc_mark(rb_objspace_t *objspace, VALUE obj, new_mark_func func)
+gc_visit_value(rb_objspace_t *objspace, VALUE obj, new_mark_func func)
 {
     if (!is_markable_object(obj)) return;
     gc_mark_ptr(objspace, obj, func);
@@ -6983,7 +6983,7 @@ gc_mark(rb_objspace_t *objspace, VALUE obj, new_mark_func func)
 void
 rb_gc_mark_movable(VALUE ptr)
 {
-    gc_mark(&rb_objspace, ptr, global_mark_func);
+    gc_visit_value(&rb_objspace, ptr, global_mark_func);
 }
 
 void
@@ -7044,31 +7044,31 @@ gc_mark_imemo(rb_objspace_t *objspace, VALUE obj)
                 GC_ASSERT(VM_ENV_ESCAPED_P(env->ep));
                 gc_mark_values(objspace, (long)env->env_size, env->env);
                 VM_ENV_FLAGS_SET(env->ep, VM_ENV_FLAG_WB_REQUIRED);
-                gc_mark(objspace, (VALUE)rb_vm_env_prev_env(env), global_mark_func);
-                gc_mark(objspace, (VALUE)env->iseq, global_mark_func);
+                gc_visit_value(objspace, (VALUE)rb_vm_env_prev_env(env), global_mark_func);
+                gc_visit_value(objspace, (VALUE)env->iseq, global_mark_func);
             }
         }
         return;
       case imemo_cref:
-        gc_mark(objspace, RANY(obj)->as.imemo.cref.klass_or_self, global_mark_func);
-        gc_mark(objspace, (VALUE)RANY(obj)->as.imemo.cref.next, global_mark_func);
-        gc_mark(objspace, RANY(obj)->as.imemo.cref.refinements, global_mark_func);
+        gc_visit_value(objspace, RANY(obj)->as.imemo.cref.klass_or_self, global_mark_func);
+        gc_visit_value(objspace, (VALUE)RANY(obj)->as.imemo.cref.next, global_mark_func);
+        gc_visit_value(objspace, RANY(obj)->as.imemo.cref.refinements, global_mark_func);
         return;
       case imemo_svar:
-        gc_mark(objspace, RANY(obj)->as.imemo.svar.cref_or_me, global_mark_func);
-        gc_mark(objspace, RANY(obj)->as.imemo.svar.lastline, global_mark_func);
-        gc_mark(objspace, RANY(obj)->as.imemo.svar.backref, global_mark_func);
-        gc_mark(objspace, RANY(obj)->as.imemo.svar.others, global_mark_func);
+        gc_visit_value(objspace, RANY(obj)->as.imemo.svar.cref_or_me, global_mark_func);
+        gc_visit_value(objspace, RANY(obj)->as.imemo.svar.lastline, global_mark_func);
+        gc_visit_value(objspace, RANY(obj)->as.imemo.svar.backref, global_mark_func);
+        gc_visit_value(objspace, RANY(obj)->as.imemo.svar.others, global_mark_func);
         return;
       case imemo_throw_data:
-        gc_mark(objspace, RANY(obj)->as.imemo.throw_data.throw_obj, global_mark_func);
+        gc_visit_value(objspace, RANY(obj)->as.imemo.throw_data.throw_obj, global_mark_func);
         return;
       case imemo_ifunc:
         gc_mark_maybe(objspace, (VALUE)RANY(obj)->as.imemo.ifunc.data);
         return;
       case imemo_memo:
-        gc_mark(objspace, RANY(obj)->as.imemo.memo.v1, global_mark_func);
-        gc_mark(objspace, RANY(obj)->as.imemo.memo.v2, global_mark_func);
+        gc_visit_value(objspace, RANY(obj)->as.imemo.memo.v1, global_mark_func);
+        gc_visit_value(objspace, RANY(obj)->as.imemo.memo.v2, global_mark_func);
         gc_mark_maybe(objspace, RANY(obj)->as.imemo.memo.u3.value);
         return;
       case imemo_ment:
@@ -7097,13 +7097,13 @@ gc_mark_imemo(rb_objspace_t *objspace, VALUE obj)
         {
             const struct rb_callcache *cc = (const struct rb_callcache *)obj;
             // should not mark klass here
-            gc_mark(objspace, (VALUE)vm_cc_cme(cc), global_mark_func);
+            gc_visit_value(objspace, (VALUE)vm_cc_cme(cc), global_mark_func);
         }
         return;
       case imemo_constcache:
         {
             const struct iseq_inline_constant_cache_entry *ice = (struct iseq_inline_constant_cache_entry *)obj;
-            gc_mark(objspace, ice->value, global_mark_func);
+            gc_visit_value(objspace, ice->value, global_mark_func);
         }
         return;
 #if VM_CHECK_MODE > 0
@@ -7183,17 +7183,17 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
         break;
     }
 
-    gc_mark(objspace, any->as.basic.klass, global_mark_func);
+    gc_visit_value(objspace, any->as.basic.klass, global_mark_func);
 
     switch (BUILTIN_TYPE(obj)) {
       case T_CLASS:
         if (FL_TEST(obj, FL_SINGLETON)) {
-            gc_mark(objspace, RCLASS_ATTACHED_OBJECT(obj), global_mark_func);
+            gc_visit_value(objspace, RCLASS_ATTACHED_OBJECT(obj), global_mark_func);
         }
         // Continue to the shared T_CLASS/T_MODULE
       case T_MODULE:
         if (RCLASS_SUPER(obj)) {
-            gc_mark(objspace, RCLASS_SUPER(obj), global_mark_func);
+            gc_visit_value(objspace, RCLASS_SUPER(obj), global_mark_func);
         }
         if (!RCLASS_EXT(obj)) break;
 
@@ -7201,11 +7201,11 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
         mark_cvc_tbl(objspace, obj);
         cc_table_mark(objspace, obj);
         for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
-            gc_mark(objspace, RCLASS_IVPTR(obj)[i], global_mark_func);
+            gc_visit_value(objspace, RCLASS_IVPTR(obj)[i], global_mark_func);
         }
         mark_const_tbl(objspace, RCLASS_CONST_TBL(obj));
 
-        gc_mark(objspace, RCLASS_EXT(obj)->classpath, global_mark_func);
+        gc_visit_value(objspace, RCLASS_EXT(obj)->classpath, global_mark_func);
         break;
 
       case T_ICLASS:
@@ -7213,12 +7213,12 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
             mark_m_tbl(objspace, RCLASS_M_TBL(obj));
         }
         if (RCLASS_SUPER(obj)) {
-            gc_mark(objspace, RCLASS_SUPER(obj), global_mark_func);
+            gc_visit_value(objspace, RCLASS_SUPER(obj), global_mark_func);
         }
         if (!RCLASS_EXT(obj)) break;
 
         if (RCLASS_INCLUDER(obj)) {
-            gc_mark(objspace, RCLASS_INCLUDER(obj), global_mark_func);
+            gc_visit_value(objspace, RCLASS_INCLUDER(obj), global_mark_func);
         }
         mark_m_tbl(objspace, RCLASS_CALLABLE_M_TBL(obj));
         cc_table_mark(objspace, obj);
@@ -7227,13 +7227,13 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
       case T_ARRAY:
         if (ARY_SHARED_P(obj)) {
             VALUE root = ARY_SHARED_ROOT(obj);
-            gc_mark(objspace, root, global_mark_func);
+            gc_visit_value(objspace, root, global_mark_func);
         }
         else {
             long i, len = RARRAY_LEN(obj);
             const VALUE *ptr = RARRAY_CONST_PTR_TRANSIENT(obj);
             for (i=0; i < len; i++) {
-                gc_mark(objspace, ptr[i], global_mark_func);
+                gc_visit_value(objspace, ptr[i], global_mark_func);
             }
 
             if (LIKELY(during_gc)) {
@@ -7250,7 +7250,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
 
       case T_STRING:
         if (STR_SHARED_P(obj)) {
-            gc_mark(objspace, any->as.string.as.heap.aux.shared, global_mark_func);
+            gc_visit_value(objspace, any->as.string.as.heap.aux.shared, global_mark_func);
         }
         break;
 
@@ -7282,7 +7282,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
 
                 uint32_t i, len = ROBJECT_IV_COUNT(obj);
                 for (i  = 0; i < len; i++) {
-                    gc_mark(objspace, ptr[i], global_mark_func);
+                    gc_visit_value(objspace, ptr[i], global_mark_func);
                 }
 
                 if (LIKELY(during_gc) &&
@@ -7304,36 +7304,36 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
 
       case T_FILE:
         if (any->as.file.fptr) {
-            gc_mark(objspace, any->as.file.fptr->self, global_mark_func);
-            gc_mark(objspace, any->as.file.fptr->pathv, global_mark_func);
-            gc_mark(objspace, any->as.file.fptr->tied_io_for_writing, global_mark_func);
-            gc_mark(objspace, any->as.file.fptr->writeconv_asciicompat, global_mark_func);
-            gc_mark(objspace, any->as.file.fptr->writeconv_pre_ecopts, global_mark_func);
-            gc_mark(objspace, any->as.file.fptr->encs.ecopts, global_mark_func);
-            gc_mark(objspace, any->as.file.fptr->write_lock, global_mark_func);
-            gc_mark(objspace, any->as.file.fptr->timeout, global_mark_func);
+            gc_visit_value(objspace, any->as.file.fptr->self, global_mark_func);
+            gc_visit_value(objspace, any->as.file.fptr->pathv, global_mark_func);
+            gc_visit_value(objspace, any->as.file.fptr->tied_io_for_writing, global_mark_func);
+            gc_visit_value(objspace, any->as.file.fptr->writeconv_asciicompat, global_mark_func);
+            gc_visit_value(objspace, any->as.file.fptr->writeconv_pre_ecopts, global_mark_func);
+            gc_visit_value(objspace, any->as.file.fptr->encs.ecopts, global_mark_func);
+            gc_visit_value(objspace, any->as.file.fptr->write_lock, global_mark_func);
+            gc_visit_value(objspace, any->as.file.fptr->timeout, global_mark_func);
         }
         break;
 
       case T_REGEXP:
-        gc_mark(objspace, any->as.regexp.src, global_mark_func);
+        gc_visit_value(objspace, any->as.regexp.src, global_mark_func);
         break;
 
       case T_MATCH:
-        gc_mark(objspace, any->as.match.regexp, global_mark_func);
+        gc_visit_value(objspace, any->as.match.regexp, global_mark_func);
         if (any->as.match.str) {
-            gc_mark(objspace, any->as.match.str, global_mark_func);
+            gc_visit_value(objspace, any->as.match.str, global_mark_func);
         }
         break;
 
       case T_RATIONAL:
-        gc_mark(objspace, any->as.rational.num, global_mark_func);
-        gc_mark(objspace, any->as.rational.den, global_mark_func);
+        gc_visit_value(objspace, any->as.rational.num, global_mark_func);
+        gc_visit_value(objspace, any->as.rational.den, global_mark_func);
         break;
 
       case T_COMPLEX:
-        gc_mark(objspace, any->as.complex.real, global_mark_func);
-        gc_mark(objspace, any->as.complex.imag, global_mark_func);
+        gc_visit_value(objspace, any->as.complex.real, global_mark_func);
+        gc_visit_value(objspace, any->as.complex.imag, global_mark_func);
         break;
 
       case T_STRUCT:
@@ -7343,7 +7343,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
             const VALUE * const ptr = RSTRUCT_CONST_PTR(obj);
 
             for (i=0; i<len; i++) {
-                gc_mark(objspace, ptr[i], global_mark_func);
+                gc_visit_value(objspace, ptr[i], global_mark_func);
             }
 
             if (LIKELY(during_gc) &&
@@ -7492,7 +7492,7 @@ gc_mark_roots(rb_objspace_t *objspace, const char **categoryp)
     MARK_CHECKPOINT("vm");
     SET_STACK_END;
     rb_vm_mark(vm);
-    if (vm->self) gc_mark(objspace, vm->self, global_mark_func);
+    if (vm->self) gc_visit_value(objspace, vm->self, global_mark_func);
 
     MARK_CHECKPOINT("finalizers");
     mark_finalizer_tbl(objspace, finalizer_table);
