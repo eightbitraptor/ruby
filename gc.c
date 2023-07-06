@@ -6911,29 +6911,40 @@ NOINLINE(static void gc_mark_ptr(rb_objspace_t *objspace, VALUE obj));
 static void reachable_objects_from_callback(VALUE obj);
 
 static void
+gc_really_mark_ptr(VALUE obj, void *data)
+{
+    rb_objspace_t *objspace = (rb_objspace_t *)data;
+    rgengc_check_relation(objspace, obj);
+    if (!gc_mark_set(objspace, obj)) return; /* already marked */
+
+    if (0) { // for debug GC marking miss
+        if (objspace->rgengc.parent_object) {
+            RUBY_DEBUG_LOG("%p (%s) parent:%p (%s)",
+                           (void *)obj, obj_type_name(obj),
+                           (void *)objspace->rgengc.parent_object, obj_type_name(objspace->rgengc.parent_object));
+        }
+        else {
+            RUBY_DEBUG_LOG("%p (%s)", (void *)obj, obj_type_name(obj));
+        }
+    }
+
+    if (UNLIKELY(RB_TYPE_P(obj, T_NONE))) {
+        rp(obj);
+        rb_bug("try to mark T_NONE object"); /* check here will help debugging */
+    }
+    gc_aging(objspace, obj);
+    gc_grey(objspace, obj);
+}
+
+typedef void (*new_mark_func)(VALUE v, void *data);
+
+new_mark_func global_mark_func;
+
+static void
 gc_mark_ptr(rb_objspace_t *objspace, VALUE obj)
 {
     if (LIKELY(during_gc)) {
-        rgengc_check_relation(objspace, obj);
-        if (!gc_mark_set(objspace, obj)) return; /* already marked */
-
-        if (0) { // for debug GC marking miss
-            if (objspace->rgengc.parent_object) {
-                RUBY_DEBUG_LOG("%p (%s) parent:%p (%s)",
-                               (void *)obj, obj_type_name(obj),
-                               (void *)objspace->rgengc.parent_object, obj_type_name(objspace->rgengc.parent_object));
-            }
-            else {
-                RUBY_DEBUG_LOG("%p (%s)", (void *)obj, obj_type_name(obj));
-            }
-        }
-
-        if (UNLIKELY(RB_TYPE_P(obj, T_NONE))) {
-            rp(obj);
-            rb_bug("try to mark T_NONE object"); /* check here will help debugging */
-        }
-        gc_aging(objspace, obj);
-        gc_grey(objspace, obj);
+        global_mark_func(obj, (void *)objspace);
     }
     else {
         reachable_objects_from_callback(obj);
@@ -8135,6 +8146,8 @@ gc_marks_start(rb_objspace_t *objspace, int full_mark)
     gc_report(1, objspace, "gc_marks_start: (%s)\n", full_mark ? "full" : "minor");
     gc_mode_transition(objspace, gc_mode_marking);
 
+
+
     if (full_mark) {
         size_t incremental_marking_steps = (objspace->rincgc.pooled_slots / INCREMENTAL_MARK_STEP_ALLOCATIONS) + 1;
         objspace->rincgc.step_slots = (objspace->marked_slots * 2) / incremental_marking_steps;
@@ -9310,6 +9323,8 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
     unsigned int do_full_mark = !!(reason & GPR_FLAG_FULL_MARK);
     unsigned int immediate_mark = reason & GPR_FLAG_IMMEDIATE_MARK;
 
+
+
     /* reason may be clobbered, later, so keep set immediate_sweep here */
     objspace->flags.immediate_sweep = !!(reason & GPR_FLAG_IMMEDIATE_SWEEP);
 
@@ -9590,6 +9605,7 @@ static inline void
 gc_enter(rb_objspace_t *objspace, enum gc_enter_event event, unsigned int *lock_lev)
 {
     RB_VM_LOCK_ENTER_LEV(lock_lev);
+    global_mark_func = gc_really_mark_ptr;
 
     switch (event) {
       case gc_enter_event_rest:
@@ -11766,7 +11782,7 @@ rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *
             struct gc_mark_func_data_struct mfd = {
                 .mark_func = func,
                 .data = data,
-            }, *prev_mfd = cr->mfd;
+            } ,*prev_mfd = cr->mfd;
 
             cr->mfd = &mfd;
             gc_mark_children(objspace, obj);
@@ -13900,6 +13916,7 @@ rb_gcdebug_remove_stress_to_class(int argc, VALUE *argv, VALUE self)
 void
 Init_GC(void)
 {
+    global_mark_func = 0;
 #undef rb_intern
     VALUE rb_mObjSpace;
     VALUE rb_mProfiler;
