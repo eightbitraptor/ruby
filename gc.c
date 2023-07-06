@@ -939,6 +939,8 @@ static const bool HEAP_PAGE_ALLOC_USE_MMAP = false;
 static bool heap_page_alloc_use_mmap;
 #endif
 
+typedef void (*new_mark_func)(VALUE v, void *data);
+
 struct heap_page {
     short slot_size;
     short total_slots;
@@ -1254,7 +1256,7 @@ static void gc_sweep_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool
 static inline void gc_mark(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_pin(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_mark_and_pin(rb_objspace_t *objspace, VALUE ptr);
-static void gc_mark_ptr(rb_objspace_t *objspace, VALUE ptr);
+static void gc_mark_ptr(rb_objspace_t *objspace, VALUE ptr, new_mark_func);
 NO_SANITIZE("memory", static void gc_mark_maybe(rb_objspace_t *objspace, VALUE ptr));
 static void gc_mark_children(rb_objspace_t *objspace, VALUE ptr);
 
@@ -6907,7 +6909,7 @@ gc_aging(rb_objspace_t *objspace, VALUE obj)
     objspace->marked_slots++;
 }
 
-NOINLINE(static void gc_mark_ptr(rb_objspace_t *objspace, VALUE obj));
+NOINLINE(static void gc_mark_ptr(rb_objspace_t *objspace, VALUE obj, new_mark_func));
 static void reachable_objects_from_callback(VALUE obj);
 
 static void
@@ -6936,15 +6938,15 @@ gc_really_mark_ptr(VALUE obj, void *data)
     gc_grey(objspace, obj);
 }
 
-typedef void (*new_mark_func)(VALUE v, void *data);
+
 
 new_mark_func global_mark_func;
 
 static void
-gc_mark_ptr(rb_objspace_t *objspace, VALUE obj)
+gc_mark_ptr(rb_objspace_t *objspace, VALUE obj, new_mark_func func)
 {
     if (LIKELY(during_gc)) {
-        global_mark_func(obj, (void *)objspace);
+        func(obj, (void *)objspace);
     }
     else {
         reachable_objects_from_callback(obj);
@@ -6967,14 +6969,14 @@ gc_mark_and_pin(rb_objspace_t *objspace, VALUE obj)
 {
     if (!is_markable_object(obj)) return;
     gc_pin(objspace, obj);
-    gc_mark_ptr(objspace, obj);
+    gc_mark_ptr(objspace, obj, global_mark_func);
 }
 
 static inline void
 gc_mark(rb_objspace_t *objspace, VALUE obj)
 {
     if (!is_markable_object(obj)) return;
-    gc_mark_ptr(objspace, obj);
+    gc_mark_ptr(objspace, obj, global_mark_func);
 }
 
 void
@@ -7002,7 +7004,7 @@ rb_gc_mark_and_move(VALUE *ptr)
         *ptr = rb_gc_location(*ptr);
     }
     else {
-        gc_mark_ptr(objspace, *ptr);
+        gc_mark_ptr(objspace, *ptr, global_mark_func);
     }
 }
 
