@@ -7770,7 +7770,8 @@ struct verify_internal_consistency_struct {
 static void
 check_generation_i(const VALUE child, void *ptr)
 {
-    struct verify_internal_consistency_struct *data = (struct verify_internal_consistency_struct *)ptr;
+    struct gc_mark_func_data_struct *mfd = (struct gc_mark_func_data_struct *)ptr;
+    struct verify_internal_consistency_struct *data = (struct verify_internal_consistency_struct *)mfd->data;
     const VALUE parent = data->parent;
 
     if (RGENGC_CHECK_MODE) GC_ASSERT(RVALUE_OLD_P(parent));
