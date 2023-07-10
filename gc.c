@@ -1257,7 +1257,6 @@ static void gc_sweep_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool
 static inline void gc_visit_value(VALUE ptr, new_mark_func visit_func, void *data);
 static inline void gc_pin(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_mark_and_pin(rb_objspace_t *objspace, VALUE ptr);
-static void gc_mark_ptr(rb_objspace_t *objspace, VALUE ptr, new_mark_func);
 NO_SANITIZE("memory", static void gc_mark_maybe(rb_objspace_t *objspace, VALUE ptr));
 static void gc_visit_fields(rb_objspace_t *objspace, VALUE ptr, new_mark_func visit_func, void* data);
 
@@ -6907,7 +6906,6 @@ gc_aging(rb_objspace_t *objspace, VALUE obj)
     objspace->marked_slots++;
 }
 
-NOINLINE(static void gc_mark_ptr(rb_objspace_t *objspace, VALUE obj, new_mark_func));
 static void reachable_objects_from_callback(VALUE obj);
 
 static void
@@ -6936,12 +6934,6 @@ gc_really_mark_ptr(VALUE obj, void *data)
     gc_grey(objspace, obj);
 }
 
-static void
-gc_mark_ptr(rb_objspace_t *objspace, VALUE obj, new_mark_func func)
-{
-    func(obj, (void *)objspace);
-}
-
 static inline void
 gc_pin(rb_objspace_t *objspace, VALUE obj)
 {
@@ -6958,21 +6950,14 @@ gc_mark_and_pin(rb_objspace_t *objspace, VALUE obj)
 {
     if (!is_markable_object(obj)) return;
     gc_pin(objspace, obj);
-    gc_mark_ptr(objspace, obj, global_mark_func);
+    gc_visit_value(obj, global_mark_func, (void *)objspace);
 }
 
 static inline void
 gc_visit_value(VALUE obj, new_mark_func func, void *data)
 {
     if (!is_markable_object(obj)) return;
-
-    rb_objspace_t *objspace = &rb_objspace;
-    if (LIKELY(during_gc)) {
-        func(obj, data);
-    }
-    else {
-        func(obj, data);
-    }
+    func(obj, data);
 }
 
 void
@@ -7000,7 +6985,7 @@ rb_gc_mark_and_move(VALUE *ptr)
         *ptr = rb_gc_location(*ptr);
     }
     else {
-        gc_mark_ptr(objspace, *ptr, global_mark_func);
+        gc_visit_value(*ptr, global_mark_func, (void *)objspace);
     }
 }
 
@@ -7444,7 +7429,7 @@ show_mark_ticks(void)
 #endif /* PRINT_ROOT_TICKS */
 
 static void
-gc_mark_roots(rb_objspace_t *objspace, const char **categoryp)
+gc_mark_roots(rb_objspace_t *objspace, const char **categoryp, new_mark_func visit_func, void *data)
 {
     struct gc_list *list;
     rb_execution_context_t *ec = GET_EC();
@@ -7487,7 +7472,7 @@ gc_mark_roots(rb_objspace_t *objspace, const char **categoryp)
     MARK_CHECKPOINT("vm");
     SET_STACK_END;
     rb_vm_mark(vm);
-    if (vm->self) gc_visit_value(vm->self, global_mark_func, (void *)objspace);
+    if (vm->self) gc_visit_value(vm->self, visit_func, data);
 
     MARK_CHECKPOINT("finalizers");
     mark_finalizer_tbl(objspace, finalizer_table);
@@ -8182,7 +8167,7 @@ gc_marks_start(rb_objspace_t *objspace, int full_mark)
         }
     }
 
-    gc_mark_roots(objspace, NULL);
+    gc_mark_roots(objspace, NULL, global_mark_func, objspace);
 
     gc_report(1, objspace, "gc_marks_start: (%s) end, stack in %"PRIdSIZE"\n",
               full_mark ? "full" : "minor", mark_stack_size(&objspace->mark_stack));
@@ -8242,7 +8227,7 @@ gc_marks_finish(rb_objspace_t *objspace)
                    mark_stack_size(&objspace->mark_stack));
         }
 
-        gc_mark_roots(objspace, 0);
+        gc_mark_roots(objspace, 0, global_mark_func, objspace);
         while (gc_mark_stacked_objects_incremental(objspace, INT_MAX) == false);
 
 #if RGENGC_CHECK_MODE >= 2
@@ -11759,13 +11744,6 @@ ruby_gc_set_params(void)
 #endif
 }
 
-static void
-reachable_objects_from_callback(VALUE obj)
-{
-    rb_ractor_t *cr = GET_RACTOR();
-    cr->mfd->mark_func(obj, cr->mfd->data);
-}
-
 void
 rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *data)
 {
@@ -11812,7 +11790,6 @@ objspace_reachable_objects_from_root(rb_objspace_t *objspace, void (func)(const 
 {
     if (during_gc) rb_bug("objspace_reachable_objects_from_root() is not supported while during_gc == true");
 
-    rb_ractor_t *cr = GET_RACTOR();
     struct root_objects_data data = {
         .func = func,
         .data = passing_data,
@@ -11820,11 +11797,9 @@ objspace_reachable_objects_from_root(rb_objspace_t *objspace, void (func)(const 
     struct gc_mark_func_data_struct mfd = {
         .mark_func = root_objects_from,
         .data = &data,
-    }, *prev_mfd = cr->mfd;
+    };
 
-    cr->mfd = &mfd;
-    gc_mark_roots(objspace, &data.category);
-    cr->mfd = prev_mfd;
+    gc_mark_roots(objspace, &data.category, func, (void *)&mfd);
 }
 
 /*
