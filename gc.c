@@ -1259,7 +1259,7 @@ static inline void gc_pin(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_mark_and_pin(rb_objspace_t *objspace, VALUE ptr);
 static void gc_mark_ptr(rb_objspace_t *objspace, VALUE ptr, new_mark_func);
 NO_SANITIZE("memory", static void gc_mark_maybe(rb_objspace_t *objspace, VALUE ptr));
-static void gc_visit_fields(rb_objspace_t *objspace, VALUE ptr, new_mark_func visit_func);
+static void gc_visit_fields(rb_objspace_t *objspace, VALUE ptr, new_mark_func visit_func, void* data);
 
 static int gc_mark_stacked_objects_incremental(rb_objspace_t *, size_t count);
 static int gc_mark_stacked_objects_all(rb_objspace_t *);
@@ -7151,7 +7151,7 @@ gc_ref_update_from_offset(rb_objspace_t *objspace, VALUE obj)
 static void mark_cvc_tbl(rb_objspace_t *objspace, VALUE klass);
 
 static void
-gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func)
+gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func, void *data)
 {
     register RVALUE *any = RANY(obj);
     gc_mark_set_parent(objspace, obj);
@@ -7386,7 +7386,7 @@ gc_mark_stacked_objects(rb_objspace_t *objspace, int incremental, size_t count)
         if (RGENGC_CHECK_MODE && !RVALUE_MARKED(obj)) {
             rb_bug("gc_mark_stacked_objects: %s is not marked.", obj_info(obj));
         }
-        gc_visit_fields(objspace, obj, global_mark_func);
+        gc_visit_fields(objspace, obj, global_mark_func, NULL);
 
         if (incremental) {
             if (RGENGC_CHECK_MODE && !RVALUE_MARKING(obj)) {
@@ -8204,7 +8204,7 @@ gc_marks_wb_unprotected_objects_plane(rb_objspace_t *objspace, uintptr_t p, bits
                 gc_report(2, objspace, "gc_marks_wb_unprotected_objects: marked shady: %s\n", obj_info((VALUE)p));
                 GC_ASSERT(RVALUE_WB_UNPROTECTED((VALUE)p));
                 GC_ASSERT(RVALUE_MARKED((VALUE)p));
-                gc_visit_fields(objspace, (VALUE)p, global_mark_func);
+                gc_visit_fields(objspace, (VALUE)p, global_mark_func, NULL);
             }
             p += BASE_SLOT_SIZE;
             bits >>= 1;
@@ -8778,7 +8778,7 @@ rgengc_rememberset_mark_plane(rb_objspace_t *objspace, uintptr_t p, bits_t bitse
                 GC_ASSERT(RVALUE_UNCOLLECTIBLE(obj));
                 GC_ASSERT(RVALUE_OLD_P(obj) || RVALUE_WB_UNPROTECTED(obj));
 
-                gc_visit_fields(objspace, obj, global_mark_func);
+                gc_visit_fields(objspace, obj, global_mark_func, NULL);
             }
             p += BASE_SLOT_SIZE;
             bitset >>= 1;
@@ -11787,10 +11787,10 @@ rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *
             struct gc_mark_func_data_struct mfd = {
                 .mark_func = func,
                 .data = data,
-            } ,*prev_mfd = cr->mfd;
+            }, *prev_mfd = cr->mfd;
 
             cr->mfd = &mfd;
-            gc_visit_fields(objspace, obj, global_mark_func);
+            gc_visit_fields(objspace, obj, func, NULL);
             cr->mfd = prev_mfd;
         }
     }
