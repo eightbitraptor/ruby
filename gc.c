@@ -1254,7 +1254,7 @@ static int  gc_sweep_step(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb
 static void gc_sweep_rest(rb_objspace_t *objspace);
 static void gc_sweep_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap);
 
-static inline void gc_visit_value(rb_objspace_t *objspace, VALUE ptr, new_mark_func visit_func);
+static inline void gc_visit_value(VALUE ptr, new_mark_func visit_func, void *data);
 static inline void gc_pin(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_mark_and_pin(rb_objspace_t *objspace, VALUE ptr);
 static void gc_mark_ptr(rb_objspace_t *objspace, VALUE ptr, new_mark_func);
@@ -3268,7 +3268,6 @@ struct cc_tbl_i_data {
 static enum rb_id_table_iterator_result
 cc_table_mark_i(ID id, VALUE ccs_ptr, void *data_ptr)
 {
-    struct cc_tbl_i_data *data = data_ptr;
     struct rb_class_cc_entries *ccs = (struct rb_class_cc_entries *)ccs_ptr;
     VM_ASSERT(vm_ccs_p(ccs));
     VM_ASSERT(id == ccs->cme->called_id);
@@ -3278,14 +3277,14 @@ cc_table_mark_i(ID id, VALUE ccs_ptr, void *data_ptr)
         return ID_TABLE_DELETE;
     }
     else {
-        gc_visit_value(data->objspace, (VALUE)ccs->cme, global_mark_func);
+        gc_visit_value((VALUE)ccs->cme, global_mark_func, (void *)&rb_objspace);
 
         for (int i=0; i<ccs->len; i++) {
             VM_ASSERT(data->klass == ccs->entries[i].cc->klass);
             VM_ASSERT(vm_cc_check_cme(ccs->entries[i].cc, ccs->cme));
 
-            gc_visit_value(data->objspace, (VALUE)ccs->entries[i].ci, global_mark_func);
-            gc_visit_value(data->objspace, (VALUE)ccs->entries[i].cc, global_mark_func);
+            gc_visit_value((VALUE)ccs->entries[i].ci, global_mark_func, (void *)&rb_objspace);
+            gc_visit_value((VALUE)ccs->entries[i].cc, global_mark_func, (void *)&rb_objspace);
         }
         return ID_TABLE_CONTINUE;
     }
@@ -6434,7 +6433,7 @@ gc_mark_values(rb_objspace_t *objspace, long n, const VALUE *values)
     long i;
 
     for (i=0; i<n; i++) {
-        gc_visit_value(objspace, values[i], global_mark_func);
+        gc_visit_value(values[i], global_mark_func, objspace);
     }
 }
 
@@ -6472,7 +6471,7 @@ static int
 mark_value(st_data_t key, st_data_t value, st_data_t data)
 {
     rb_objspace_t *objspace = (rb_objspace_t *)data;
-    gc_visit_value(objspace, (VALUE)value, global_mark_func);
+    gc_visit_value((VALUE)value, global_mark_func, (void *)objspace);
     return ST_CONTINUE;
 }
 
@@ -6537,10 +6536,8 @@ rb_mark_set(st_table *tbl)
 static int
 mark_keyvalue(st_data_t key, st_data_t value, st_data_t data)
 {
-    rb_objspace_t *objspace = (rb_objspace_t *)data;
-
-    gc_visit_value(objspace, (VALUE)key, global_mark_func);
-    gc_visit_value(objspace, (VALUE)value, global_mark_func);
+    gc_visit_value((VALUE)key, global_mark_func, (void *)data);
+    gc_visit_value((VALUE)value, global_mark_func, (void *)data);
     return ST_CONTINUE;
 }
 
@@ -6560,7 +6557,7 @@ pin_key_mark_value(st_data_t key, st_data_t value, st_data_t data)
     rb_objspace_t *objspace = (rb_objspace_t *)data;
 
     gc_mark_and_pin(objspace, (VALUE)key);
-    gc_visit_value(objspace, (VALUE)value, global_mark_func);
+    gc_visit_value((VALUE)value, global_mark_func, (void *)data);
     return ST_CONTINUE;
 }
 
@@ -6574,7 +6571,7 @@ mark_hash(rb_objspace_t *objspace, VALUE hash)
         rb_hash_stlike_foreach(hash, mark_keyvalue, (st_data_t)objspace);
     }
 
-    gc_visit_value(objspace, RHASH(hash)->ifnone, global_mark_func);
+    gc_visit_value(RHASH(hash)->ifnone, global_mark_func, (void *)objspace);
 }
 
 static void
@@ -6595,14 +6592,14 @@ mark_method_entry(rb_objspace_t *objspace, const rb_method_entry_t *me)
 {
     const rb_method_definition_t *def = me->def;
 
-    gc_visit_value(objspace, me->owner, global_mark_func);
-    gc_visit_value(objspace, me->defined_class, global_mark_func);
+    gc_visit_value(me->owner, global_mark_func, (void *)objspace);
+    gc_visit_value(me->defined_class, global_mark_func, (void *)objspace);
 
     if (def) {
         switch (def->type) {
           case VM_METHOD_TYPE_ISEQ:
-            if (def->body.iseq.iseqptr) gc_visit_value(objspace, (VALUE)def->body.iseq.iseqptr, global_mark_func);
-            gc_visit_value(objspace, (VALUE)def->body.iseq.cref, global_mark_func);
+            if (def->body.iseq.iseqptr) gc_visit_value((VALUE)def->body.iseq.iseqptr, global_mark_func, (void *)objspace);
+            gc_visit_value((VALUE)def->body.iseq.cref, global_mark_func, (void *)objspace);
 
             if (def->iseq_overload && me->defined_class) {
                 // it can be a key of "overloaded_cme" table
@@ -6612,18 +6609,18 @@ mark_method_entry(rb_objspace_t *objspace, const rb_method_entry_t *me)
             break;
           case VM_METHOD_TYPE_ATTRSET:
           case VM_METHOD_TYPE_IVAR:
-            gc_visit_value(objspace, def->body.attr.location, global_mark_func);
+            gc_visit_value(def->body.attr.location, global_mark_func, (void *)objspace);
             break;
           case VM_METHOD_TYPE_BMETHOD:
-            gc_visit_value(objspace, def->body.bmethod.proc, global_mark_func);
+            gc_visit_value(def->body.bmethod.proc, global_mark_func, (void *)objspace);
             if (def->body.bmethod.hooks) rb_hook_list_mark(def->body.bmethod.hooks);
             break;
           case VM_METHOD_TYPE_ALIAS:
-            gc_visit_value(objspace, (VALUE)def->body.alias.original_me, global_mark_func);
+            gc_visit_value((VALUE)def->body.alias.original_me, global_mark_func, (void *)objspace);
             return;
           case VM_METHOD_TYPE_REFINED:
-            gc_visit_value(objspace, (VALUE)def->body.refined.orig_me, global_mark_func);
-            gc_visit_value(objspace, (VALUE)def->body.refined.owner, global_mark_func);
+            gc_visit_value((VALUE)def->body.refined.orig_me, global_mark_func, (void *)objspace);
+            gc_visit_value((VALUE)def->body.refined.owner, global_mark_func, (void *)objspace);
             break;
           case VM_METHOD_TYPE_CFUNC:
           case VM_METHOD_TYPE_ZSUPER:
@@ -6641,7 +6638,7 @@ mark_method_entry_i(VALUE me, void *data)
 {
     rb_objspace_t *objspace = (rb_objspace_t *)data;
 
-    gc_visit_value(objspace, me, global_mark_func);
+    gc_visit_value(me, global_mark_func, (void *)objspace);
     return ID_TABLE_CONTINUE;
 }
 
@@ -6659,8 +6656,8 @@ mark_const_entry_i(VALUE value, void *data)
     const rb_const_entry_t *ce = (const rb_const_entry_t *)value;
     rb_objspace_t *objspace = data;
 
-    gc_visit_value(objspace, ce->value, global_mark_func);
-    gc_visit_value(objspace, ce->file, global_mark_func);
+    gc_visit_value(ce->value, global_mark_func, (void *)objspace);
+    gc_visit_value(ce->file, global_mark_func, (void *)objspace);
     return ID_TABLE_CONTINUE;
 }
 
@@ -6942,12 +6939,7 @@ gc_really_mark_ptr(VALUE obj, void *data)
 static void
 gc_mark_ptr(rb_objspace_t *objspace, VALUE obj, new_mark_func func)
 {
-    if (LIKELY(during_gc)) {
-        func(obj, (void *)objspace);
-    }
-    else {
-        reachable_objects_from_callback(obj);
-    }
+    func(obj, (void *)objspace);
 }
 
 static inline void
@@ -6970,22 +6962,23 @@ gc_mark_and_pin(rb_objspace_t *objspace, VALUE obj)
 }
 
 static inline void
-gc_visit_value(rb_objspace_t *objspace, VALUE obj, new_mark_func func)
+gc_visit_value(VALUE obj, new_mark_func func, void *data)
 {
     if (!is_markable_object(obj)) return;
 
+    rb_objspace_t *objspace = &rb_objspace;
     if (LIKELY(during_gc)) {
-        func(obj, (void *)objspace);
+        func(obj, data);
     }
     else {
-        reachable_objects_from_callback(obj);
+        func(obj, data);
     }
 }
 
 void
 rb_gc_mark_movable(VALUE ptr)
 {
-    gc_visit_value(&rb_objspace, ptr, global_mark_func);
+    gc_visit_value(ptr, global_mark_func, (void *)&rb_objspace);
 }
 
 void
@@ -7046,31 +7039,31 @@ gc_mark_imemo(rb_objspace_t *objspace, VALUE obj)
                 GC_ASSERT(VM_ENV_ESCAPED_P(env->ep));
                 gc_mark_values(objspace, (long)env->env_size, env->env);
                 VM_ENV_FLAGS_SET(env->ep, VM_ENV_FLAG_WB_REQUIRED);
-                gc_visit_value(objspace, (VALUE)rb_vm_env_prev_env(env), global_mark_func);
-                gc_visit_value(objspace, (VALUE)env->iseq, global_mark_func);
+                gc_visit_value((VALUE)rb_vm_env_prev_env(env), global_mark_func, (void *)objspace);
+                gc_visit_value((VALUE)env->iseq, global_mark_func, (void *)objspace);
             }
         }
         return;
       case imemo_cref:
-        gc_visit_value(objspace, RANY(obj)->as.imemo.cref.klass_or_self, global_mark_func);
-        gc_visit_value(objspace, (VALUE)RANY(obj)->as.imemo.cref.next, global_mark_func);
-        gc_visit_value(objspace, RANY(obj)->as.imemo.cref.refinements, global_mark_func);
+        gc_visit_value(RANY(obj)->as.imemo.cref.klass_or_self, global_mark_func, (void *)objspace);
+        gc_visit_value((VALUE)RANY(obj)->as.imemo.cref.next, global_mark_func, (void *)objspace);
+        gc_visit_value(RANY(obj)->as.imemo.cref.refinements, global_mark_func, (void *)objspace);
         return;
       case imemo_svar:
-        gc_visit_value(objspace, RANY(obj)->as.imemo.svar.cref_or_me, global_mark_func);
-        gc_visit_value(objspace, RANY(obj)->as.imemo.svar.lastline, global_mark_func);
-        gc_visit_value(objspace, RANY(obj)->as.imemo.svar.backref, global_mark_func);
-        gc_visit_value(objspace, RANY(obj)->as.imemo.svar.others, global_mark_func);
+        gc_visit_value(RANY(obj)->as.imemo.svar.cref_or_me, global_mark_func, (void *)objspace);
+        gc_visit_value(RANY(obj)->as.imemo.svar.lastline, global_mark_func, (void *)objspace);
+        gc_visit_value(RANY(obj)->as.imemo.svar.backref, global_mark_func, (void *)objspace);
+        gc_visit_value(RANY(obj)->as.imemo.svar.others, global_mark_func, (void *)objspace);
         return;
       case imemo_throw_data:
-        gc_visit_value(objspace, RANY(obj)->as.imemo.throw_data.throw_obj, global_mark_func);
+        gc_visit_value(RANY(obj)->as.imemo.throw_data.throw_obj, global_mark_func, (void *)objspace);
         return;
       case imemo_ifunc:
         gc_mark_maybe(objspace, (VALUE)RANY(obj)->as.imemo.ifunc.data);
         return;
       case imemo_memo:
-        gc_visit_value(objspace, RANY(obj)->as.imemo.memo.v1, global_mark_func);
-        gc_visit_value(objspace, RANY(obj)->as.imemo.memo.v2, global_mark_func);
+        gc_visit_value(RANY(obj)->as.imemo.memo.v1, global_mark_func, (void *)objspace);
+        gc_visit_value(RANY(obj)->as.imemo.memo.v2, global_mark_func, (void *)objspace);
         gc_mark_maybe(objspace, RANY(obj)->as.imemo.memo.u3.value);
         return;
       case imemo_ment:
@@ -7099,13 +7092,13 @@ gc_mark_imemo(rb_objspace_t *objspace, VALUE obj)
         {
             const struct rb_callcache *cc = (const struct rb_callcache *)obj;
             // should not mark klass here
-            gc_visit_value(objspace, (VALUE)vm_cc_cme(cc), global_mark_func);
+            gc_visit_value((VALUE)vm_cc_cme(cc), global_mark_func, (void *)objspace);
         }
         return;
       case imemo_constcache:
         {
             const struct iseq_inline_constant_cache_entry *ice = (struct iseq_inline_constant_cache_entry *)obj;
-            gc_visit_value(objspace, ice->value, global_mark_func);
+            gc_visit_value(ice->value, global_mark_func, (void *)objspace);
         }
         return;
 #if VM_CHECK_MODE > 0
@@ -7185,17 +7178,17 @@ gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func, vo
         break;
     }
 
-    gc_visit_value(objspace, any->as.basic.klass, visit_func);
+    gc_visit_value(any->as.basic.klass, visit_func, data);
 
     switch (BUILTIN_TYPE(obj)) {
       case T_CLASS:
         if (FL_TEST(obj, FL_SINGLETON)) {
-            gc_visit_value(objspace, RCLASS_ATTACHED_OBJECT(obj), visit_func);
+            gc_visit_value(RCLASS_ATTACHED_OBJECT(obj), visit_func, data);
         }
         // Continue to the shared T_CLASS/T_MODULE
       case T_MODULE:
         if (RCLASS_SUPER(obj)) {
-            gc_visit_value(objspace, RCLASS_SUPER(obj), visit_func);
+            gc_visit_value(RCLASS_SUPER(obj), visit_func, data);
         }
         if (!RCLASS_EXT(obj)) break;
 
@@ -7203,11 +7196,11 @@ gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func, vo
         mark_cvc_tbl(objspace, obj);
         cc_table_mark(objspace, obj);
         for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
-            gc_visit_value(objspace, RCLASS_IVPTR(obj)[i], visit_func);
+            gc_visit_value(RCLASS_IVPTR(obj)[i], visit_func, data);
         }
         mark_const_tbl(objspace, RCLASS_CONST_TBL(obj));
 
-        gc_visit_value(objspace, RCLASS_EXT(obj)->classpath, visit_func);
+        gc_visit_value(RCLASS_EXT(obj)->classpath, visit_func, (void *)data);
         break;
 
       case T_ICLASS:
@@ -7215,12 +7208,12 @@ gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func, vo
             mark_m_tbl(objspace, RCLASS_M_TBL(obj));
         }
         if (RCLASS_SUPER(obj)) {
-            gc_visit_value(objspace, RCLASS_SUPER(obj), visit_func);
+            gc_visit_value(RCLASS_SUPER(obj), visit_func, (void *)data);
         }
         if (!RCLASS_EXT(obj)) break;
 
         if (RCLASS_INCLUDER(obj)) {
-            gc_visit_value(objspace, RCLASS_INCLUDER(obj), visit_func);
+            gc_visit_value(RCLASS_INCLUDER(obj), visit_func, (void *)data);
         }
         mark_m_tbl(objspace, RCLASS_CALLABLE_M_TBL(obj));
         cc_table_mark(objspace, obj);
@@ -7229,13 +7222,13 @@ gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func, vo
       case T_ARRAY:
         if (ARY_SHARED_P(obj)) {
             VALUE root = ARY_SHARED_ROOT(obj);
-            gc_visit_value(objspace, root, visit_func);
+            gc_visit_value(root, visit_func, (void *)data);
         }
         else {
             long i, len = RARRAY_LEN(obj);
             const VALUE *ptr = RARRAY_CONST_PTR_TRANSIENT(obj);
             for (i=0; i < len; i++) {
-                gc_visit_value(objspace, ptr[i], visit_func);
+                gc_visit_value(ptr[i], visit_func, (void *)data);
             }
 
             if (LIKELY(during_gc)) {
@@ -7252,7 +7245,7 @@ gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func, vo
 
       case T_STRING:
         if (STR_SHARED_P(obj)) {
-            gc_visit_value(objspace, any->as.string.as.heap.aux.shared, visit_func);
+            gc_visit_value(any->as.string.as.heap.aux.shared, visit_func, (void *)data);
         }
         break;
 
@@ -7284,7 +7277,7 @@ gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func, vo
 
                 uint32_t i, len = ROBJECT_IV_COUNT(obj);
                 for (i  = 0; i < len; i++) {
-                    gc_visit_value(objspace, ptr[i], visit_func);
+                    gc_visit_value(ptr[i], visit_func, (void *)data);
                 }
 
                 if (LIKELY(during_gc) &&
@@ -7306,36 +7299,36 @@ gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func, vo
 
       case T_FILE:
         if (any->as.file.fptr) {
-            gc_visit_value(objspace, any->as.file.fptr->self, visit_func);
-            gc_visit_value(objspace, any->as.file.fptr->pathv, visit_func);
-            gc_visit_value(objspace, any->as.file.fptr->tied_io_for_writing, visit_func);
-            gc_visit_value(objspace, any->as.file.fptr->writeconv_asciicompat, visit_func);
-            gc_visit_value(objspace, any->as.file.fptr->writeconv_pre_ecopts, visit_func);
-            gc_visit_value(objspace, any->as.file.fptr->encs.ecopts, visit_func);
-            gc_visit_value(objspace, any->as.file.fptr->write_lock, visit_func);
-            gc_visit_value(objspace, any->as.file.fptr->timeout, visit_func);
+            gc_visit_value(any->as.file.fptr->self, visit_func, (void *)data);
+            gc_visit_value(any->as.file.fptr->pathv, visit_func, (void *)data);
+            gc_visit_value(any->as.file.fptr->tied_io_for_writing, visit_func, (void *)data);
+            gc_visit_value(any->as.file.fptr->writeconv_asciicompat, visit_func, (void *)data);
+            gc_visit_value(any->as.file.fptr->writeconv_pre_ecopts, visit_func, (void *)data);
+            gc_visit_value(any->as.file.fptr->encs.ecopts, visit_func, (void *)data);
+            gc_visit_value(any->as.file.fptr->write_lock, visit_func, (void *)data);
+            gc_visit_value(any->as.file.fptr->timeout, visit_func, (void *)data);
         }
         break;
 
       case T_REGEXP:
-        gc_visit_value(objspace, any->as.regexp.src, visit_func);
+        gc_visit_value(any->as.regexp.src, visit_func, (void *)data);
         break;
 
       case T_MATCH:
-        gc_visit_value(objspace, any->as.match.regexp, visit_func);
+        gc_visit_value(any->as.match.regexp, visit_func, (void *)data);
         if (any->as.match.str) {
-            gc_visit_value(objspace, any->as.match.str, visit_func);
+            gc_visit_value(any->as.match.str, visit_func, (void *)data);
         }
         break;
 
       case T_RATIONAL:
-        gc_visit_value(objspace, any->as.rational.num, visit_func);
-        gc_visit_value(objspace, any->as.rational.den, visit_func);
+        gc_visit_value(any->as.rational.num, visit_func, (void *)data);
+        gc_visit_value(any->as.rational.den, visit_func, (void *)data);
         break;
 
       case T_COMPLEX:
-        gc_visit_value(objspace, any->as.complex.real, visit_func);
-        gc_visit_value(objspace, any->as.complex.imag, visit_func);
+        gc_visit_value(any->as.complex.real, visit_func, (void *)data);
+        gc_visit_value(any->as.complex.imag, visit_func, (void *)data);
         break;
 
       case T_STRUCT:
@@ -7345,7 +7338,7 @@ gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func, vo
             const VALUE * const ptr = RSTRUCT_CONST_PTR(obj);
 
             for (i=0; i<len; i++) {
-                gc_visit_value(objspace, ptr[i], visit_func);
+                gc_visit_value(ptr[i], visit_func, (void *)data);
             }
 
             if (LIKELY(during_gc) &&
@@ -7386,7 +7379,7 @@ gc_mark_stacked_objects(rb_objspace_t *objspace, int incremental, size_t count)
         if (RGENGC_CHECK_MODE && !RVALUE_MARKED(obj)) {
             rb_bug("gc_mark_stacked_objects: %s is not marked.", obj_info(obj));
         }
-        gc_visit_fields(objspace, obj, global_mark_func, NULL);
+        gc_visit_fields(objspace, obj, global_mark_func, objspace);
 
         if (incremental) {
             if (RGENGC_CHECK_MODE && !RVALUE_MARKING(obj)) {
@@ -7494,7 +7487,7 @@ gc_mark_roots(rb_objspace_t *objspace, const char **categoryp)
     MARK_CHECKPOINT("vm");
     SET_STACK_END;
     rb_vm_mark(vm);
-    if (vm->self) gc_visit_value(objspace, vm->self, global_mark_func);
+    if (vm->self) gc_visit_value(vm->self, global_mark_func, (void *)objspace);
 
     MARK_CHECKPOINT("finalizers");
     mark_finalizer_tbl(objspace, finalizer_table);
@@ -8204,7 +8197,7 @@ gc_marks_wb_unprotected_objects_plane(rb_objspace_t *objspace, uintptr_t p, bits
                 gc_report(2, objspace, "gc_marks_wb_unprotected_objects: marked shady: %s\n", obj_info((VALUE)p));
                 GC_ASSERT(RVALUE_WB_UNPROTECTED((VALUE)p));
                 GC_ASSERT(RVALUE_MARKED((VALUE)p));
-                gc_visit_fields(objspace, (VALUE)p, global_mark_func, NULL);
+                gc_visit_fields(objspace, (VALUE)p, global_mark_func, objspace);
             }
             p += BASE_SLOT_SIZE;
             bits >>= 1;
@@ -8778,7 +8771,7 @@ rgengc_rememberset_mark_plane(rb_objspace_t *objspace, uintptr_t p, bits_t bitse
                 GC_ASSERT(RVALUE_UNCOLLECTIBLE(obj));
                 GC_ASSERT(RVALUE_OLD_P(obj) || RVALUE_WB_UNPROTECTED(obj));
 
-                gc_visit_fields(objspace, obj, global_mark_func, NULL);
+                gc_visit_fields(objspace, obj, global_mark_func, objspace);
             }
             p += BASE_SLOT_SIZE;
             bitset >>= 1;
@@ -11783,15 +11776,12 @@ rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *
         if (during_gc) rb_bug("rb_objspace_reachable_objects_from() is not supported while during_gc == true");
 
         if (is_markable_object(obj)) {
-            rb_ractor_t *cr = GET_RACTOR();
             struct gc_mark_func_data_struct mfd = {
                 .mark_func = func,
                 .data = data,
-            }, *prev_mfd = cr->mfd;
+            };
 
-            cr->mfd = &mfd;
-            gc_visit_fields(objspace, obj, func, NULL);
-            cr->mfd = prev_mfd;
+            gc_visit_fields(objspace, obj, func, (void *)&mfd);
         }
     }
     RB_VM_LOCK_LEAVE();
