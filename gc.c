@@ -1254,12 +1254,12 @@ static int  gc_sweep_step(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb
 static void gc_sweep_rest(rb_objspace_t *objspace);
 static void gc_sweep_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap);
 
-static inline void gc_visit_value(rb_objspace_t *objspace, VALUE ptr, new_mark_func);
+static inline void gc_visit_value(rb_objspace_t *objspace, VALUE ptr, new_mark_func visit_func);
 static inline void gc_pin(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_mark_and_pin(rb_objspace_t *objspace, VALUE ptr);
 static void gc_mark_ptr(rb_objspace_t *objspace, VALUE ptr, new_mark_func);
 NO_SANITIZE("memory", static void gc_mark_maybe(rb_objspace_t *objspace, VALUE ptr));
-static void gc_mark_children(rb_objspace_t *objspace, VALUE ptr);
+static void gc_visit_fields(rb_objspace_t *objspace, VALUE ptr, new_mark_func visit_func);
 
 static int gc_mark_stacked_objects_incremental(rb_objspace_t *, size_t count);
 static int gc_mark_stacked_objects_all(rb_objspace_t *);
@@ -6939,10 +6939,6 @@ gc_really_mark_ptr(VALUE obj, void *data)
     gc_grey(objspace, obj);
 }
 
-
-
-
-
 static void
 gc_mark_ptr(rb_objspace_t *objspace, VALUE obj, new_mark_func func)
 {
@@ -6977,7 +6973,13 @@ static inline void
 gc_visit_value(rb_objspace_t *objspace, VALUE obj, new_mark_func func)
 {
     if (!is_markable_object(obj)) return;
-    gc_mark_ptr(objspace, obj, func);
+
+    if (LIKELY(during_gc)) {
+        func(obj, (void *)objspace);
+    }
+    else {
+        reachable_objects_from_callback(obj);
+    }
 }
 
 void
@@ -7149,7 +7151,7 @@ gc_ref_update_from_offset(rb_objspace_t *objspace, VALUE obj)
 static void mark_cvc_tbl(rb_objspace_t *objspace, VALUE klass);
 
 static void
-gc_mark_children(rb_objspace_t *objspace, VALUE obj)
+gc_visit_fields(rb_objspace_t *objspace, VALUE obj, new_mark_func visit_func)
 {
     register RVALUE *any = RANY(obj);
     gc_mark_set_parent(objspace, obj);
@@ -7183,17 +7185,17 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
         break;
     }
 
-    gc_visit_value(objspace, any->as.basic.klass, global_mark_func);
+    gc_visit_value(objspace, any->as.basic.klass, visit_func);
 
     switch (BUILTIN_TYPE(obj)) {
       case T_CLASS:
         if (FL_TEST(obj, FL_SINGLETON)) {
-            gc_visit_value(objspace, RCLASS_ATTACHED_OBJECT(obj), global_mark_func);
+            gc_visit_value(objspace, RCLASS_ATTACHED_OBJECT(obj), visit_func);
         }
         // Continue to the shared T_CLASS/T_MODULE
       case T_MODULE:
         if (RCLASS_SUPER(obj)) {
-            gc_visit_value(objspace, RCLASS_SUPER(obj), global_mark_func);
+            gc_visit_value(objspace, RCLASS_SUPER(obj), visit_func);
         }
         if (!RCLASS_EXT(obj)) break;
 
@@ -7201,11 +7203,11 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
         mark_cvc_tbl(objspace, obj);
         cc_table_mark(objspace, obj);
         for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
-            gc_visit_value(objspace, RCLASS_IVPTR(obj)[i], global_mark_func);
+            gc_visit_value(objspace, RCLASS_IVPTR(obj)[i], visit_func);
         }
         mark_const_tbl(objspace, RCLASS_CONST_TBL(obj));
 
-        gc_visit_value(objspace, RCLASS_EXT(obj)->classpath, global_mark_func);
+        gc_visit_value(objspace, RCLASS_EXT(obj)->classpath, visit_func);
         break;
 
       case T_ICLASS:
@@ -7213,12 +7215,12 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
             mark_m_tbl(objspace, RCLASS_M_TBL(obj));
         }
         if (RCLASS_SUPER(obj)) {
-            gc_visit_value(objspace, RCLASS_SUPER(obj), global_mark_func);
+            gc_visit_value(objspace, RCLASS_SUPER(obj), visit_func);
         }
         if (!RCLASS_EXT(obj)) break;
 
         if (RCLASS_INCLUDER(obj)) {
-            gc_visit_value(objspace, RCLASS_INCLUDER(obj), global_mark_func);
+            gc_visit_value(objspace, RCLASS_INCLUDER(obj), visit_func);
         }
         mark_m_tbl(objspace, RCLASS_CALLABLE_M_TBL(obj));
         cc_table_mark(objspace, obj);
@@ -7227,13 +7229,13 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
       case T_ARRAY:
         if (ARY_SHARED_P(obj)) {
             VALUE root = ARY_SHARED_ROOT(obj);
-            gc_visit_value(objspace, root, global_mark_func);
+            gc_visit_value(objspace, root, visit_func);
         }
         else {
             long i, len = RARRAY_LEN(obj);
             const VALUE *ptr = RARRAY_CONST_PTR_TRANSIENT(obj);
             for (i=0; i < len; i++) {
-                gc_visit_value(objspace, ptr[i], global_mark_func);
+                gc_visit_value(objspace, ptr[i], visit_func);
             }
 
             if (LIKELY(during_gc)) {
@@ -7250,7 +7252,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
 
       case T_STRING:
         if (STR_SHARED_P(obj)) {
-            gc_visit_value(objspace, any->as.string.as.heap.aux.shared, global_mark_func);
+            gc_visit_value(objspace, any->as.string.as.heap.aux.shared, visit_func);
         }
         break;
 
@@ -7282,7 +7284,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
 
                 uint32_t i, len = ROBJECT_IV_COUNT(obj);
                 for (i  = 0; i < len; i++) {
-                    gc_visit_value(objspace, ptr[i], global_mark_func);
+                    gc_visit_value(objspace, ptr[i], visit_func);
                 }
 
                 if (LIKELY(during_gc) &&
@@ -7304,36 +7306,36 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
 
       case T_FILE:
         if (any->as.file.fptr) {
-            gc_visit_value(objspace, any->as.file.fptr->self, global_mark_func);
-            gc_visit_value(objspace, any->as.file.fptr->pathv, global_mark_func);
-            gc_visit_value(objspace, any->as.file.fptr->tied_io_for_writing, global_mark_func);
-            gc_visit_value(objspace, any->as.file.fptr->writeconv_asciicompat, global_mark_func);
-            gc_visit_value(objspace, any->as.file.fptr->writeconv_pre_ecopts, global_mark_func);
-            gc_visit_value(objspace, any->as.file.fptr->encs.ecopts, global_mark_func);
-            gc_visit_value(objspace, any->as.file.fptr->write_lock, global_mark_func);
-            gc_visit_value(objspace, any->as.file.fptr->timeout, global_mark_func);
+            gc_visit_value(objspace, any->as.file.fptr->self, visit_func);
+            gc_visit_value(objspace, any->as.file.fptr->pathv, visit_func);
+            gc_visit_value(objspace, any->as.file.fptr->tied_io_for_writing, visit_func);
+            gc_visit_value(objspace, any->as.file.fptr->writeconv_asciicompat, visit_func);
+            gc_visit_value(objspace, any->as.file.fptr->writeconv_pre_ecopts, visit_func);
+            gc_visit_value(objspace, any->as.file.fptr->encs.ecopts, visit_func);
+            gc_visit_value(objspace, any->as.file.fptr->write_lock, visit_func);
+            gc_visit_value(objspace, any->as.file.fptr->timeout, visit_func);
         }
         break;
 
       case T_REGEXP:
-        gc_visit_value(objspace, any->as.regexp.src, global_mark_func);
+        gc_visit_value(objspace, any->as.regexp.src, visit_func);
         break;
 
       case T_MATCH:
-        gc_visit_value(objspace, any->as.match.regexp, global_mark_func);
+        gc_visit_value(objspace, any->as.match.regexp, visit_func);
         if (any->as.match.str) {
-            gc_visit_value(objspace, any->as.match.str, global_mark_func);
+            gc_visit_value(objspace, any->as.match.str, visit_func);
         }
         break;
 
       case T_RATIONAL:
-        gc_visit_value(objspace, any->as.rational.num, global_mark_func);
-        gc_visit_value(objspace, any->as.rational.den, global_mark_func);
+        gc_visit_value(objspace, any->as.rational.num, visit_func);
+        gc_visit_value(objspace, any->as.rational.den, visit_func);
         break;
 
       case T_COMPLEX:
-        gc_visit_value(objspace, any->as.complex.real, global_mark_func);
-        gc_visit_value(objspace, any->as.complex.imag, global_mark_func);
+        gc_visit_value(objspace, any->as.complex.real, visit_func);
+        gc_visit_value(objspace, any->as.complex.imag, visit_func);
         break;
 
       case T_STRUCT:
@@ -7343,7 +7345,7 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
             const VALUE * const ptr = RSTRUCT_CONST_PTR(obj);
 
             for (i=0; i<len; i++) {
-                gc_visit_value(objspace, ptr[i], global_mark_func);
+                gc_visit_value(objspace, ptr[i], visit_func);
             }
 
             if (LIKELY(during_gc) &&
@@ -7384,7 +7386,7 @@ gc_mark_stacked_objects(rb_objspace_t *objspace, int incremental, size_t count)
         if (RGENGC_CHECK_MODE && !RVALUE_MARKED(obj)) {
             rb_bug("gc_mark_stacked_objects: %s is not marked.", obj_info(obj));
         }
-        gc_mark_children(objspace, obj);
+        gc_visit_fields(objspace, obj, global_mark_func);
 
         if (incremental) {
             if (RGENGC_CHECK_MODE && !RVALUE_MARKING(obj)) {
@@ -8202,7 +8204,7 @@ gc_marks_wb_unprotected_objects_plane(rb_objspace_t *objspace, uintptr_t p, bits
                 gc_report(2, objspace, "gc_marks_wb_unprotected_objects: marked shady: %s\n", obj_info((VALUE)p));
                 GC_ASSERT(RVALUE_WB_UNPROTECTED((VALUE)p));
                 GC_ASSERT(RVALUE_MARKED((VALUE)p));
-                gc_mark_children(objspace, (VALUE)p);
+                gc_visit_fields(objspace, (VALUE)p, global_mark_func);
             }
             p += BASE_SLOT_SIZE;
             bits >>= 1;
@@ -8776,7 +8778,7 @@ rgengc_rememberset_mark_plane(rb_objspace_t *objspace, uintptr_t p, bits_t bitse
                 GC_ASSERT(RVALUE_UNCOLLECTIBLE(obj));
                 GC_ASSERT(RVALUE_OLD_P(obj) || RVALUE_WB_UNPROTECTED(obj));
 
-                gc_mark_children(objspace, obj);
+                gc_visit_fields(objspace, obj, global_mark_func);
             }
             p += BASE_SLOT_SIZE;
             bitset >>= 1;
@@ -11788,7 +11790,7 @@ rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *
             } ,*prev_mfd = cr->mfd;
 
             cr->mfd = &mfd;
-            gc_mark_children(objspace, obj);
+            gc_visit_fields(objspace, obj, global_mark_func);
             cr->mfd = prev_mfd;
         }
     }
