@@ -6848,7 +6848,7 @@ static void reachable_objects_from_callback(VALUE obj);
 static void
 gc_mark_ptr(VALUE obj, void *data)
 {
-    rb_objspace_t *objspace = &rb_objspace;
+    rb_objspace_t *objspace = (rb_objspace_t *)data;
     rgengc_check_relation(objspace, obj);
     if (!gc_mark_set(objspace, obj)) return; /* already marked */
 
@@ -8509,7 +8509,7 @@ gc_marks_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t 
     rb_ractor_t *cr = GET_RACTOR();
     struct gc_mark_func_data_struct mfd = {
         .mark_func = gc_mark_ptr,
-        .data = NULL,
+        .data = (void *)objspace,
     }, *prev_mfd = cr->mfd;
     cr->mfd = &mfd;
 
@@ -8544,7 +8544,7 @@ gc_marks(rb_objspace_t *objspace, int full_mark)
     rb_ractor_t *cr = GET_RACTOR();
     struct gc_mark_func_data_struct mfd = {
         .mark_func = gc_mark_ptr,
-        .data = NULL,
+        .data = (void *)objspace,
     }, *prev_mfd = cr->mfd;
     cr->mfd = &mfd;
 
@@ -9346,7 +9346,7 @@ gc_rest(rb_objspace_t *objspace)
             rb_ractor_t *cr = GET_RACTOR();
             struct gc_mark_func_data_struct mfd = {
                 .mark_func = gc_mark_ptr,
-                .data = NULL,
+                .data = (void *)objspace,
             }, *prev_mfd = cr->mfd;
             cr->mfd = &mfd;
 
