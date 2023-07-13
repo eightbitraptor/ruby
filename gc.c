@@ -6844,37 +6844,33 @@ gc_aging(rb_objspace_t *objspace, VALUE obj)
     objspace->marked_slots++;
 }
 
-NOINLINE(static void gc_mark_ptr(rb_objspace_t *objspace, VALUE obj));
+NOINLINE(static void gc_mark_ptr(VALUE obj, void *data));
 static void reachable_objects_from_callback(VALUE obj);
 
 static void
-gc_mark_ptr(rb_objspace_t *objspace, VALUE obj)
+gc_mark_ptr(VALUE obj, void *data)
 {
-    if (LIKELY(during_gc)) {
-        rgengc_check_relation(objspace, obj);
-        if (!gc_mark_set(objspace, obj)) return; /* already marked */
+    rb_objspace_t *objspace = (rb_objspace_t *)data;
+    rgengc_check_relation(objspace, obj);
+    if (!gc_mark_set(objspace, obj)) return; /* already marked */
 
-        if (0) { // for debug GC marking miss
-            if (objspace->rgengc.parent_object) {
-                RUBY_DEBUG_LOG("%p (%s) parent:%p (%s)",
-                               (void *)obj, obj_type_name(obj),
-                               (void *)objspace->rgengc.parent_object, obj_type_name(objspace->rgengc.parent_object));
-            }
-            else {
-                RUBY_DEBUG_LOG("%p (%s)", (void *)obj, obj_type_name(obj));
-            }
+    if (0) { // for debug GC marking miss
+        if (objspace->rgengc.parent_object) {
+            RUBY_DEBUG_LOG("%p (%s) parent:%p (%s)",
+                           (void *)obj, obj_type_name(obj),
+                           (void *)objspace->rgengc.parent_object, obj_type_name(objspace->rgengc.parent_object));
         }
+        else {
+            RUBY_DEBUG_LOG("%p (%s)", (void *)obj, obj_type_name(obj));
+        }
+    }
 
-        if (UNLIKELY(RB_TYPE_P(obj, T_NONE))) {
-            rp(obj);
-            rb_bug("try to mark T_NONE object"); /* check here will help debugging */
-        }
-        gc_aging(objspace, obj);
-        gc_grey(objspace, obj);
+    if (UNLIKELY(RB_TYPE_P(obj, T_NONE))) {
+        rp(obj);
+        rb_bug("try to mark T_NONE object"); /* check here will help debugging */
     }
-    else {
-        reachable_objects_from_callback(obj);
-    }
+    gc_aging(objspace, obj);
+    gc_grey(objspace, obj);
 }
 
 static inline void
@@ -6893,14 +6889,14 @@ gc_mark_and_pin(rb_objspace_t *objspace, VALUE obj)
 {
     if (!is_markable_object(obj)) return;
     gc_pin(objspace, obj);
-    gc_mark_ptr(objspace, obj);
+    reachable_objects_from_callback(obj);
 }
 
 static inline void
 gc_mark(rb_objspace_t *objspace, VALUE obj)
 {
     if (!is_markable_object(obj)) return;
-    gc_mark_ptr(objspace, obj);
+    reachable_objects_from_callback(obj);
 }
 
 void
@@ -6928,7 +6924,7 @@ rb_gc_mark_and_move(VALUE *ptr)
         *ptr = rb_gc_location(*ptr);
     }
     else {
-        gc_mark_ptr(objspace, *ptr);
+        reachable_objects_from_callback(*ptr);
     }
 }
 
@@ -8557,7 +8553,6 @@ gc_marks(rb_objspace_t *objspace, int full_mark)
     bool marking_finished = false;
 
     /* setup marking */
-
     gc_marks_start(objspace, full_mark);
     if (!is_incremental_marking(objspace)) {
         gc_marks_rest(objspace);
@@ -9231,6 +9226,10 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
     /* reason may be clobbered, later, so keep set immediate_sweep here */
     objspace->flags.immediate_sweep = !!(reason & GPR_FLAG_IMMEDIATE_SWEEP);
 
+    rb_ractor_t *cr = GET_RACTOR();
+    struct gc_mark_func_data_struct prev_mfd = cr->mfd;
+    rb_ractor_init_mfd(cr);
+
     /* Explicitly enable compaction (GC.compact) */
     if (do_full_mark && ruby_enable_autocompact) {
         objspace->flags.during_compacting = TRUE;
@@ -9336,6 +9335,8 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
     gc_prof_timer_stop(objspace);
 
     gc_exit(objspace, gc_enter_event_start, &lock_lev);
+
+    cr->mfd = prev_mfd;
     return TRUE;
 }
 
@@ -11706,7 +11707,7 @@ static void
 reachable_objects_from_callback(VALUE obj)
 {
     rb_ractor_t *cr = GET_RACTOR();
-    cr->mfd->mark_func(obj, cr->mfd->data);
+    cr->mfd.mark_func(obj, cr->mfd.data);
 }
 
 void
@@ -11723,9 +11724,9 @@ rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *
             struct gc_mark_func_data_struct mfd = {
                 .mark_func = func,
                 .data = data,
-            }, *prev_mfd = cr->mfd;
+            }, prev_mfd = cr->mfd;
 
-            cr->mfd = &mfd;
+            cr->mfd = mfd;
             gc_mark_children(objspace, obj);
             cr->mfd = prev_mfd;
         }
@@ -11766,9 +11767,9 @@ objspace_reachable_objects_from_root(rb_objspace_t *objspace, void (func)(const 
     struct gc_mark_func_data_struct mfd = {
         .mark_func = root_objects_from,
         .data = &data,
-    }, *prev_mfd = cr->mfd;
+    }, prev_mfd = cr->mfd;
 
-    cr->mfd = &mfd;
+    cr->mfd = mfd;
     gc_mark_roots(objspace, &data.category);
     cr->mfd = prev_mfd;
 }
@@ -13803,6 +13804,13 @@ rb_gcdebug_remove_stress_to_class(int argc, VALUE *argv, VALUE self)
         }
     }
     return Qnil;
+}
+
+void
+rb_ractor_init_mfd(rb_ractor_t *r)
+{
+    r->mfd.mark_func = gc_mark_ptr;
+    r->mfd.data = (void *)&rb_objspace;
 }
 
 /*
