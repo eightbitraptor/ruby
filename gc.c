@@ -6842,13 +6842,13 @@ gc_aging(rb_objspace_t *objspace, VALUE obj)
     objspace->marked_slots++;
 }
 
-NOINLINE(static void gc_mark_ptr(rb_objspace_t *objspace, VALUE obj));
+NOINLINE(static void gc_mark_ptr(VALUE obj, void *data));
 static void reachable_objects_from_callback(VALUE obj);
 
 static void
-gc_really_mark_ptr(rb_objspace_t *objspace, VALUE obj)
+gc_mark_ptr(VALUE obj, void *data)
 {
-
+    rb_objspace_t *objspace = &rb_objspace;
     rgengc_check_relation(objspace, obj);
     if (!gc_mark_set(objspace, obj)) return; /* already marked */
 
@@ -6869,18 +6869,6 @@ gc_really_mark_ptr(rb_objspace_t *objspace, VALUE obj)
     }
     gc_aging(objspace, obj);
     gc_grey(objspace, obj);
-
-}
-
-static void
-gc_mark_ptr(rb_objspace_t *objspace, VALUE obj)
-{
-    if (LIKELY(during_gc)) {
-        gc_really_mark_ptr(objspace, obj);
-    }
-    else {
-        reachable_objects_from_callback(obj);
-    }
 }
 
 static inline void
@@ -6899,14 +6887,14 @@ gc_mark_and_pin(rb_objspace_t *objspace, VALUE obj)
 {
     if (!is_markable_object(obj)) return;
     gc_pin(objspace, obj);
-    gc_mark_ptr(objspace, obj);
+    reachable_objects_from_callback(obj);
 }
 
 static inline void
 gc_mark(rb_objspace_t *objspace, VALUE obj)
 {
     if (!is_markable_object(obj)) return;
-    gc_mark_ptr(objspace, obj);
+    reachable_objects_from_callback(obj);
 }
 
 void
@@ -6934,7 +6922,7 @@ rb_gc_mark_and_move(VALUE *ptr)
         *ptr = rb_gc_location(*ptr);
     }
     else {
-        gc_mark_ptr(objspace, *ptr);
+        reachable_objects_from_callback(*ptr);
     }
 }
 
@@ -7297,6 +7285,7 @@ gc_mark_stacked_objects(rb_objspace_t *objspace, int incremental, size_t count)
         if (RGENGC_CHECK_MODE && !RVALUE_MARKED(obj)) {
             rb_bug("gc_mark_stacked_objects: %s is not marked.", obj_info(obj));
         }
+
         gc_mark_children(objspace, obj);
 
         if (incremental) {
@@ -7383,16 +7372,16 @@ gc_mark_roots(rb_objspace_t *objspace, const char **categoryp)
     objspace->rgengc.parent_object = Qfalse;
 
 #if PRINT_ROOT_TICKS
-#define MARK_CHECKPOINT_PRINT_TICK(category) do { \
-    if (prev_category) { \
-        tick_t t = tick(); \
-        mark_ticks[tick_count] = t - start_tick; \
-        mark_ticks_categories[tick_count] = prev_category; \
-        tick_count++; \
-    } \
-    prev_category = category; \
-    start_tick = tick(); \
-} while (0)
+#define MARK_CHECKPOINT_PRINT_TICK(category) do {               \
+        if (prev_category) {                                    \
+            tick_t t = tick();                                  \
+            mark_ticks[tick_count] = t - start_tick;            \
+            mark_ticks_categories[tick_count] = prev_category;  \
+            tick_count++;                                       \
+        }                                                       \
+        prev_category = category;                               \
+        start_tick = tick();                                    \
+    } while (0)
 #else /* PRINT_ROOT_TICKS */
 #define MARK_CHECKPOINT_PRINT_TICK(category)
 #endif
@@ -8517,6 +8506,13 @@ gc_marks_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t 
     GC_ASSERT(dont_gc_val() == FALSE);
     bool marking_finished = true;
 
+    rb_ractor_t *cr = GET_RACTOR();
+    struct gc_mark_func_data_struct mfd = {
+        .mark_func = gc_mark_ptr,
+        .data = NULL,
+    }, *prev_mfd = cr->mfd;
+    cr->mfd = &mfd;
+
     gc_marking_enter(objspace);
 
     if (heap->free_pages) {
@@ -8532,6 +8528,7 @@ gc_marks_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t 
 
     gc_marking_exit(objspace);
 
+    cr->mfd = prev_mfd;
     return marking_finished;
 }
 
@@ -8544,6 +8541,12 @@ gc_marks(rb_objspace_t *objspace, int full_mark)
     bool marking_finished = false;
 
     /* setup marking */
+    rb_ractor_t *cr = GET_RACTOR();
+    struct gc_mark_func_data_struct mfd = {
+        .mark_func = gc_mark_ptr,
+        .data = NULL,
+    }, *prev_mfd = cr->mfd;
+    cr->mfd = &mfd;
 
     gc_marks_start(objspace, full_mark);
     if (!is_incremental_marking(objspace)) {
@@ -8561,6 +8564,7 @@ gc_marks(rb_objspace_t *objspace, int full_mark)
     gc_marking_exit(objspace);
     gc_prof_mark_timer_stop(objspace);
 
+    cr->mfd = prev_mfd;
     return marking_finished;
 }
 
@@ -9339,10 +9343,18 @@ gc_rest(rb_objspace_t *objspace)
         if (RGENGC_CHECK_MODE >= 2) gc_verify_internal_consistency(objspace);
 
         if (is_incremental_marking(objspace)) {
+            rb_ractor_t *cr = GET_RACTOR();
+            struct gc_mark_func_data_struct mfd = {
+                .mark_func = gc_mark_ptr,
+                .data = NULL,
+            }, *prev_mfd = cr->mfd;
+            cr->mfd = &mfd;
+
             gc_marking_enter(objspace);
             gc_marks_rest(objspace);
             gc_marking_exit(objspace);
 
+            cr->mfd = prev_mfd;
             gc_sweep(objspace);
         }
 
