@@ -125,6 +125,13 @@ const char *rb_raw_obj_info(char *const buff, const size_t buff_size, VALUE obj)
 
 size_t rb_size_pool_slot_size(unsigned char pool_id);
 
+
+struct gc_mark_func_data_struct {
+    void *data;
+    void (*mark_func)(VALUE v, void *data);
+};
+
+
 struct rb_execution_context_struct; /* in vm_core.h */
 struct rb_objspace; /* in vm_core.h */
 
@@ -234,6 +241,7 @@ VALUE rb_gc_id2ref_obj_tbl(VALUE objid);
 VALUE rb_define_finalizer_no_check(VALUE obj, VALUE block);
 
 void rb_gc_mark_and_move(VALUE *ptr);
+void rb_init_default_mark_func(rb_ractor_t *r);
 
 #define rb_gc_mark_and_move_ptr(ptr) do { \
     VALUE _obj = (VALUE)*(ptr); \

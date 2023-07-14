@@ -8522,13 +8522,6 @@ gc_marks_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t 
     GC_ASSERT(dont_gc_val() == FALSE);
     bool marking_finished = true;
 
-    rb_ractor_t *cr = GET_RACTOR();
-    struct gc_mark_func_data_struct mfd = {
-        .mark_func = gc_mark_ptr,
-        .data = (void *)objspace,
-    }, *prev_mfd = cr->mfd;
-    cr->mfd = &mfd;
-
     gc_marking_enter(objspace);
 
     if (heap->free_pages) {
@@ -8544,7 +8537,6 @@ gc_marks_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t 
 
     gc_marking_exit(objspace);
 
-    cr->mfd = prev_mfd;
     return marking_finished;
 }
 
@@ -8557,13 +8549,6 @@ gc_marks(rb_objspace_t *objspace, int full_mark)
     bool marking_finished = false;
 
     /* setup marking */
-    rb_ractor_t *cr = GET_RACTOR();
-    struct gc_mark_func_data_struct mfd = {
-        .mark_func = gc_mark_ptr,
-        .data = (void *)objspace,
-    }, *prev_mfd = cr->mfd;
-    cr->mfd = &mfd;
-
     gc_marks_start(objspace, full_mark);
     if (!is_incremental_marking(objspace)) {
         gc_marks_rest(objspace);
@@ -8580,7 +8565,6 @@ gc_marks(rb_objspace_t *objspace, int full_mark)
     gc_marking_exit(objspace);
     gc_prof_mark_timer_stop(objspace);
 
-    cr->mfd = prev_mfd;
     return marking_finished;
 }
 
@@ -9359,18 +9343,10 @@ gc_rest(rb_objspace_t *objspace)
         if (RGENGC_CHECK_MODE >= 2) gc_verify_internal_consistency(objspace);
 
         if (is_incremental_marking(objspace)) {
-            rb_ractor_t *cr = GET_RACTOR();
-            struct gc_mark_func_data_struct mfd = {
-                .mark_func = gc_mark_ptr,
-                .data = (void *)objspace,
-            }, *prev_mfd = cr->mfd;
-            cr->mfd = &mfd;
-
             gc_marking_enter(objspace);
             gc_marks_rest(objspace);
             gc_marking_exit(objspace);
 
-            cr->mfd = prev_mfd;
             gc_sweep(objspace);
         }
 
@@ -13804,6 +13780,15 @@ rb_gcdebug_remove_stress_to_class(int argc, VALUE *argv, VALUE self)
         }
     }
     return Qnil;
+}
+
+void
+rb_init_default_mark_func(rb_ractor_t *r)
+{
+    struct gc_mark_func_data_struct *mfd = ruby_mimmalloc(sizeof(struct gc_mark_func_data_struct));
+    mfd->mark_func = gc_mark_ptr;
+    mfd->data = (void *)&rb_objspace;
+    r->mfd = mfd;
 }
 
 /*
