@@ -6596,13 +6596,6 @@ mark_const_entry_i(VALUE value, void *data)
     return ID_TABLE_CONTINUE;
 }
 
-static void
-mark_const_tbl(rb_objspace_t *objspace, struct rb_id_table *tbl)
-{
-    if (!tbl) return;
-    rb_id_table_foreach_values(tbl, mark_const_entry_i, objspace);
-}
-
 #if STACK_GROW_DIRECTION < 0
 #define GET_STACK_BOUNDS(start, end, appendix) ((start) = STACK_END, (end) = STACK_START)
 #elif STACK_GROW_DIRECTION > 0
@@ -7115,7 +7108,9 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
         for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
             gc_visit_valid_object(objspace, RCLASS_IVPTR(obj)[i]);
         }
-        mark_const_tbl(objspace, RCLASS_CONST_TBL(obj));
+        if (RCLASS_CONST_TBL(obj)){
+            rb_id_table_foreach_values(RCLASS_CONST_TBL(obj), mark_const_entry_i, objspace);
+        }
 
         gc_visit_valid_object(objspace, RCLASS_EXT(obj)->classpath);
         break;
