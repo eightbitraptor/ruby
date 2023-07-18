@@ -7064,9 +7064,18 @@ gc_ref_update_from_offset(rb_objspace_t *objspace, VALUE obj)
 }
 
 static void mark_cvc_tbl(rb_objspace_t *objspace, VALUE klass);
+static void gc_visit_object_references(rb_objspace_t *objspace, VALUE obj);
 
 static void
-gc_visit_references(rb_objspace_t *objspace, VALUE obj)
+gc_mark_children(rb_objspace_t *objspace, VALUE obj)
+{
+    gc_mark_set_parent(objspace, obj);
+    gc_visit_object_references(objspace, obj);
+
+}
+
+static void
+gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
 {
     register RVALUE *any = RANY(obj);
 
@@ -7264,23 +7273,6 @@ gc_visit_references(rb_objspace_t *objspace, VALUE obj)
                BUILTIN_TYPE(obj), (void *)any,
                is_pointer_to_heap(objspace, any) ? "corrupted object" : "non object");
     }
-}
-
-static void
-gc_mark_children(rb_objspace_t *objspace, VALUE obj)
-{
-    rb_ractor_t *cr = GET_RACTOR();
-    struct gc_mark_func_data_struct mfd = {
-        .mark_func = gc_mark_ptr,
-        .data = (void *)objspace,
-    }, *prev_mfd = cr->mfd;
-    cr->mfd = &mfd;
-
-    gc_mark_set_parent(objspace, obj);
-
-    gc_visit_references(objspace, obj);
-
-    cr->mfd = prev_mfd;
 }
 
 /**
@@ -13783,7 +13775,7 @@ rb_gcdebug_remove_stress_to_class(int argc, VALUE *argv, VALUE self)
 }
 
 void
-rb_init_default_mark_func(rb_ractor_t *r)
+rb_ractor_init_mfd(rb_ractor_t *r)
 {
     struct gc_mark_func_data_struct *mfd = ruby_mimmalloc(sizeof(struct gc_mark_func_data_struct));
     mfd->mark_func = gc_mark_ptr;

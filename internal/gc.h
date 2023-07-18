@@ -241,7 +241,7 @@ VALUE rb_gc_id2ref_obj_tbl(VALUE objid);
 VALUE rb_define_finalizer_no_check(VALUE obj, VALUE block);
 
 void rb_gc_mark_and_move(VALUE *ptr);
-void rb_init_default_mark_func(rb_ractor_t *r);
+void rb_ractor_init_mfd(rb_ractor_t *r);
 
 #define rb_gc_mark_and_move_ptr(ptr) do { \
     VALUE _obj = (VALUE)*(ptr); \
