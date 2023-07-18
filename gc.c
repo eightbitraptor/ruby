@@ -6578,10 +6578,10 @@ mark_method_entry_i(VALUE me, void *data)
 }
 
 static void
-mark_m_tbl(rb_objspace_t *objspace, struct rb_id_table *tbl)
+gc_visit_m_tbl(rb_objspace_t *objspace, struct rb_id_table *tbl, rb_id_table_foreach_values_func_t *iter_func)
 {
     if (tbl) {
-        rb_id_table_foreach_values(tbl, mark_method_entry_i, objspace);
+        rb_id_table_foreach_values(tbl, iter_func, objspace);
     }
 }
 
@@ -7109,7 +7109,7 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
         }
         if (!RCLASS_EXT(obj)) break;
 
-        mark_m_tbl(objspace, RCLASS_M_TBL(obj));
+        gc_visit_m_tbl(objspace, RCLASS_M_TBL(obj), mark_method_entry_i);
         mark_cvc_tbl(objspace, obj);
         cc_table_mark(objspace, obj);
         for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
@@ -7122,7 +7122,7 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
 
       case T_ICLASS:
         if (RICLASS_OWNS_M_TBL_P(obj)) {
-            mark_m_tbl(objspace, RCLASS_M_TBL(obj));
+            gc_visit_m_tbl(objspace, RCLASS_M_TBL(obj), mark_method_entry_i);
         }
         if (RCLASS_SUPER(obj)) {
             gc_visit_valid_object(objspace, RCLASS_SUPER(obj));
@@ -7132,7 +7132,7 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
         if (RCLASS_INCLUDER(obj)) {
             gc_visit_valid_object(objspace, RCLASS_INCLUDER(obj));
         }
-        mark_m_tbl(objspace, RCLASS_CALLABLE_M_TBL(obj));
+        gc_visit_m_tbl(objspace, RCLASS_CALLABLE_M_TBL(obj), mark_method_entry_i);
         cc_table_mark(objspace, obj);
         break;
 
