@@ -125,12 +125,12 @@ const char *rb_raw_obj_info(char *const buff, const size_t buff_size, VALUE obj)
 
 size_t rb_size_pool_slot_size(unsigned char pool_id);
 
+typedef void (*rb_ractor_value_visitor_func)(VALUE v, void *data);
 
 struct gc_mark_func_data_struct {
     void *data;
-    void (*mark_func)(VALUE v, void *data);
+    rb_ractor_value_visitor_func mark_func;
 };
-
 
 struct rb_execution_context_struct; /* in vm_core.h */
 struct rb_objspace; /* in vm_core.h */

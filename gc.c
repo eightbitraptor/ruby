@@ -9214,6 +9214,8 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
     /* reason may be clobbered, later, so keep set immediate_sweep here */
     objspace->flags.immediate_sweep = !!(reason & GPR_FLAG_IMMEDIATE_SWEEP);
 
+    rb_ractor_t *cr = GET_RACTOR();
+
     /* Explicitly enable compaction (GC.compact) */
     if (do_full_mark && ruby_enable_autocompact) {
         objspace->flags.during_compacting = TRUE;
