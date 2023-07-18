@@ -9215,6 +9215,8 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
     objspace->flags.immediate_sweep = !!(reason & GPR_FLAG_IMMEDIATE_SWEEP);
 
     rb_ractor_t *cr = GET_RACTOR();
+    struct gc_mark_func_data_struct *prev_mfd = cr->mfd;
+    rb_ractor_init_mfd(cr);
 
     /* Explicitly enable compaction (GC.compact) */
     if (do_full_mark && ruby_enable_autocompact) {
@@ -9322,6 +9324,8 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
 
     gc_exit(objspace, gc_enter_event_start, &lock_lev);
     return TRUE;
+
+    cr->mfd = prev_mfd;
 }
 
 static void
@@ -13776,13 +13780,17 @@ rb_gcdebug_remove_stress_to_class(int argc, VALUE *argv, VALUE self)
     return Qnil;
 }
 
+static struct gc_mark_func_data_struct *default_gc_mfd;
+
 void
 rb_ractor_init_mfd(rb_ractor_t *r)
 {
-    struct gc_mark_func_data_struct *mfd = ruby_mimmalloc(sizeof(struct gc_mark_func_data_struct));
-    mfd->mark_func = gc_mark_ptr;
-    mfd->data = (void *)&rb_objspace;
-    r->mfd = mfd;
+    if (default_gc_mfd == NULL) {
+        default_gc_mfd = ruby_mimmalloc(sizeof(struct gc_mark_func_data_struct));
+    };
+    default_gc_mfd->mark_func = gc_mark_ptr;
+    default_gc_mfd->data = (void *)&rb_objspace;
+    r->mfd = default_gc_mfd;
 }
 
 /*
