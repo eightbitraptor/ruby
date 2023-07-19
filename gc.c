@@ -7261,11 +7261,10 @@ static void
 gc_mark_children(rb_objspace_t *objspace, VALUE obj)
 {
 
+    gc_mark_set_parent(objspace, obj);
     if (FL_TEST(obj, FL_EXIVAR)) {
         rb_mark_and_update_generic_ivar(obj);
     }
-
-    gc_mark_set_parent(objspace, obj);
     gc_visit_object_references(objspace, obj);
 
 }
