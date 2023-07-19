@@ -10272,11 +10272,12 @@ static enum rb_id_table_iterator_result
 mark_cvc_tbl_i(VALUE cvc_entry, void *data)
 {
     struct rb_cvar_class_tbl_entry *entry;
+    rb_objspace_t *objspace = &rb_objspace;
 
     entry = (struct rb_cvar_class_tbl_entry *)cvc_entry;
 
     RUBY_ASSERT(entry->cref == 0 || (BUILTIN_TYPE((VALUE)entry->cref) == T_IMEMO && IMEMO_TYPE_P(entry->cref, imemo_cref)));
-    rb_gc_mark((VALUE) entry->cref);
+    gc_mark(objspace, (VALUE) entry->cref);
 
     return ID_TABLE_CONTINUE;
 }
