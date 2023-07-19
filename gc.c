@@ -3234,7 +3234,7 @@ cc_table_mark_i(ID id, VALUE ccs_ptr, void *data_ptr)
 }
 
 static void
-cc_table_mark(rb_objspace_t *objspace, VALUE klass)
+gc_visit_cc_table(rb_objspace_t *objspace, VALUE klass, rb_id_table_foreach_func_t *iter_func)
 {
     struct rb_id_table *cc_tbl = RCLASS_CC_TBL(klass);
     if (cc_tbl) {
@@ -7106,7 +7106,7 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
         if (RCLASS_CVC_TBL(obj)) {
             rb_id_table_foreach_values(RCLASS_CVC_TBL(obj), mark_cvc_tbl_i, objspace);
         }
-        cc_table_mark(objspace, obj);
+        gc_visit_cc_table(objspace, obj, cc_table_mark_i);
         for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
             gc_visit_valid_object(objspace, RCLASS_IVPTR(obj)[i]);
         }
@@ -7130,7 +7130,7 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
             gc_visit_valid_object(objspace, RCLASS_INCLUDER(obj));
         }
         gc_visit_m_tbl(objspace, RCLASS_CALLABLE_M_TBL(obj), mark_method_entry_i);
-        cc_table_mark(objspace, obj);
+        gc_visit_cc_table(objspace, obj, cc_table_mark_i);
         break;
 
       case T_ARRAY:
