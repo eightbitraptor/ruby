@@ -11686,7 +11686,7 @@ rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *
             }, *prev_mfd = cr->mfd;
 
             cr->mfd = &mfd;
-            gc_mark_children(objspace, obj);
+            gc_visit_object_references(objspace, obj);
             cr->mfd = prev_mfd;
         }
     }
