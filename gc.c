@@ -6495,15 +6495,9 @@ pin_key_mark_value(st_data_t key, st_data_t value, st_data_t data)
 }
 
 static void
-mark_hash(rb_objspace_t *objspace, VALUE hash)
+visit_hash(rb_objspace_t *objspace, VALUE hash, st_foreach_callback_func *visit_func)
 {
-    if (rb_hash_compare_by_id_p(hash)) {
-        rb_hash_stlike_foreach(hash, pin_key_mark_value, (st_data_t)objspace);
-    }
-    else {
-        rb_hash_stlike_foreach(hash, mark_keyvalue, (st_data_t)objspace);
-    }
-
+    rb_hash_stlike_foreach(hash, visit_func, (st_data_t)objspace);
     gc_visit_valid_object(objspace, RHASH(hash)->ifnone);
 }
 
@@ -7048,7 +7042,7 @@ gc_mark_from_offset(rb_objspace_t *objspace, VALUE obj)
     void *data_struct = RANY(obj)->as.typeddata.data;
 
     for (size_t offset = *offset_list; *offset_list != RUBY_REF_END; offset = *offset_list++) {
-        rb_gc_mark_movable(*EDGE);
+        gc_visit_valid_object(objspace, *EDGE);
     }
 }
 
@@ -7161,7 +7155,7 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
         break;
 
       case T_HASH:
-        mark_hash(objspace, obj);
+        visit_hash(objspace, obj, mark_keyvalue);
         break;
 
       case T_STRING:
@@ -7298,6 +7292,10 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
       case T_MODULE:
         if (RCLASS_CC_TBL(obj)) {
             rb_id_table_foreach(RCLASS_CC_TBL(obj), free_invalid_ccs_cme, NULL);
+        }
+      case T_HASH:
+        if (rb_hash_compare_by_id_p(obj)) {
+            rb_hash_stlike_foreach(obj, pin_key_mark_value, (st_data_t)objspace);
         }
       default:
         break;
