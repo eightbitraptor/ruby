@@ -7087,14 +7087,9 @@ gc_ref_update_from_offset(rb_objspace_t *objspace, VALUE obj)
 static void mark_cvc_tbl(rb_objspace_t *objspace, VALUE klass);
 
 static void
-gc_mark_children(rb_objspace_t *objspace, VALUE obj)
+gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
 {
     register RVALUE *any = RANY(obj);
-    gc_mark_set_parent(objspace, obj);
-
-    if (FL_TEST(obj, FL_EXIVAR)) {
-        rb_mark_and_update_generic_ivar(obj);
-    }
 
     switch (BUILTIN_TYPE(obj)) {
       case T_FLOAT:
@@ -7286,6 +7281,16 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
                BUILTIN_TYPE(obj), (void *)any,
                is_pointer_to_heap(objspace, any) ? "corrupted object" : "non object");
     }
+}
+
+static void
+gc_mark_children(rb_objspace_t *objspace, VALUE obj)
+{
+    gc_mark_set_parent(objspace, obj);
+    if (FL_TEST(obj, FL_EXIVAR)) {
+        rb_mark_and_update_generic_ivar(obj);
+    }
+    gc_visit_object_references(objspace, obj);
 }
 
 /**
