@@ -3210,18 +3210,14 @@ struct cc_tbl_i_data {
 };
 
 static enum rb_id_table_iterator_result
-cc_table_mark_i(ID id, VALUE ccs_ptr, void *data_ptr)
+visit_cc_tbl_i(ID id, VALUE ccs_ptr, void *data_ptr)
 {
     struct cc_tbl_i_data *data = data_ptr;
     struct rb_class_cc_entries *ccs = (struct rb_class_cc_entries *)ccs_ptr;
     VM_ASSERT(vm_ccs_p(ccs));
     VM_ASSERT(id == ccs->cme->called_id);
 
-    if (METHOD_ENTRY_INVALIDATED(ccs->cme)) {
-        rb_vm_ccs_free(ccs);
-        return ID_TABLE_DELETE;
-    }
-    else {
+    if (!METHOD_ENTRY_INVALIDATED(ccs->cme)) {
         gc_visit_valid_object(data->objspace, (VALUE)ccs->cme);
 
         for (int i=0; i<ccs->len; i++) {
@@ -3231,12 +3227,12 @@ cc_table_mark_i(ID id, VALUE ccs_ptr, void *data_ptr)
             gc_visit_valid_object(data->objspace, (VALUE)ccs->entries[i].ci);
             gc_visit_valid_object(data->objspace, (VALUE)ccs->entries[i].cc);
         }
-        return ID_TABLE_CONTINUE;
     }
+    return ID_TABLE_CONTINUE;
 }
 
 static void
-cc_table_mark(rb_objspace_t *objspace, VALUE klass)
+visit_cc_tbl(rb_objspace_t *objspace, VALUE klass)
 {
     struct rb_id_table *cc_tbl = RCLASS_CC_TBL(klass);
     if (cc_tbl) {
@@ -3244,7 +3240,7 @@ cc_table_mark(rb_objspace_t *objspace, VALUE klass)
             .objspace = objspace,
             .klass = klass,
         };
-        rb_id_table_foreach(cc_tbl, cc_table_mark_i, &data);
+        rb_id_table_foreach(cc_tbl, visit_cc_tbl_i, &data);
     }
 }
 
@@ -7121,7 +7117,7 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
         if (RCLASS_CVC_TBL(obj)) {
             rb_id_table_foreach_values(RCLASS_CVC_TBL(obj), visit_cvc_tbl_i, objspace);
         }
-        cc_table_mark(objspace, obj);
+        visit_cc_tbl(objspace, obj);
         for (attr_index_t i = 0; i < RCLASS_IV_COUNT(obj); i++) {
             gc_visit_valid_object(objspace, RCLASS_IVPTR(obj)[i]);
         }
@@ -7147,7 +7143,7 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
         if (RCLASS_CALLABLE_M_TBL(obj)) {
             rb_id_table_foreach_values(RCLASS_CALLABLE_M_TBL(obj), visit_method_entry_i, objspace);
         }
-        cc_table_mark(objspace, obj);
+        visit_cc_tbl(objspace, obj);
         break;
 
       case T_ARRAY:
@@ -7276,6 +7272,17 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
     }
 }
 
+static enum rb_id_table_iterator_result
+free_invalid_ccs_cme(ID id, VALUE ccs_ptr, void *data) {
+    struct rb_class_cc_entries *ccs = (struct rb_class_cc_entries *)ccs_ptr;
+
+    if (METHOD_ENTRY_INVALIDATED(ccs->cme)) {
+        rb_vm_ccs_free(ccs);
+        return ID_TABLE_DELETE;
+    }
+    return ID_TABLE_CONTINUE;
+}
+
 static void
 gc_mark_children(rb_objspace_t *objspace, VALUE obj)
 {
@@ -7284,6 +7291,17 @@ gc_mark_children(rb_objspace_t *objspace, VALUE obj)
         rb_mark_and_update_generic_ivar(obj);
     }
     gc_visit_object_references(objspace, obj);
+
+    switch(BUILTIN_TYPE(obj)) {
+      case T_CLASS:
+      case T_ICLASS:
+      case T_MODULE:
+        if (RCLASS_CC_TBL(obj)) {
+            rb_id_table_foreach(RCLASS_CC_TBL(obj), free_invalid_ccs_cme, NULL);
+        }
+      default:
+        break;
+    }
 }
 
 /**
