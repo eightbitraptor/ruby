@@ -6399,7 +6399,7 @@ rb_gc_mark_vm_stack_values(long n, const VALUE *values)
 }
 
 static int
-mark_value(st_data_t key, st_data_t value, st_data_t data)
+visit_value(st_data_t key, st_data_t value, st_data_t data)
 {
     rb_objspace_t *objspace = (rb_objspace_t *)data;
     gc_visit_valid_object(objspace, (VALUE)value);
@@ -6415,10 +6415,10 @@ mark_value_pin(st_data_t key, st_data_t value, st_data_t data)
 }
 
 static void
-mark_tbl_no_pin(rb_objspace_t *objspace, st_table *tbl)
+visit_tbl(rb_objspace_t *objspace, st_table *tbl)
 {
     if (!tbl || tbl->num_entries == 0) return;
-    st_foreach(tbl, mark_value, (st_data_t)objspace);
+    st_foreach(tbl, visit_value, (st_data_t)objspace);
 }
 
 static void
@@ -6700,7 +6700,7 @@ rb_mark_tbl(st_table *tbl)
 void
 rb_mark_tbl_no_pin(st_table *tbl)
 {
-    mark_tbl_no_pin(&rb_objspace, tbl);
+    visit_tbl(&rb_objspace, tbl);
 }
 
 static void
@@ -7185,7 +7185,7 @@ gc_visit_object_references(rb_objspace_t *objspace, VALUE obj)
         {
             rb_shape_t *shape = rb_shape_get_shape_by_id(ROBJECT_SHAPE_ID(obj));
             if (rb_shape_obj_too_complex(obj)) {
-                mark_tbl_no_pin(objspace, ROBJECT_IV_HASH(obj));
+                visit_tbl(objspace, ROBJECT_IV_HASH(obj));
             }
             else {
                 const VALUE * const ptr = ROBJECT_IVPTR(obj);
@@ -7450,7 +7450,7 @@ gc_mark_roots(rb_objspace_t *objspace, const char **categoryp)
 
     MARK_CHECKPOINT("object_id");
     rb_gc_mark(objspace->next_object_id);
-    mark_tbl_no_pin(objspace, objspace->obj_to_id_tbl); /* Only mark ids */
+    visit_tbl(objspace, objspace->obj_to_id_tbl); /* Only mark ids */
 
     if (stress_to_class) rb_gc_mark(stress_to_class);
 
