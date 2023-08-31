@@ -1301,6 +1301,7 @@ static void gc_sweep(rb_objspace_t *objspace);
 static void gc_sweep_finish_size_pool(rb_objspace_t *objspace, rb_size_pool_t *size_pool);
 static void gc_sweep_continue(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap);
 
+static inline void rb_obj_visit(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_mark(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_pin(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_mark_and_pin(rb_objspace_t *objspace, VALUE ptr);
@@ -6338,7 +6339,7 @@ rb_gc_mark_values(long n, const VALUE *values)
     rb_objspace_t *objspace = &rb_objspace;
 
     for (i=0; i<n; i++) {
-        gc_mark(objspace, values[i]);
+        rb_obj_visit(objspace, values[i]);
     }
 }
 
@@ -6852,6 +6853,13 @@ gc_mark_and_pin(rb_objspace_t *objspace, VALUE obj)
 }
 
 static inline void
+rb_obj_visit(rb_objspace_t *objspace, VALUE obj)
+{
+    if (!is_markable_object(obj)) return;
+    reachable_objects_from_callback(obj);
+}
+
+static inline void
 gc_mark(rb_objspace_t *objspace, VALUE obj)
 {
     if (!is_markable_object(obj)) return;
@@ -7356,7 +7364,7 @@ vm_mark_negative_cme(VALUE val, void *dmy)
 }
 
 void
-rb_vm_mark(void *ptr)
+rb_vm_visit(rb_objspace_t *objspace, void *ptr)
 {
     RUBY_MARK_ENTER("vm");
     RUBY_GC_INFO("-------------------------------------------------\n");
@@ -7370,10 +7378,10 @@ rb_vm_mark(void *ptr)
             // ractor.set only contains blocking or running ractors
             VM_ASSERT(rb_ractor_status_p(r, ractor_blocking) ||
                       rb_ractor_status_p(r, ractor_running));
-            rb_gc_mark(rb_ractor_self(r));
+            rb_obj_visit(objspace, rb_ractor_self(r));
         }
 
-        rb_gc_mark_movable(vm->mark_object_ary);
+        rb_obj_visit(objspace, vm->mark_object_ary);
 
         len = RARRAY_LEN(vm->mark_object_ary);
         obj_ary = RARRAY_CONST_PTR(vm->mark_object_ary);
@@ -7381,27 +7389,28 @@ rb_vm_mark(void *ptr)
             const VALUE *ptr;
             long j, jlen;
 
-            rb_gc_mark(*obj_ary);
+            rb_obj_visit(objspace, *obj_ary);
             jlen = RARRAY_LEN(*obj_ary);
             ptr = RARRAY_CONST_PTR(*obj_ary);
             for (j=0; j < jlen; j++) {
-                rb_gc_mark(*ptr++);
+                rb_obj_visit(objspace, *ptr++);
             }
             obj_ary++;
         }
 
-        rb_gc_mark_movable(vm->load_path);
-        rb_gc_mark_movable(vm->load_path_snapshot);
-        RUBY_MARK_MOVABLE_UNLESS_NULL(vm->load_path_check_cache);
-        rb_gc_mark_movable(vm->expanded_load_path);
-        rb_gc_mark_movable(vm->loaded_features);
-        rb_gc_mark_movable(vm->loaded_features_snapshot);
-        rb_gc_mark_movable(vm->loaded_features_realpaths);
-        rb_gc_mark_movable(vm->loaded_features_realpath_map);
-        rb_gc_mark_movable(vm->top_self);
-        rb_gc_mark_movable(vm->orig_progname);
-        RUBY_MARK_MOVABLE_UNLESS_NULL(vm->coverages);
-        RUBY_MARK_MOVABLE_UNLESS_NULL(vm->me2counter);
+        rb_obj_visit(objspace, vm->load_path);
+        rb_obj_visit(objspace, vm->load_path_snapshot);
+        rb_obj_visit(objspace, vm->load_path_check_cache);
+        rb_obj_visit(objspace, vm->expanded_load_path);
+        rb_obj_visit(objspace, vm->loaded_features);
+        rb_obj_visit(objspace, vm->loaded_features_snapshot);
+        rb_obj_visit(objspace, vm->loaded_features_realpaths);
+        rb_obj_visit(objspace, vm->loaded_features_realpath_map);
+        rb_obj_visit(objspace, vm->top_self);
+        rb_obj_visit(objspace, vm->orig_progname);
+        rb_obj_visit(objspace, vm->coverages);
+        rb_obj_visit(objspace, vm->me2counter);
+
         /* Prevent classes from moving */
         rb_mark_tbl(vm->defined_module_hash);
 
@@ -7475,7 +7484,7 @@ gc_mark_roots(rb_objspace_t *objspace, const char **categoryp)
 
     MARK_CHECKPOINT("vm");
     SET_STACK_END;
-    rb_vm_mark(vm);
+    rb_vm_visit(&rb_objspace, vm);
     if (vm->self) gc_mark(objspace, vm->self);
 
     MARK_CHECKPOINT("finalizers");
