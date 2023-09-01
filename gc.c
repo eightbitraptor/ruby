@@ -6332,8 +6332,8 @@ rb_gc_mark_locations(const VALUE *start, const VALUE *end)
     gc_mark_locations(&rb_objspace, start, end, gc_mark_maybe);
 }
 
-void
-rb_gc_mark_values(long n, const VALUE *values)
+static void
+gc_visit_values(long n, const VALUE *values)
 {
     long i;
     rb_objspace_t *objspace = &rb_objspace;
@@ -6947,7 +6947,7 @@ gc_mark_imemo(rb_objspace_t *objspace, VALUE obj)
                 // just after newobj() can be NULL here.
                 GC_ASSERT(env->ep[VM_ENV_DATA_INDEX_ENV] == obj);
                 GC_ASSERT(VM_ENV_ESCAPED_P(env->ep));
-                rb_gc_mark_values((long)env->env_size, env->env);
+                gc_visit_values((long)env->env_size, env->env);
                 VM_ENV_FLAGS_SET(env->ep, VM_ENV_FLAG_WB_REQUIRED);
                 gc_mark(objspace, (VALUE)rb_vm_env_prev_env(env));
                 gc_mark(objspace, (VALUE)env->iseq);
@@ -7418,7 +7418,7 @@ rb_vm_visit(rb_objspace_t *objspace, void *ptr)
             rb_mark_tbl(vm->loading_table);
         }
 
-        rb_gc_mark_values(RUBY_NSIG, vm->trap_list.cmd);
+        gc_visit_values(RUBY_NSIG, vm->trap_list.cmd);
 
         rb_id_table_foreach_values(vm->negative_cme_table, vm_mark_negative_cme, NULL);
         rb_mark_tbl_no_pin(vm->overloaded_cme_table);

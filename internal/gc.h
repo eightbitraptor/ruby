@@ -280,7 +280,6 @@ VALUE rb_wb_unprotected_newobj_of(VALUE, VALUE, size_t);
 size_t rb_obj_memsize_of(VALUE);
 void rb_gc_verify_internal_consistency(void);
 size_t rb_obj_gc_flags(VALUE, ID[], size_t);
-void rb_gc_mark_values(long n, const VALUE *values);
 void rb_gc_mark_vm_stack_values(long n, const VALUE *values);
 void rb_gc_update_values(long n, VALUE *values);
 void *ruby_sized_xrealloc(void *ptr, size_t new_size, size_t old_size) RUBY_ATTR_RETURNS_NONNULL RUBY_ATTR_ALLOC_SIZE((2));
