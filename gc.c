@@ -7408,8 +7408,10 @@ rb_vm_visit(rb_objspace_t *objspace, void *ptr)
         rb_obj_visit(objspace, vm->loaded_features_realpath_map);
         rb_obj_visit(objspace, vm->top_self);
         rb_obj_visit(objspace, vm->orig_progname);
-        rb_obj_visit(objspace, vm->coverages);
-        rb_obj_visit(objspace, vm->me2counter);
+        if (vm->coverages)
+            rb_obj_visit(objspace, vm->coverages);
+        if (vm->me2counter)
+            rb_obj_visit(objspace, vm->me2counter);
 
         /* Prevent classes from moving */
         rb_mark_tbl(vm->defined_module_hash);
