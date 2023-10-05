@@ -1447,6 +1447,52 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
         }
         return;
       }
+      case PM_FOR_NODE: {
+          pm_for_node_t *for_node = (pm_for_node_t *)node;
+
+          const rb_iseq_t *prevblock = ISEQ_COMPILE_DATA(iseq)->current_block;
+          const rb_iseq_t *child_iseq;
+
+          LABEL *retry_label = NEW_LABEL(lineno);
+          LABEL *retry_end_l = NEW_LABEL(lineno);
+
+          pm_scope_node_t next_scope_node;
+          pm_scope_node_init((pm_node_t *)for_node, &next_scope_node, scope_node, parser);
+
+          pm_constant_id_list_t locals;
+          pm_constant_id_list_init(&locals);
+          pm_constant_id_list_append(&locals, ((pm_constant_id_t)(1<<31)));
+          next_scope_node.locals = locals;
+
+          ADD_LABEL(ret, retry_label);
+
+          PM_COMPILE(for_node->collection);
+          ISEQ_COMPILE_DATA(iseq)->current_block = child_iseq = 
+              NEW_CHILD_ISEQ(&next_scope_node, make_name_for_block(iseq), 
+                      ISEQ_TYPE_BLOCK, lineno);
+          ADD_SEND_WITH_BLOCK(ret, &dummy_line_node, idEach, INT2FIX(0), child_iseq);
+
+          switch (PM_NODE_TYPE(for_node->index)) {
+              case PM_LOCAL_VARIABLE_TARGET_NODE: {
+
+                  break;
+              }
+              default: {
+                  rb_bug("unreachable");
+              }
+          }
+
+          ret->last = (LINK_ELEMENT *)retry_end_l;
+
+          if (popped) {
+              ADD_INSN(ret, &dummy_line_node, pop);
+          }
+
+          ISEQ_COMPILE_DATA(iseq)->current_block = prevblock;
+
+          ADD_CATCH_ENTRY(CATCH_TYPE_BREAK, retry_label, retry_end_l, child_iseq, retry_end_l);
+          return;
+      }
       case PM_GLOBAL_VARIABLE_AND_WRITE_NODE: {
         pm_global_variable_and_write_node_t *global_variable_and_write_node = (pm_global_variable_and_write_node_t*) node;
 
@@ -2257,7 +2303,12 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
 
         for (size_t i = 0; i < size; i++) {
             pm_constant_id_t constant_id = locals.ids[i];
-            ID local = pm_constant_id_lookup(scope_node, constant_id);
+            ID local;
+            if (constant_id & (1 << 31)) {
+                local = rb_make_temporary_id(i);
+            } else {
+                local = pm_constant_id_lookup(scope_node, constant_id);
+            }
             tbl->ids[i] = local;
             st_insert(index_lookup_table, constant_id, i);
         }
@@ -2310,6 +2361,14 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
             ADD_LABEL(ret, start);
 
             if (scope_node->body) {
+                if (PM_NODE_TYPE_P(scope_node->ast_node, PM_FOR_NODE)) {
+                    pm_for_node_t *for_node = (pm_for_node_t *)scope_node->ast_node;
+                    pm_local_variable_target_node_t *v = (pm_local_variable_target_node_t *)for_node->index;
+
+                    ADD_GETLOCAL(ret, &dummy_line_node, 0, 0);
+                    ADD_SETLOCAL(ret, &dummy_line_node, v->depth + 1, 1);
+                }
+
                 pm_compile_node(iseq, (pm_node_t *)(scope_node->body), ret, src, popped, scope_node);
             }
             else {
