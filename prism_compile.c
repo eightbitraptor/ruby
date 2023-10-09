@@ -1450,11 +1450,9 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
       case PM_FOR_NODE: {
           pm_for_node_t *for_node = (pm_for_node_t *)node;
 
-          const rb_iseq_t *prevblock = ISEQ_COMPILE_DATA(iseq)->current_block;
           const rb_iseq_t *child_iseq;
 
           LABEL *retry_label = NEW_LABEL(lineno);
-          LABEL *retry_end_l = NEW_LABEL(lineno);
 
           pm_scope_node_t next_scope_node;
           pm_scope_node_init((pm_node_t *)for_node, &next_scope_node, scope_node, parser);
@@ -1472,15 +1470,11 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
                       ISEQ_TYPE_BLOCK, lineno);
           ADD_SEND_WITH_BLOCK(ret, &dummy_line_node, idEach, INT2FIX(0), child_iseq);
 
-          ret->last = (LINK_ELEMENT *)retry_end_l;
 
           if (popped) {
               ADD_INSN(ret, &dummy_line_node, pop);
           }
 
-          ISEQ_COMPILE_DATA(iseq)->current_block = prevblock;
-
-          ADD_CATCH_ENTRY(CATCH_TYPE_BREAK, retry_label, retry_end_l, child_iseq, retry_end_l);
           return;
       }
       case PM_GLOBAL_VARIABLE_AND_WRITE_NODE: {
