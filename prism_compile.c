@@ -1472,16 +1472,6 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
                       ISEQ_TYPE_BLOCK, lineno);
           ADD_SEND_WITH_BLOCK(ret, &dummy_line_node, idEach, INT2FIX(0), child_iseq);
 
-          switch (PM_NODE_TYPE(for_node->index)) {
-              case PM_LOCAL_VARIABLE_TARGET_NODE: {
-
-                  break;
-              }
-              default: {
-                  rb_bug("unreachable");
-              }
-          }
-
           ret->last = (LINK_ELEMENT *)retry_end_l;
 
           if (popped) {
@@ -2367,6 +2357,7 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
 
                     ADD_GETLOCAL(ret, &dummy_line_node, 0, 0);
                     ADD_SETLOCAL(ret, &dummy_line_node, v->depth + 1, 1);
+                    ADD_INSN(ret, &dummy_line_node, nop);
                 }
 
                 pm_compile_node(iseq, (pm_node_t *)(scope_node->body), ret, src, popped, scope_node);
