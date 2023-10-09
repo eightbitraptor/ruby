@@ -33,6 +33,8 @@
 #define PM_PUTNIL_UNLESS_POPPED \
     if (!popped) ADD_INSN(ret, &dummy_line_node, putnil);
 
+#define TEMP_CONSTANT_IDENTIFIER ((pm_constant_id_t)(1 << 31))
+
 rb_iseq_t *
 pm_iseq_new_with_opt(pm_scope_node_t *node, pm_parser_t *parser, VALUE name, VALUE path, VALUE realpath,
                      int first_lineno, const rb_iseq_t *parent, int isolated_depth,
@@ -1459,17 +1461,14 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
 
           pm_constant_id_list_t locals;
           pm_constant_id_list_init(&locals);
-          pm_constant_id_list_append(&locals, ((pm_constant_id_t)(1<<31)));
+          pm_constant_id_list_append(&locals, TEMP_CONSTANT_IDENTIFIER);
           next_scope_node.locals = locals;
 
           ADD_LABEL(ret, retry_label);
 
           PM_COMPILE(for_node->collection);
-          ISEQ_COMPILE_DATA(iseq)->current_block = child_iseq = 
-              NEW_CHILD_ISEQ(&next_scope_node, make_name_for_block(iseq), 
-                      ISEQ_TYPE_BLOCK, lineno);
+          child_iseq = NEW_CHILD_ISEQ(&next_scope_node, make_name_for_block(iseq), ISEQ_TYPE_BLOCK, lineno);
           ADD_SEND_WITH_BLOCK(ret, &dummy_line_node, idEach, INT2FIX(0), child_iseq);
-
 
           if (popped) {
               ADD_INSN(ret, &dummy_line_node, pop);
@@ -2288,7 +2287,7 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
         for (size_t i = 0; i < size; i++) {
             pm_constant_id_t constant_id = locals.ids[i];
             ID local;
-            if (constant_id & (1 << 31)) {
+            if (constant_id & TEMP_CONSTANT_IDENTIFIER) {
                 local = rb_make_temporary_id(i);
             } else {
                 local = pm_constant_id_lookup(scope_node, constant_id);
