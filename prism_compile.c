@@ -2350,6 +2350,15 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
             ADD_INSN (ret, &dummy_line_node, nop);
             ADD_LABEL(ret, start);
 
+            if (PM_NODE_TYPE_P(scope_node->ast_node, PM_FOR_NODE)) {
+                pm_for_node_t *for_node = (pm_for_node_t *)scope_node->ast_node;
+                pm_local_variable_target_node_t *v = (pm_local_variable_target_node_t *)for_node->index;
+
+                ADD_GETLOCAL(ret, &dummy_line_node, 0, 0);
+                ADD_SETLOCAL(ret, &dummy_line_node, v->depth + 1, 1);
+                ADD_INSN(ret, &dummy_line_node, nop);
+            }
+
             if (scope_node->body) {
                 if (PM_NODE_TYPE_P(scope_node->ast_node, PM_FOR_NODE)) {
                     pm_for_node_t *for_node = (pm_for_node_t *)scope_node->ast_node;
