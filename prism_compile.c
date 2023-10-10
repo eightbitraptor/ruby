@@ -1453,8 +1453,10 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
           pm_for_node_t *for_node = (pm_for_node_t *)node;
 
           const rb_iseq_t *child_iseq;
+          const rb_iseq_t *prevblock = ISEQ_COMPILE_DATA(iseq)->current_block;
 
           LABEL *retry_label = NEW_LABEL(lineno);
+          LABEL *retry_end_l = NEW_LABEL(lineno);
 
           pm_scope_node_t next_scope_node;
           pm_scope_node_init((pm_node_t *)for_node, &next_scope_node, scope_node, parser);
@@ -1468,11 +1470,25 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
 
           PM_COMPILE(for_node->collection);
           child_iseq = NEW_CHILD_ISEQ(&next_scope_node, make_name_for_block(iseq), ISEQ_TYPE_BLOCK, lineno);
+          ISEQ_COMPILE_DATA(iseq)->current_block = child_iseq;
           ADD_SEND_WITH_BLOCK(ret, &dummy_line_node, idEach, INT2FIX(0), child_iseq);
+
+          INSN *iobj;
+          LINK_ELEMENT *last_elem = LAST_ELEMENT(ret);
+          iobj = IS_INSN(last_elem) ? (INSN *)last_elem : (INSN *)get_prev_insn((INSN*)last_elem);
+          while (INSN_OF(iobj) != BIN(send) &&
+                  INSN_OF(iobj) != BIN(invokesuper)) {
+              iobj = (INSN *)get_prev_insn(iobj);
+          }
+          ELEM_INSERT_NEXT(&iobj->link, (LINK_ELEMENT*)retry_end_l);
+
 
           if (popped) {
               ADD_INSN(ret, &dummy_line_node, pop);
           }
+
+          ISEQ_COMPILE_DATA(iseq)->current_block = prevblock;
+          ADD_CATCH_ENTRY(CATCH_TYPE_BREAK, retry_label, retry_end_l, child_iseq, retry_end_l);
 
           return;
       }
