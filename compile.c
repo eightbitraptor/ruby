@@ -975,6 +975,7 @@ rb_iseq_compile_prism_node(rb_iseq_t * iseq, pm_scope_node_t scope_node, pm_pars
     DECL_ANCHOR(ret);
     INIT_ANCHOR(ret);
 
+    // make this only done once per file rather than every time we compile a child node
     ID *constants = calloc(parser->constant_pool.size, sizeof(ID));
     rb_encoding *encoding = rb_enc_find(parser->encoding.name);
 

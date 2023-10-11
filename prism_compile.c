@@ -842,7 +842,7 @@ pm_compile_pattern(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const re
  *
  * iseq -            The current instruction sequence object (used for locals)
  * node -            The prism node to compile
- * ret -             The linked list of instruction sequences to append instructions onto
+ * ret -             The linked list of instructions to append instructions onto
  * popped -          True if compiling something with no side effects, so instructions don't
  *                   need to be added
  * scope_node - Stores parser and local information
@@ -2283,12 +2283,18 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
         pm_constant_id_list_t locals = scope_node->locals;
 
         pm_parameters_node_t *parameters_node = (pm_parameters_node_t *)scope_node->parameters;
-        pm_node_list_t requireds_list = PM_EMPTY_NODE_LIST;
         pm_node_list_t optionals_list = PM_EMPTY_NODE_LIST;
 
         if (parameters_node) {
-            requireds_list = parameters_node->requireds;
             optionals_list = parameters_node->optionals;
+            ISEQ_BODY(iseq)->param.lead_num = (int) parameters_node->requireds.size;
+            ISEQ_BODY(iseq)->param.opt_num = (int) optionals_list.size;
+        } else if (PM_NODE_TYPE_P(scope_node->ast_node, PM_FOR_NODE)) {
+            ISEQ_BODY(iseq)->param.lead_num = 1;
+            ISEQ_BODY(iseq)->param.opt_num = 0;
+        } else {
+            ISEQ_BODY(iseq)->param.lead_num = 0;
+            ISEQ_BODY(iseq)->param.opt_num = 0;
         }
 
         size_t size = locals.size;
@@ -2314,8 +2320,6 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
 
         scope_node->index_lookup_table = (void *)index_lookup_table;
 
-        ISEQ_BODY(iseq)->param.lead_num = (int)requireds_list.size;
-        ISEQ_BODY(iseq)->param.opt_num = (int)optionals_list.size;
         // TODO: Set all the other nums (good comment by lead_num illustrating what they are)
         ISEQ_BODY(iseq)->param.size = (unsigned int)size;
 
@@ -2361,10 +2365,9 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
 
             if (PM_NODE_TYPE_P(scope_node->ast_node, PM_FOR_NODE)) {
                 pm_for_node_t *for_node = (pm_for_node_t *)scope_node->ast_node;
-                pm_local_variable_target_node_t *v = (pm_local_variable_target_node_t *)for_node->index;
 
-                ADD_GETLOCAL(ret, &dummy_line_node, 0, 0);
-                ADD_SETLOCAL(ret, &dummy_line_node, v->depth + 1, 1);
+                ADD_GETLOCAL(ret, &dummy_line_node, 1, 0);
+                pm_compile_node(iseq, for_node->index, ret, src, popped, scope_node);
                 ADD_INSN(ret, &dummy_line_node, nop);
             }
 

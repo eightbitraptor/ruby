@@ -662,9 +662,6 @@ pm_arguments_validate_block(pm_parser_t *parser, pm_arguments_t *arguments, pm_b
 /* Scope node functions                                                       */
 /******************************************************************************/
 
-static pm_parameters_node_t *
-pm_parameters_node_create(pm_parser_t *parser);
-
 // Generate a scope node from the given node.
 void
 pm_scope_node_init(const pm_node_t *node, pm_scope_node_t *scope, pm_scope_node_t *previous, pm_parser_t *parser) {
@@ -13565,6 +13562,7 @@ parse_expression_prefix(pm_parser_t *parser, pm_binding_power_t binding_power) {
         case PM_TOKEN_KEYWORD_FOR: {
             parser_lex(parser);
             pm_token_t for_keyword = parser->previous;
+
             pm_node_t *index;
             pm_parser_scope_push_transparent(parser);
 
