@@ -4,13 +4,13 @@
 #undef NEW_ISEQ
 
 #define NEW_ISEQ(node, name, type, line_no) \
-    pm_new_child_iseq(iseq, (node), parser, rb_fstring(name), 0, (type), (line_no))
+    pm_new_child_iseq(iseq, (node), parser, rb_fstring(name), 0, (type), (line_no), NULL)
 
 #define OLD_CHILD_ISEQ NEW_CHILD_ISEQ
 #undef NEW_CHILD_ISEQ
 
-#define NEW_CHILD_ISEQ(node, name, type, line_no) \
-    pm_new_child_iseq(iseq, (node), parser, rb_fstring(name), iseq, (type), (line_no))
+#define NEW_CHILD_ISEQ(node, name, type, line_no, parent_context) \
+    pm_new_child_iseq(iseq, (node), parser, rb_fstring(name), iseq, (type), (line_no), parent_context)
 
 #define PM_COMPILE(node) \
     pm_compile_node(iseq, (node), ret, src, popped, compile_context)
@@ -36,7 +36,8 @@
 rb_iseq_t *
 pm_iseq_new_with_opt(pm_scope_node_t *node, pm_parser_t *parser, VALUE name, VALUE path, VALUE realpath,
                      int first_lineno, const rb_iseq_t *parent, int isolated_depth,
-                     enum rb_iseq_type type, const rb_compile_option_t *option);
+                     enum rb_iseq_type type, const rb_compile_option_t *option,
+                     pm_compile_context_t *parent_context);
 
 static VALUE
 parse_integer(const pm_integer_node_t *node)
@@ -575,7 +576,7 @@ pm_constant_id_lookup(pm_compile_context_t *compile_context, pm_constant_id_t co
 
 static rb_iseq_t *
 pm_new_child_iseq(rb_iseq_t *iseq, pm_scope_node_t * node, pm_parser_t *parser,
-               VALUE name, const rb_iseq_t *parent, enum rb_iseq_type type, int line_no)
+               VALUE name, const rb_iseq_t *parent, enum rb_iseq_type type, int line_no, pm_compile_context_t *parent_context)
 {
     debugs("[new_child_iseq]> ---------------------------------------\n");
     int isolated_depth = ISEQ_COMPILE_DATA(iseq)->isolated_depth;
@@ -583,7 +584,7 @@ pm_new_child_iseq(rb_iseq_t *iseq, pm_scope_node_t * node, pm_parser_t *parser,
             rb_iseq_path(iseq), rb_iseq_realpath(iseq),
             line_no, parent,
             isolated_depth ? isolated_depth + 1 : 0,
-            type, ISEQ_COMPILE_DATA(iseq)->option);
+            type, ISEQ_COMPILE_DATA(iseq)->option, parent_context);
     debugs("[new_child_iseq]< ---------------------------------------\n");
     return ret_iseq;
 }
@@ -1014,7 +1015,7 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
             pm_scope_node_t scope_node;
             pm_scope_node_init(call_node->block, &scope_node);
 
-            const rb_iseq_t *block_iseq = NEW_CHILD_ISEQ(&scope_node, make_name_for_block(iseq), ISEQ_TYPE_BLOCK, lineno);
+            const rb_iseq_t *block_iseq = NEW_CHILD_ISEQ(&scope_node, make_name_for_block(iseq), ISEQ_TYPE_BLOCK, lineno, compile_context);
             ISEQ_COMPILE_DATA(iseq)->current_block = block_iseq;
             ADD_SEND_WITH_BLOCK(ret, &dummy_line_node, method_id, INT2FIX(orig_argc), block_iseq);
         }
@@ -1050,7 +1051,7 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
 
         VALUE class_name = rb_str_freeze(rb_sprintf("<class:%"PRIsVALUE">", rb_id2str(class_id)));
 
-        const rb_iseq_t *class_iseq = NEW_CHILD_ISEQ(&scope_node, class_name, ISEQ_TYPE_CLASS, lineno);
+        const rb_iseq_t *class_iseq = NEW_CHILD_ISEQ(&scope_node, class_name, ISEQ_TYPE_CLASS, lineno, compile_context);
 
         // TODO: Once we merge constant path nodes correctly, fix this flag
         const int flags = VM_DEFINECLASS_TYPE_CLASS |
@@ -1766,7 +1767,7 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
         pm_scope_node_t scope_node;
         pm_scope_node_init((pm_node_t *)node, &scope_node);
 
-        const rb_iseq_t *block = NEW_CHILD_ISEQ(&scope_node, make_name_for_block(iseq), ISEQ_TYPE_BLOCK, lineno);
+        const rb_iseq_t *block = NEW_CHILD_ISEQ(&scope_node, make_name_for_block(iseq), ISEQ_TYPE_BLOCK, lineno, compile_context);
         VALUE argc = INT2FIX(0);
 
         ADD_INSN1(ret, &dummy_line_node, putspecialobject, INT2FIX(VM_SPECIAL_OBJECT_VMCORE));
@@ -2008,7 +2009,7 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
         ID module_id = pm_constant_id_lookup(compile_context, module_node->name);
         VALUE module_name = rb_str_freeze(rb_sprintf("<module:%"PRIsVALUE">", rb_id2str(module_id)));
 
-        const rb_iseq_t *module_iseq = NEW_CHILD_ISEQ(&scope_node, module_name, ISEQ_TYPE_CLASS, lineno);
+        const rb_iseq_t *module_iseq = NEW_CHILD_ISEQ(&scope_node, module_name, ISEQ_TYPE_CLASS, lineno, compile_context);
 
         const int flags = VM_DEFINECLASS_TYPE_MODULE |
             pm_compile_class_path(ret, iseq, module_node->constant_path, &dummy_line_node, src, false, compile_context);
