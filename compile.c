@@ -977,7 +977,7 @@ typedef struct pm_compile_context {
 static VALUE rb_translate_prism(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, pm_compile_context_t *compile_context);
 
 VALUE
-rb_iseq_compile_prism_node(rb_iseq_t * iseq, const pm_node_t *node, pm_parser_t *parser)
+rb_iseq_compile_prism_node(rb_iseq_t * iseq, const pm_node_t *node, pm_parser_t *parser, pm_compile_context_t *parent_context)
 {
     DECL_ANCHOR(ret);
     INIT_ANCHOR(ret);
@@ -985,16 +985,21 @@ rb_iseq_compile_prism_node(rb_iseq_t * iseq, const pm_node_t *node, pm_parser_t 
     ID *constants = calloc(parser->constant_pool.size, sizeof(ID));
     rb_encoding *encoding = rb_enc_find(parser->encoding.name);
 
-    for (uint32_t index = 0; index < parser->constant_pool.size; index++) {
-        pm_constant_t *constant = &parser->constant_pool.constants[index];
-        constants[index] = rb_intern3((const char *) constant->start, constant->length, encoding);
-    }
+    pm_compile_context_t compile_context;
+    compile_context.parser = parser;
+    compile_context.previous = NULL;
 
-    pm_compile_context_t compile_context = {
-        .parser = parser,
-        .previous = NULL,
-        .constants = constants
-    };
+    if (parent_context) {
+        compile_context.previous = parent_context;
+    } else {
+        // Only index the constants for the first compile context created
+        for (uint32_t index = 0; index < parser->constant_pool.size; index++) {
+            pm_constant_t *constant = &parser->constant_pool.constants[index];
+            constants[index] = rb_intern3((const char *) constant->start, constant->length, encoding);
+        }
+
+        compile_context.constants = constants;
+    }
 
     CHECK(rb_translate_prism(iseq, node, ret, &compile_context));
     free(constants);

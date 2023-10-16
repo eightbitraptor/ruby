@@ -939,12 +939,14 @@ rb_iseq_new_with_opt(const rb_ast_body_t *ast, VALUE name, VALUE path, VALUE rea
     return iseq_translate(iseq);
 }
 
-VALUE rb_iseq_compile_prism_node(rb_iseq_t * iseq, const pm_node_t *node, pm_parser_t *parser);
+struct pm_compile_context;
+VALUE rb_iseq_compile_prism_node(rb_iseq_t * iseq, const pm_node_t *node, pm_parser_t *parser, struct pm_compile_context *parent_context);
 
 rb_iseq_t *
 pm_iseq_new_with_opt(pm_node_t *node, pm_parser_t *parser, VALUE name, VALUE path, VALUE realpath,
                      int first_lineno, const rb_iseq_t *parent, int isolated_depth,
-                     enum rb_iseq_type type, const rb_compile_option_t *option)
+                     enum rb_iseq_type type, const rb_compile_option_t *option, 
+                     struct pm_compile_context *parent_context)
 {
     rb_iseq_t *iseq = iseq_alloc();
     VALUE script_lines = Qnil;
@@ -973,7 +975,7 @@ pm_iseq_new_with_opt(pm_node_t *node, pm_parser_t *parser, VALUE name, VALUE pat
     prepare_iseq_build(iseq, name, path, realpath, first_lineno, &code_loc, node_id,
             parent, isolated_depth, type, script_lines, option);
 
-    rb_iseq_compile_prism_node(iseq, node, parser);
+    rb_iseq_compile_prism_node(iseq, node, parser, parent_context);
 
     finish_iseq_build(iseq);
 
@@ -1444,7 +1446,7 @@ iseqw_s_compile_prism(int argc, VALUE *argv, VALUE self)
     prepare_iseq_build(iseq, name, file, path, first_lineno, &node_location, node_id,
                        parent, 0, (enum rb_iseq_type)iseq_type, Qnil, &option);
 
-    rb_iseq_compile_prism_node(iseq, node, &parser);
+    rb_iseq_compile_prism_node(iseq, node, &parser, NULL);
 
     finish_iseq_build(iseq);
     pm_node_destroy(&parser, node);
