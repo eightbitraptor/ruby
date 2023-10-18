@@ -544,6 +544,9 @@ pm_lookup_local_index(rb_iseq_t *iseq, pm_scope_node_t *scope_node, pm_constant_
     st_data_t local_index;
 
     int num_params = ISEQ_BODY(iseq)->param.size;
+    if(PM_NODE_TYPE_P(scope_node->ast_node, PM_FOR_NODE)) {
+        scope_node = scope_node->previous;
+    }
 
     if (!st_lookup(scope_node->index_lookup_table, constant_id, &local_index)) {
         rb_bug("This local does not exist");
@@ -2366,21 +2369,12 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
             if (PM_NODE_TYPE_P(scope_node->ast_node, PM_FOR_NODE)) {
                 pm_for_node_t *for_node = (pm_for_node_t *)scope_node->ast_node;
 
-                ADD_GETLOCAL(ret, &dummy_line_node, 1, 0);
+                ADD_GETLOCAL(ret, &dummy_line_node, 0, 0);
                 pm_compile_node(iseq, for_node->index, ret, src, popped, scope_node);
                 ADD_INSN(ret, &dummy_line_node, nop);
             }
 
             if (scope_node->body) {
-                if (PM_NODE_TYPE_P(scope_node->ast_node, PM_FOR_NODE)) {
-                    pm_for_node_t *for_node = (pm_for_node_t *)scope_node->ast_node;
-                    pm_local_variable_target_node_t *v = (pm_local_variable_target_node_t *)for_node->index;
-
-                    ADD_GETLOCAL(ret, &dummy_line_node, 0, 0);
-                    ADD_SETLOCAL(ret, &dummy_line_node, v->depth + 1, 1);
-                    ADD_INSN(ret, &dummy_line_node, nop);
-                }
-
                 pm_compile_node(iseq, (pm_node_t *)(scope_node->body), ret, src, popped, scope_node);
             }
             else {
