@@ -5585,8 +5585,6 @@ defined_expr0(rb_iseq_t *iseq, LINK_ANCHOR *const ret,
             switch (nd_type(get_nd_recv(node))) {
               case NODE_CALL:
               case NODE_OPCALL:
-              case NODE_VCALL:
-              case NODE_FCALL:
               case NODE_ATTRASGN:
                 ADD_INSNL(ret, line_node, branchunless, lfinish[2]);
                 compile_call(iseq, ret, get_nd_recv(node), nd_type(get_nd_recv(node)), line_node, 0, true);
