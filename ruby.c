@@ -2427,7 +2427,12 @@ process_options(int argc, char **argv, ruby_cmdline_options_t *opt)
                 pm_options_filepath_set(&options, RSTRING_PTR(opt->script_name));
             }
 
-            iseq = rb_iseq_new_main_prism(&input, &options, path);
+            rb_binding_t *toplevel_binding;
+            GetBindingPtr(rb_const_get(rb_cObject, rb_intern("TOPLEVEL_BINDING")),
+                          toplevel_binding);
+            const struct rb_block *base_block = toplevel_context(toplevel_binding);
+
+            iseq = rb_iseq_new_main_prism(&input, &options, path, vm_block_iseq(base_block));
 
             pm_string_free(&input);
             pm_options_free(&options);

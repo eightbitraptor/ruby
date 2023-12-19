@@ -1398,16 +1398,19 @@ iseqw_s_compile(int argc, VALUE *argv, VALUE self)
     return iseqw_new(rb_iseq_compile_with_option(src, file, path, line, opt));
 }
 
-static void
-iseqw_s_compile_prism_compile(pm_parser_t *parser, VALUE opt, rb_iseq_t *iseq, VALUE file, VALUE path, int first_lineno)
+static rb_iseq_t *
+iseqw_s_compile_prism_compile(pm_parser_t *parser, VALUE opt, rb_iseq_t *parent, VALUE file, VALUE path, int first_lineno)
 {
+    rb_iseq_t *iseq = iseq_alloc();
     pm_node_t *node = pm_parse(parser);
     rb_code_location_t code_location;
     pm_code_location(&code_location, &parser->newline_list, &node->location);
 
     rb_compile_option_t option;
     make_compile_option(&option, opt);
-    prepare_iseq_build(iseq, rb_fstring_lit("<compiled>"), file, path, first_lineno, &code_location, -1, NULL, 0, ISEQ_TYPE_TOP, Qnil, &option);
+    prepare_iseq_build(iseq, rb_fstring_lit("<compiled>"), file, path, first_lineno, &code_location, -1,
+            parent,
+            0, ISEQ_TYPE_TOP, Qnil, &option);
 
     pm_scope_node_t scope_node;
     pm_scope_node_init(node, &scope_node, NULL, parser);
@@ -1415,6 +1418,7 @@ iseqw_s_compile_prism_compile(pm_parser_t *parser, VALUE opt, rb_iseq_t *iseq, V
 
     finish_iseq_build(iseq);
     pm_node_destroy(parser, node);
+    return iseq;
 }
 
 static VALUE
@@ -1460,8 +1464,7 @@ iseqw_s_compile_prism(int argc, VALUE *argv, VALUE self)
         pm_parser_init(&parser, (const uint8_t *) RSTRING_PTR(src), RSTRING_LEN(src), &options);
     }
 
-    rb_iseq_t *iseq = iseq_alloc();
-    iseqw_s_compile_prism_compile(&parser, opt, iseq, file, path, start_line);
+    rb_iseq_t * iseq = iseqw_s_compile_prism_compile(&parser, opt, NULL, file, path, start_line);
     pm_parser_free(&parser);
     pm_options_free(&options);
 
@@ -1491,8 +1494,7 @@ iseqw_s_compile_file_prism(int argc, VALUE *argv, VALUE self)
     pm_parser_t parser;
     pm_parser_init(&parser, pm_string_source(&input), pm_string_length(&input), &options);
 
-    rb_iseq_t *iseq = iseq_alloc();
-    iseqw_s_compile_prism_compile(&parser, opt, iseq, file, rb_realpath_internal(Qnil, file, 1), 1);
+    rb_iseq_t * iseq = iseqw_s_compile_prism_compile(&parser, opt, NULL, file, rb_realpath_internal(Qnil, file, 1), 1);
     pm_parser_free(&parser);
     pm_string_free(&input);
     pm_options_free(&options);
@@ -1501,18 +1503,22 @@ iseqw_s_compile_file_prism(int argc, VALUE *argv, VALUE self)
 }
 
 rb_iseq_t *
-rb_iseq_new_main_prism(pm_string_t *input, pm_options_t *options, VALUE path)
+rb_iseq_new_main_prism(pm_string_t *input, pm_options_t *options, VALUE path, const rb_iseq_t * parent)
 {
     pm_parser_t parser;
     pm_parser_init(&parser, pm_string_source(input), pm_string_length(input), options);
 
-    if (NIL_P(path)) path = rb_fstring_lit("<compiled>");
+    if (NIL_P(path)) path = rb_fstring_lit("<main>");
     int start_line = 0;
     pm_options_line_set(options, start_line);
 
-    rb_iseq_t *iseq = iseq_alloc();
-    iseqw_s_compile_prism_compile(&parser, Qnil, iseq, path, path, start_line);
+    pm_node_t *node = pm_parse(&parser);
+    pm_scope_node_t scope_node;
+    pm_scope_node_init(node, &scope_node, NULL, &parser);
 
+    // TODO: handle compile options with --parser=prism
+    rb_iseq_t *iseq = pm_iseq_new_with_opt(&scope_node, &parser, path, path, 
+            path, start_line, parent, 0, ISEQ_TYPE_MAIN, &COMPILE_OPTION_DEFAULT);
     pm_parser_free(&parser);
     return iseq;
 }

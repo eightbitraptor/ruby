@@ -2199,7 +2199,6 @@ pm_scope_node_init(const pm_node_t *node, pm_scope_node_t *scope, pm_scope_node_
             pm_block_node_t *cast = (pm_block_node_t *) node;
             scope->body = cast->body;
             scope->locals = cast->locals;
-            scope->local_depth_offset = 0;
             scope->parameters = cast->parameters;
             break;
         }
