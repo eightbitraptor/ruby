@@ -796,6 +796,9 @@ pm_lookup_local_index(rb_iseq_t *iseq, pm_scope_node_t *scope_node, pm_constant_
 {
     pm_local_index_t lindex = {0};
     int level = (start_depth) ? start_depth : 0;
+    for (int i = 0; i < level; i++) {
+        scope_node = scope_node->previous;
+    }
     st_data_t local_index;
 
     while(!st_lookup(scope_node->index_lookup_table, constant_id, &local_index)) {
