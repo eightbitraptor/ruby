@@ -795,8 +795,15 @@ static pm_local_index_t
 pm_lookup_local_index(rb_iseq_t *iseq, pm_scope_node_t *scope_node, pm_constant_id_t constant_id, int start_depth)
 {
     pm_local_index_t lindex = {0};
-    int level = (start_depth) ? start_depth : 0;
+    int level = ((start_depth) ? start_depth : 0) + (int)scope_node->skip_local_lookup;
     st_data_t local_index;
+
+    for (int i = 0; i < level; i++) {
+        scope_node = scope_node->previous;
+        if (!scope_node) {
+            rb_bug("Not enough scopes. Incorrect starting depth for node");
+        }
+    }
 
     while(!st_lookup(scope_node->index_lookup_table, constant_id, &local_index)) {
         level++;
@@ -2310,6 +2317,7 @@ pm_scope_node_init(const pm_node_t *node, pm_scope_node_t *scope, pm_scope_node_
     scope->body = NULL;
     scope->constants = NULL;
     scope->local_table_for_iseq_size = 0;
+    scope->skip_local_lookup = false;
 
     if (previous) {
         scope->constants = previous->constants;
@@ -2346,6 +2354,7 @@ pm_scope_node_init(const pm_node_t *node, pm_scope_node_t *scope, pm_scope_node_
         case PM_FOR_NODE: {
             pm_for_node_t *cast = (pm_for_node_t *)node;
             scope->body = (pm_node_t *)cast->statements;
+            scope->skip_local_lookup = true;
             break;
         }
         case PM_INTERPOLATED_REGULAR_EXPRESSION_NODE: {
@@ -2380,11 +2389,13 @@ pm_scope_node_init(const pm_node_t *node, pm_scope_node_t *scope, pm_scope_node_
         case PM_RESCUE_NODE: {
             pm_rescue_node_t *cast = (pm_rescue_node_t *)node;
             scope->body = (pm_node_t *)cast->statements;
+            scope->skip_local_lookup = true;
             break;
         }
         case PM_RESCUE_MODIFIER_NODE: {
             pm_rescue_modifier_node_t *cast = (pm_rescue_modifier_node_t *)node;
             scope->body = (pm_node_t *)cast->rescue_expression;
+            scope->skip_local_lookup = true;
             break;
         }
         case PM_SINGLETON_CLASS_NODE: {

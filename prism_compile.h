@@ -30,6 +30,7 @@ typedef struct pm_scope_node {
 
     ID *constants;
     st_table *index_lookup_table;
+    bool skip_local_lookup;
 } pm_scope_node_t;
 
 void pm_scope_node_init(const pm_node_t *node, pm_scope_node_t *scope, pm_scope_node_t *previous, pm_parser_t *parser);
