@@ -4031,6 +4031,11 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
             PM_COMPILE_NOT_POPPED(case_node->predicate);
         }
         LABEL *end_label = NEW_LABEL(lineno);
+        LABEL *else_label = NEW_LABEL(lineno);
+        VALUE literals = rb_hash_new();
+        RHASH_TBL_RAW(literals)->type = &cdhash_type;
+
+        int only_special_literals = 1;
 
         pm_node_list_t conditions = case_node->conditions;
 
@@ -4047,12 +4052,23 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
 
                 if (PM_NODE_TYPE_P(condition_node, PM_SPLAT_NODE)) {
                     int checkmatch_type = has_predicate ? VM_CHECKMATCH_TYPE_CASE : VM_CHECKMATCH_TYPE_WHEN;
+                    only_special_literals = 0;
                     ADD_INSN (ret, &dummy_line_node, dup);
                     PM_COMPILE_NOT_POPPED(condition_node);
                     ADD_INSN1(ret, &dummy_line_node, checkmatch,
                               INT2FIX(checkmatch_type | VM_CHECKMATCH_ARRAY));
                 }
                 else {
+                    if (has_predicate) {
+                        if (only_special_literals &&
+                            ISEQ_COMPILE_DATA(iseq)->option->specialized_instruction) {
+                            ADD_INSN(ret, &dummy_line_node, dup);
+                            ADD_INSN2(ret, &dummy_line_node, opt_case_dispatch, literals, else_label);
+                            RB_OBJ_WRITTEN(iseq, Qundef, literals);
+                            LABEL_REF(else_label);
+                        }
+                        only_special_literals = 0;
+                    }
                     PM_COMPILE_NOT_POPPED(condition_node);
                     if (has_predicate) {
                         ADD_INSN1(ret, &dummy_line_node, topn, INT2FIX(1));
@@ -4063,13 +4079,13 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
                 ADD_INSNL(ret, &dummy_line_node, branchif, label);
             }
         }
-
+        ADD_LABEL(ret, else_label);
         if (has_predicate) {
             PM_POP;
         }
 
         if (case_node->consequent) {
-             PM_COMPILE((pm_node_t *)case_node->consequent);
+            PM_COMPILE((pm_node_t *)case_node->consequent);
         }
         else {
             PM_PUTNIL_UNLESS_POPPED;
@@ -4094,6 +4110,8 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
 
             ADD_INSNL(ret, &dummy_line_node, jump, end_label);
         }
+
+
 
         ADD_LABEL(ret, end_label);
         return;
