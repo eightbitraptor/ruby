@@ -2634,6 +2634,43 @@ end
     #  Miscellaneous                                                           #
     ############################################################################
 
+    def test_eval
+      assert_prism_eval("eval('1 + 1')", raw: true)
+      assert_prism_eval("a = 1; eval('a + 1')", raw: true)
+
+      assert_prism_eval(<<~CODE, raw: true)
+        def foo(**bar)
+          eval("bar")
+        end
+        foo(bar: 10)
+      CODE
+
+      assert_prism_eval(<<~CODE, raw: true)
+        def bar(baz:)
+          eval("baz")
+        end
+        bar(baz: 10)
+      CODE
+
+      assert_prism_eval(<<~CODE, raw: true)
+        [1].each do |a|
+          [2].each do |b|
+            c = 3
+            eval("a + b + c")
+          end
+        end
+      CODE
+
+      assert_prism_eval(<<~CODE, raw: true)
+        def foo(b)
+          eval("bar", b)
+        end
+
+        bar = :ok
+        foo(binding)
+      CODE
+    end
+
     def test_ScopeNode
       assert_separately(%w[], <<~'RUBY')
         def compare_eval(source)
