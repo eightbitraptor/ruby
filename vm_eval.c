@@ -1646,6 +1646,7 @@ static const rb_iseq_t *
 pm_eval_make_iseq(VALUE src, VALUE fname, int line,
         const struct rb_block *base_block)
 {
+    rb_bug("NO");
     const rb_iseq_t *const parent = vm_block_iseq(base_block);
     const rb_iseq_t *iseq = parent;
     int ln;
