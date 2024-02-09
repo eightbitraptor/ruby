@@ -1753,9 +1753,9 @@ static const rb_iseq_t *
 eval_make_iseq(VALUE src, VALUE fname, int line,
                const struct rb_block *base_block)
 {
-    if (*rb_ruby_prism_ptr()) {
-        return pm_eval_make_iseq(src, fname, line, base_block);
-    }
+    /* if (*rb_ruby_prism_ptr()) { */
+    /*     return pm_eval_make_iseq(src, fname, line, base_block); */
+    /* } */
     const VALUE parser = rb_parser_new();
     const rb_iseq_t *const parent = vm_block_iseq(base_block);
     rb_iseq_t *iseq = NULL;
