@@ -2639,17 +2639,17 @@ end
       assert_prism_eval("a = 1; eval('a + 1')", raw: true)
 
       assert_prism_eval(<<~CODE, raw: true)
-        def foo(**bar)
+        def prism_eval_splat(**bar)
           eval("bar")
         end
-        foo(bar: 10)
+        prism_eval_splat(bar: 10)
       CODE
 
       assert_prism_eval(<<~CODE, raw: true)
-        def bar(baz:)
+        def prism_eval_keywords(baz:)
           eval("baz")
         end
-        bar(baz: 10)
+        prism_eval_keywords(baz: 10)
       CODE
 
       assert_prism_eval(<<~CODE, raw: true)
@@ -2662,12 +2662,12 @@ end
       CODE
 
       assert_prism_eval(<<~CODE, raw: true)
-        def foo(b)
+        def prism_eval_binding(b)
           eval("bar", b)
         end
 
         bar = :ok
-        foo(binding)
+        prism_eval_binding(binding)
       CODE
     end
 
