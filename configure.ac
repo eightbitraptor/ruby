@@ -29,6 +29,7 @@ m4_include([tool/m4/ruby_defint.m4])dnl
 m4_include([tool/m4/ruby_dtrace_available.m4])dnl
 m4_include([tool/m4/ruby_dtrace_postprocess.m4])dnl
 m4_include([tool/m4/ruby_func_attribute.m4])dnl
+m4_include([tool/m4/ruby_link_gcimpl.m4])dnl
 m4_include([tool/m4/ruby_mingw32.m4])dnl
 m4_include([tool/m4/ruby_prepend_option.m4])dnl
 m4_include([tool/m4/ruby_prog_gnu_ld.m4])dnl

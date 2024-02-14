@@ -1915,6 +1915,10 @@ calloc1(size_t n)
 rb_objspace_t *
 rb_objspace_alloc(void)
 {
+    bool something = extracted_function(Qnil);
+    if (something) {
+        fprintf(stderr, "linked extracted function\n");
+    }
     rb_objspace_t *objspace = calloc1(sizeof(rb_objspace_t));
     objspace->flags.measure_gc = 1;
     malloc_limit = gc_params.malloc_limit_min;

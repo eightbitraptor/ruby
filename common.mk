@@ -1148,6 +1148,9 @@ verconf.h: $(srcdir)/template/verconf.h.tmpl $(tooldir)/generic_erb.rb $(RBCONFI
 
 ruby-glommed.$(OBJEXT): $(OBJS)
 
+libgcimpl.$(SOEXT): gcimpl.c
+	$(Q) $(CC) -dynamic $(CFLAGS) $(INCFLAGS) $(CPPFLAGS) $(COUTFLAG)libgcimp.$(SOEXT) -c $(CSRCFLAG)$(srcdir)/gcimpl.c
+
 $(OBJS):  {$(VPATH)}config.h {$(VPATH)}missing.h
 
 INSNS2VMOPT = --srcdir="$(srcdir)"
