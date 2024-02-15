@@ -3515,6 +3515,7 @@ LIBRUBYGC_SONAME='lib$(RUBYGC_SO_NAME).$(SOEXT).$(RUBY_API_VERSION)'
 LIBRUBYGC_ALIASES='lib$(RUBYGC_SO_NAME).$(SOEXT)'
 
 ENABLE_SHARED=no
+ENABLE_SHARED_GC=no
 
 libprefix=${multiarch+'$(archlibdir)'}${multiarch-'$(libdir)'}
 LIBRUBY_RELATIVE=${load_relative-no}
@@ -3526,10 +3527,10 @@ AC_ARG_ENABLE(shared_gc,
 AS_CASE("$enable_shared_gc", [yes], [
   LIBRUBYGC='$(LIBRUBYGC_SO)'
   LIBRUBYGCARG_SHARED='-l$(RUBYGC_SO_NAME)'
-  LIBRUBYGCARG='$(LIBRUBYGCARG_SHARED)'
+  LIBRUBYARG='$(LIBRUBYGCARG_SHARED)'
   LIBRUBYGC_RELATIVE=no
   test -z "$CCDLFLAGS" || CFLAGS="$CFLAGS $CCDLFLAGS"
-  ENABLE_SHARED=yes
+  ENABLE_SHARED_GC=yes
 
   # libdir can be overridden in config.site file (on OpenSUSE at least).
   libdir_basename=lib
@@ -3550,7 +3551,7 @@ AS_CASE("$enable_shared_gc", [yes], [
       RUBY_APPEND_OPTIONS(LDFLAGS, [${linker_flag}--no-as-needed])
   ])
 
-  #AS_CASE(["$target_os"],
+  AS_CASE(["$target_os"],
   #  [linux* | gnu* | k*bsd*-gnu | atheos* | kopensolaris*-gnu | haiku*], [
   #      RUBY_APPEND_OPTIONS(LIBRUBY_DLDFLAGS, ['-Wl,-soname,$(LIBRUBY_SONAME)' "$LDFLAGS_OPTDIR"])
   #      LIBRUBY_ALIASES='$(LIBRUBY_SONAME) lib$(RUBY_SO_NAME).$(SOEXT)'
@@ -3560,27 +3561,27 @@ AS_CASE("$enable_shared_gc", [yes], [
   #          LIBRUBY_RELATIVE=yes
   #      ])
   #      ],
-  #  [darwin*], [
-  #      LIBRUBY_SO='lib$(RUBY_SO_NAME).$(SOEXT)'
-  #      LIBRUBY_SONAME='$(LIBRUBY_SO)'
-  #      LIBRUBY_ALIASES='lib$(RUBY_INSTALL_NAME).$(SOEXT)'
-  #      AS_IF([test "$load_relative" = yes], [
-  #          libprefix="@executable_path/../${libdir_basename}"
-  #          LIBRUBY_RELATIVE=yes
-  #      ])
+  [darwin*], [
+      LIBRUBYGC_SO='lib$(RUBYGC_SO_NAME).$(SOEXT)'
+      LIBRUBYGC_SONAME='$(LIBRUBYGC_SO)'
+      LIBRUBYGC_ALIASES='lib$(RUBY_INSTALL_NAME)gc.$(SOEXT)'
+      AS_IF([test "$load_relative" = yes], [
+          libprefix="@executable_path/../${libdir_basename}"
+          LIBRUBY_RELATIVE=yes
+      ])
 
-  #      LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS -install_name ${libprefix}"'/$(LIBRUBY_SONAME)'
-  #      LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-compatibility_version $(RUBY_API_VERSION)'
-  #      LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-current_version $(RUBY_PROGRAM_VERSION)'
+        LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS -install_name ${libprefix}"'/$(LIBRUBYGC_SONAME)'
+        LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-compatibility_version $(RUBY_API_VERSION)'
+        LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-current_version $(RUBY_PROGRAM_VERSION)'
 
-  #      AS_IF([test "$visibility_option" = ld], [
-  #          LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-Wl,-unexported_symbol,_Init_*'
-  #          LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-Wl,-unexported_symbol,_ruby_static_id_*'
-  #          LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-Wl,-unexported_symbol,*_threadptr_*'
-  #      ])
-  #      LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "' $(XLDFLAGS)'
-  #      ],
-  #    )
+        #AS_IF([test "$visibility_option" = ld], [
+        #    LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-Wl,-unexported_symbol,_Init_*'
+        #    LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-Wl,-unexported_symbol,_ruby_static_id_*'
+        #    LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "'-Wl,-unexported_symbol,*_threadptr_*'
+        #])
+        LIBRUBY_DLDFLAGS="$LIBRUBY_DLDFLAGS "' $(XLDFLAGS)'
+        ],
+      )
 ], [
     AC_MSG_NOTICE([======== shared gc is not enabled ============])
                                ])
@@ -4306,6 +4307,7 @@ AC_SUBST(LIBRUBY)
 AC_SUBST(LIBRUBYARG)
 AC_SUBST(LIBRUBYARG_STATIC)
 AC_SUBST(LIBRUBYARG_SHARED)
+AC_SUBST(LIBRUBYGCARG_SHARED)
 AC_SUBST(LIBRUBYGC_SO)
 AC_SUBST(SOLIBS)
 AC_SUBST(DLDLIBS)
@@ -4736,6 +4738,7 @@ config_summary "compiler"            "$CC"
 config_summary "with thread"         "$THREAD_MODEL"
 config_summary "with coroutine"      "$coroutine_type"
 config_summary "enable shared libs"  "$ENABLE_SHARED"
+config_summary "enable shared gc"    "$ENABLE_SHARED_GC"
 config_summary "dynamic library ext" "$DLEXT"
 config_summary "CFLAGS"              "$cflags"
 config_summary "CPPFLAGS"            "$cppflags"
