@@ -3536,6 +3536,7 @@ AS_CASE("$enable_shared_gc", [yes], [
   LIBRUBYGCARG='$(LIBRUBYGCARG_SHARED)'
   LIBRUBY_RELATIVE=no
   ENABLE_SHARED_GC=yes
+  LIBRUBYGC_CFLAGS=-fPIC
 
   # libdir can be overridden in config.site file (on OpenSUSE at least).
   libdir_basename=lib
@@ -3558,6 +3559,7 @@ AS_CASE("$enable_shared_gc", [yes], [
       [AC_MSG_ERROR(["--enable-shared-gc was passed but ${target_os} doesn't support this option.])]
   )
   ])
+AC_SUBST(LIBRUBYGC_CFLAGS)
 
 AC_ARG_ENABLE(shared,
        AS_HELP_STRING([--enable-shared], [build a shared library for Ruby]),
@@ -3683,6 +3685,7 @@ AS_CASE("$enable_shared", [yes], [
 	])
 ], [
   LIBRUBYARG_SHARED=
+  XLDPIEFLAGS=
 
   # enable PIE if possible
   AC_ARG_ENABLE(pie,
@@ -3701,7 +3704,7 @@ AS_CASE("$enable_shared", [yes], [
 	RUBY_TRY_LDFLAGS([$pie], [], [pie=])
 	AS_IF([test "x$pie" != x], [
 	  RUBY_APPEND_OPTION(XCFLAGS, -fPIE)
-	  RUBY_APPEND_OPTION(XLDFLAGS, $pie)
+	  RUBY_APPEND_OPTION(XLDPIEFLAGS, $pie)
 	  break
 	])
       done
@@ -3709,6 +3712,7 @@ AS_CASE("$enable_shared", [yes], [
     ])
   ])
 ])
+AC_SUBST(XLDPIEFLAGS)
 AS_IF([test "$enable_rpath" = yes], [
     test -z "$LIBRUBY_RPATHFLAGS" || LIBRUBY_RPATHFLAGS="$LIBRUBY_RPATHFLAGS "
     rpathflag="${RPATHFLAG}"
