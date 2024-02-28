@@ -2451,7 +2451,7 @@ extout = #{$extout && $extout.quote}
 extout_prefix = #{$extout_prefix}
 target_prefix = #{target_prefix}
 LOCAL_LIBS = #{$LOCAL_LIBS}
-LIBS = #{$LIBRUBYARG} #{$libs} #{$LIBS}
+LIBS = #{$LIBRUBYARG} #{$LIBRUBYGCARG} #{$libs} #{$LIBS}
 ORIG_SRCS = #{orig_srcs.collect(&File.method(:basename)).join(' ')}
 SRCS = $(ORIG_SRCS) #{(srcs - orig_srcs).collect(&File.method(:basename)).join(' ')}
 OBJS = #{$objs.join(" ")}
@@ -2673,6 +2673,7 @@ site-install-rb: install-rb
     $makefile_created = false
     $arg_config = []
     $enable_shared = config['ENABLE_SHARED'] == 'yes'
+    $enable_shared_gc = config['ENABLE_SHARED_GC'] == 'yes'
     $defs = []
     $extconf_h = nil
     $config_dirs = {}
@@ -2708,6 +2709,7 @@ site-install-rb: install-rb
     $ASMEXT = config_string('ASMEXT', &:dup) || 'S'
     $LIBS = "#{config['LIBS']} #{config['DLDLIBS']}"
     $LIBRUBYARG = ""
+    $LIBRUBYGCARG = ""
     $LIBRUBYARG_STATIC = config['LIBRUBYARG_STATIC']
     $LIBRUBYARG_SHARED = config['LIBRUBYARG_SHARED']
     $LIBRUBYGCARG_STATIC = config['LIBRUBYGCARG_STATIC']
@@ -2725,6 +2727,10 @@ site-install-rb: install-rb
     $libs = ""
     if $enable_shared or RbConfig.expand(config["LIBRUBY"].dup) != RbConfig.expand(config["LIBRUBY_A"].dup)
       $LIBRUBYARG = config['LIBRUBYARG']
+    end
+
+    if $enable_shared_gc or RbConfig.expand(config["LIBRUBYGC"].dup) != RbConfig.expand(config["LIBRUBYGC_A"].dup)
+      $LIBRUBYGCARG = config['LIBRUBYGCARG']
     end
 
     $LOCAL_LIBS = ""
@@ -2810,6 +2816,7 @@ MESSAGE
   $ruby = arg_config("--ruby", File.join(RbConfig::CONFIG["bindir"], CONFIG["ruby_install_name"]))
 
   RbConfig.expand(CONFIG["RUBY_SO_NAME"])
+  RbConfig.expand(CONFIG["RUBYGC_SO_NAME"])
 
   # :startdoc:
 
