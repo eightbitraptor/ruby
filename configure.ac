@@ -3537,6 +3537,7 @@ AS_CASE("$enable_shared_gc", [yes], [
   LIBRUBY_RELATIVE=no
   ENABLE_SHARED_GC=yes
   LIBRUBYGC_CFLAGS=-fPIC
+  LIBRUBY_LINK='-l$(LIBRUBYGCARG_SHARED)'
 
   # libdir can be overridden in config.site file (on OpenSUSE at least).
   libdir_basename=lib
@@ -3558,8 +3559,11 @@ AS_CASE("$enable_shared_gc", [yes], [
       ],
       [AC_MSG_ERROR(["--enable-shared-gc was passed but ${target_os} doesn't support this option.])]
   )
-  ])
+  ], [
+        LIBRUBY_LINK='-l$(LIBRUBYGCARG_STATIC)'
+    ])
 AC_SUBST(LIBRUBYGC_CFLAGS)
+AC_SUBST(LIBRUBY_LINK)
 
 AC_ARG_ENABLE(shared,
        AS_HELP_STRING([--enable-shared], [build a shared library for Ruby]),

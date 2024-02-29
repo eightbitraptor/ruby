@@ -1,3 +1,22 @@
+Feb 29, 2024
+
+* Building with enable shared only is broken
+* We need the libruby shared object to statically link against the gc in this case
+
+Here's a handy chart
+
+* Shared gc is working
+* Shared both is working
+* Share just ruby is broken
+* Static? Not sure, haven't run it
+
+        | static | share ruby | shared gc | shared both
+-----------------------------------------------------
+exts    |        | -lruby     | -lrubygc  | -lruby -lrubygc
+
+libruby |   X    | all .o + -lrubygc-static | -lrubygc  | X
+
+
 Feb 28, 2024
 
 * We fixed extensions.
