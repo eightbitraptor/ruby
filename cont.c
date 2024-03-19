@@ -1056,7 +1056,9 @@ cont_free(void *ptr)
     if (cont->type == CONTINUATION_CONTEXT) {
         ruby_xfree(cont->saved_ec.vm_stack);
         ruby_xfree(cont->ensure_array);
-        RUBY_FREE_UNLESS_NULL(cont->machine.stack);
+        if (cont->machine.stack) {
+            ruby_xfree(cont->machine.stack);
+        }
     }
     else {
         rb_fiber_t *fiber = (rb_fiber_t*)cont;
@@ -1064,7 +1066,10 @@ cont_free(void *ptr)
         fiber_stack_release(fiber);
     }
 
-    RUBY_FREE_UNLESS_NULL(cont->saved_vm_stack.ptr);
+    if (cont->saved_vm_stack.ptr) {
+        ruby_xfree(cont->saved_vm_stack.ptr);
+    }
+
 
     VM_ASSERT(cont->jit_cont != NULL);
     jit_cont_free(cont->jit_cont);
