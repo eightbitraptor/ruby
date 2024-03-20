@@ -8355,6 +8355,7 @@ heap_move_pooled_pages_to_free_pages(rb_heap_t *heap)
 static void
 gc_marks_start(rb_objspace_t *objspace, int full_mark)
 {
+
     /* start marking */
     gc_report(1, objspace, "gc_marks_start: (%s)\n", full_mark ? "full" : "minor");
     gc_mode_transition(objspace, gc_mode_marking);
@@ -8370,6 +8371,10 @@ gc_marks_start(rb_objspace_t *objspace, int full_mark)
         objspace->flags.during_minor_gc = FALSE;
         if (ruby_enable_autocompact) {
             objspace->flags.during_compacting |= TRUE;
+        }
+        if (dont_major_val())
+        {
+            rb_bug("Major mark when majors disabled, incrementing major count");
         }
         objspace->profile.major_gc_count++;
         objspace->rgengc.uncollectible_wb_unprotected_objects = 0;
