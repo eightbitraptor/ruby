@@ -93,9 +93,16 @@ ruby_setup(void)
     return state;
 }
 
+#include "internal/rubygc.h"
+
 void
 ruby_init(void)
 {
+    if (GC_Init != NULL) {
+        GC_Init();
+    } else {
+        GC_Init_default();
+    }
     int state = ruby_setup();
     if (state) {
         if (RTEST(ruby_debug)) {

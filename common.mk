@@ -113,6 +113,8 @@ PRISM_FILES = prism/api_node.$(OBJEXT) \
 		prism/prism.$(OBJEXT) \
 		prism_init.$(OBJEXT)
 
+GC_OBJS	      = rubygc.$(OBJEXT)
+
 COMMONOBJS    = array.$(OBJEXT) \
 		ast.$(OBJEXT) \
 		bignum.$(OBJEXT) \
@@ -423,7 +425,7 @@ programs: $(PROGRAM) $(WPROGRAM) $(arch)-fake.rb
 
 $(PREP): $(MKFILES)
 
-miniruby$(EXEEXT): config.status $(NORMALMAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(ARCHFILE)
+miniruby$(EXEEXT): config.status $(NORMALMAINOBJ) $(MINIOBJS) $(COMMONOBJS)$(GC_OBJS) $(ARCHFILE)
 
 objs: $(ALLOBJS)
 
