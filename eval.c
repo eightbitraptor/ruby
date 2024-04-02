@@ -39,6 +39,10 @@
 #include "vm_core.h"
 #include "ractor_core.h"
 
+#if USE_SHARED_GC
+# include <dlfcn.h>
+#endif
+
 NORETURN(static void rb_raise_jump(VALUE, VALUE));
 void rb_ec_clear_current_thread_trace_func(const rb_execution_context_t *ec);
 void rb_ec_clear_all_trace_func(const rb_execution_context_t *ec);
@@ -62,6 +66,37 @@ extern ID ruby_static_id_cause;
     (!SPECIAL_CONST_P(obj) && \
      (BUILTIN_TYPE(obj) == T_CLASS || BUILTIN_TYPE(obj) == T_MODULE))
 
+#if USE_SHARED_GC
+bool
+ruby_external_gc_init()
+{
+    char *gc_so_path = getenv("RUBY_GC_LIBRARY_PATH");
+    if (!gc_so_path) return FALSE;
+
+    void *h = dlopen(gc_so_path, RTLD_NOW);
+    if (!h)
+    {
+        rb_bug(
+            "ruby_external_gc_init: Shared library %s cannot be opened.\n",
+            gc_so_path
+        );
+    }
+
+    void *gc_init_func = dlsym(h, "GC_Init");
+    if (!gc_init_func)
+    {
+        rb_bug("ruby_external_gc_init: GC_Init func not exported by library");
+    }
+
+    rb_gc_function_map_t *map = malloc(sizeof(rb_gc_function_map_t));
+    map->init = gc_init_func;
+    rb_gc_functions = map;
+
+    return TRUE;
+
+}
+#endif
+
 int
 ruby_setup(void)
 {
@@ -78,6 +113,12 @@ ruby_setup(void)
     prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
 #endif
     Init_BareVM();
+#if USE_SHARED_GC
+    if (ruby_external_gc_init()) {
+        rb_gc_functions->init();
+    }
+#endif
+
     Init_heap();
     rb_vm_encoded_insn_data_table_init();
     Init_vm_objects();
