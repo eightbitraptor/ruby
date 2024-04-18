@@ -70,7 +70,7 @@ class TestGc < Test::Unit::TestCase
     assert_operator(minor_count, :<, GC.stat[:minor_gc_count])
     assert_nil(GC.start)
   ensure
-    GC.enable
+    GC.enable_major
     GC.start
   end
 
@@ -82,6 +82,8 @@ class TestGc < Test::Unit::TestCase
     GC.start
 
     assert_operator(major_count, :<, GC.stat[:major_gc_count])
+  ensure
+    GC.enable_major
   end
 
   def test_start_full_mark
