@@ -845,8 +845,10 @@ void *
 rb_objspace_alloc(void)
 {
 #if USE_SHARED_GC
+    fprintf(stderr, "loading external gc stuff\n");
     ruby_external_gc_init();
 #endif
+    fprintf(stderr, "allocating objspace external gc stuff\n");
     void *objspace = rb_gc_impl_objspace_alloc();
     ruby_current_vm_ptr->objspace = objspace;
 
