@@ -2936,7 +2936,7 @@ newobj_slowpath_wb_unprotected(VALUE klass, VALUE flags, rb_objspace_t *objspace
 }
 
 static inline VALUE
-newobj_of(rb_ractor_t *cr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, int wb_protected, size_t alloc_size)
+newobj_of0(rb_ractor_t *cr, VALUE klass, VALUE flags, int wb_protected, size_t alloc_size)
 {
     VALUE obj;
     rb_objspace_t *objspace = &rb_objspace;
@@ -2970,6 +2970,13 @@ newobj_of(rb_ractor_t *cr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v
           newobj_slowpath_wb_unprotected(klass, flags, objspace, cache, size_pool_idx);
     }
 
+    return obj;
+}
+
+VALUE
+newobj_of(rb_ractor_t *cr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, int wb_protected, size_t alloc_size)
+{
+    VALUE obj = newobj_of0(cr, klass, flags, wb_protected, alloc_size);
     return newobj_fill(obj, v1, v2, v3);
 }
 
