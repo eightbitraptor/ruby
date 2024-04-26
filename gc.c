@@ -2818,12 +2818,17 @@ ractor_cache_set_page(rb_ractor_newobj_cache_t *cache, size_t size_pool_idx,
 }
 
 static inline VALUE
-newobj_fill(VALUE obj, VALUE v1, VALUE v2, VALUE v3)
+newobj_fill(VALUE obj, int count, ...)
 {
-    RVALUE *p = (RVALUE *)obj;
-    p->as.values.v1 = v1;
-    p->as.values.v2 = v2;
-    p->as.values.v3 = v3;
+# define OBJ_PTR_OFFSET (sizeof(struct RBasic) / sizeof(VALUE))
+    VALUE *p = (VALUE *)obj;
+    va_list ptr;
+    va_start(ptr, count);
+
+    for (int i = 0; i < count; i++) {
+        *(p + (i + OBJ_PTR_OFFSET)) = va_arg(ptr, VALUE);
+    }
+
     return obj;
 }
 
@@ -2977,7 +2982,7 @@ VALUE
 newobj_of(rb_ractor_t *cr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, int wb_protected, size_t alloc_size)
 {
     VALUE obj = newobj_of0(cr, klass, flags, wb_protected, alloc_size);
-    return newobj_fill(obj, v1, v2, v3);
+    return newobj_fill(obj, 3, v1, v2, v3);
 }
 
 VALUE
