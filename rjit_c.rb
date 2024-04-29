@@ -866,7 +866,6 @@ module RubyVM::RJIT # :nodoc: all
       flags: [self.VALUE, Primitive.cexpr!("OFFSETOF((*((struct iseq_inline_constant_cache_entry *)NULL)), flags)")],
       value: [self.VALUE, Primitive.cexpr!("OFFSETOF((*((struct iseq_inline_constant_cache_entry *)NULL)), value)")],
       _unused1: [self.VALUE, Primitive.cexpr!("OFFSETOF((*((struct iseq_inline_constant_cache_entry *)NULL)), _unused1)")],
-      _unused2: [self.VALUE, Primitive.cexpr!("OFFSETOF((*((struct iseq_inline_constant_cache_entry *)NULL)), _unused2)")],
       ic_cref: [CType::Pointer.new { self.rb_cref_t }, Primitive.cexpr!("OFFSETOF((*((struct iseq_inline_constant_cache_entry *)NULL)), ic_cref)")],
     )
   end

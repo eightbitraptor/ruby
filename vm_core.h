@@ -244,8 +244,7 @@ struct iseq_inline_constant_cache_entry {
 
     VALUE value;              // v0
     VALUE _unused1;           // v1
-    VALUE _unused2;           // v2
-    const rb_cref_t *ic_cref; // v3
+    const rb_cref_t *ic_cref; // v2
 };
 STATIC_ASSERT(sizeof_iseq_inline_constant_cache_entry,
               (offsetof(struct iseq_inline_constant_cache_entry, ic_cref) +

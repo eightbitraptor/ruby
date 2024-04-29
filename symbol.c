@@ -543,6 +543,7 @@ register_sym(rb_symbols_t *symbols, VALUE str, VALUE sym)
                   register_sym_update_callback, (st_data_t)sym);
     }
     else {
+        fprintf(stderr, "register_sym: registering %s\n", rb_obj_info(str));
         st_add_direct(symbols->str_sym, (st_data_t)str, (st_data_t)sym);
     }
 }
@@ -847,6 +848,7 @@ rb_gc_free_dsymbol(VALUE sym)
 
         GLOBAL_SYMBOLS_ENTER(symbols);
         {
+            fprintf(stderr, "rb_gc_free_dsymbol: unregistering %s\n", rb_obj_info(str));
             unregister_sym(symbols, str, sym);
             rb_hash_delete_entry(symbols->dsymbol_fstr_hash, str);
         }

@@ -684,7 +684,6 @@ typedef struct RVALUE {
             struct RBasic basic;
             VALUE v1;
             VALUE v2;
-            VALUE v3;
         } values;
     } as;
 
@@ -953,7 +952,7 @@ typedef struct rb_objspace {
 #define HEAP_PAGE_ALIGN_LOG 16
 #endif
 
-#define BASE_SLOT_SIZE sizeof(RVALUE)
+#define BASE_SLOT_SIZE 32
 
 #define CEILDIV(i, mod) roomof(i, mod)
 enum {
@@ -2979,24 +2978,17 @@ newobj_of0(rb_ractor_t *cr, VALUE klass, VALUE flags, int wb_protected, size_t a
 }
 
 VALUE
-newobj_of(rb_ractor_t *cr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, int wb_protected, size_t alloc_size)
-{
-    VALUE obj = newobj_of0(cr, klass, flags, wb_protected, alloc_size);
-    return newobj_fill(obj, 3, v1, v2, v3);
-}
-
-VALUE
 rb_wb_unprotected_newobj_of(VALUE klass, VALUE flags, size_t size)
 {
     GC_ASSERT((flags & FL_WB_PROTECTED) == 0);
-    return newobj_of(GET_RACTOR(), klass, flags, 0, 0, 0, FALSE, size);
+    return newobj_of0(GET_RACTOR(), klass, flags, FALSE, size);
 }
 
 VALUE
 rb_wb_protected_newobj_of(rb_execution_context_t *ec, VALUE klass, VALUE flags, size_t size)
 {
     GC_ASSERT((flags & FL_WB_PROTECTED) == 0);
-    return newobj_of(rb_ec_ractor_ptr(ec), klass, flags, 0, 0, 0, TRUE, size);
+    return newobj_of0(rb_ec_ractor_ptr(ec), klass, flags, TRUE, size);
 }
 
 #define UNEXPECTED_NODE(func) \
@@ -3017,7 +3009,8 @@ rb_data_object_wrap(VALUE klass, void *datap, RUBY_DATA_FUNC dmark, RUBY_DATA_FU
 {
     RUBY_ASSERT_ALWAYS(dfree != (RUBY_DATA_FUNC)1);
     if (klass) rb_data_object_check(klass);
-    return newobj_of(GET_RACTOR(), klass, T_DATA, (VALUE)dmark, (VALUE)dfree, (VALUE)datap, !dmark, sizeof(struct RTypedData));
+    VALUE obj = newobj_of0(GET_RACTOR(), klass, T_DATA, !dmark, sizeof(struct RTypedData));
+    return newobj_fill(obj, 3, (VALUE)dmark, (VALUE)dfree, (VALUE)datap);
 }
 
 VALUE
@@ -3034,7 +3027,8 @@ typed_data_alloc(VALUE klass, VALUE typed_flag, void *datap, const rb_data_type_
     RBIMPL_NONNULL_ARG(type);
     if (klass) rb_data_object_check(klass);
     bool wb_protected = (type->flags & RUBY_FL_WB_PROTECTED) || !type->function.dmark;
-    return newobj_of(GET_RACTOR(), klass, T_DATA, (VALUE)type, 1 | typed_flag, (VALUE)datap, wb_protected, size);
+    VALUE obj = newobj_of0(GET_RACTOR(), klass, T_DATA,  wb_protected, size);
+    return newobj_fill(obj, 3, (VALUE)type, 1 | typed_flag, (VALUE)datap);
 }
 
 VALUE

@@ -187,7 +187,7 @@ ary_embed_capa(VALUE ary)
 static size_t
 ary_embed_size(long capa)
 {
-    return offsetof(struct RArray, as.ary) + (sizeof(VALUE) * capa);
+    return offsetof(struct RArray, as.ary) + ((sizeof(VALUE) * (capa ? capa : 1)));
 }
 
 static bool
@@ -700,8 +700,10 @@ ary_new(VALUE klass, long capa)
     if (capa < 0) {
         rb_raise(rb_eArgError, "negative array size (or size too big)");
     }
-    if (capa > ARY_MAX_SIZE) {
+    else if (capa > ARY_MAX_SIZE) {
         rb_raise(rb_eArgError, "array size too big");
+    } else if (capa == 0) {
+        capa = 1;
     }
 
     RUBY_DTRACE_CREATE_HOOK(ARRAY, capa);

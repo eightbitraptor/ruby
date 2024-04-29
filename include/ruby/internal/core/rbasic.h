@@ -40,7 +40,7 @@
 #define RBASIC(obj)                 RBIMPL_CAST((struct RBasic *)(obj))
 /** @cond INTERNAL_MACRO */
 #define RBASIC_CLASS                RBASIC_CLASS
-#define RBIMPL_RVALUE_EMBED_LEN_MAX 3
+#define RBIMPL_RVALUE_EMBED_LEN_MAX 2
 #define RVALUE_EMBED_LEN_MAX        RVALUE_EMBED_LEN_MAX
 #define RBIMPL_EMBED_LEN_MAX_OF(T) \
     RBIMPL_CAST((int)(sizeof(VALUE[RBIMPL_RVALUE_EMBED_LEN_MAX]) / (sizeof(T))))
