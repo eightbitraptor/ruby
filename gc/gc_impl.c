@@ -19,31 +19,13 @@ typedef uint32_t rb_event_flag_t;
 #include "ruby/st.h"
 
 #define SIZE_POOL_COUNT 1
+#define OBJ_ID_INCREMENT 1
 #define STACK_CHUNK_SIZE 500
 
 /* functions we'll need to call in gc.c */
 void *rb_gc_get_objspace(void);
-
-static int
-object_id_cmp(st_data_t x, st_data_t y)
-{
-    if (RB_TYPE_P(x, T_BIGNUM)) {
-        return !rb_big_eql(x, y);
-    }
-    else {
-        return x != y;
-    }
-}
-
-static st_index_t
-object_id_hash(st_data_t n)
-{
-    return FIX2LONG(rb_hash((VALUE)n));
-}
-static const struct st_hash_type object_id_hash_type = {
-    object_id_cmp,
-    object_id_hash,
-};
+unsigned int rb_gc_vm_lock();
+void rb_gc_vm_unlock(unsigned int lev);
 
 typedef struct stack_chunk {
     VALUE data[STACK_CHUNK_SIZE];
@@ -91,116 +73,32 @@ typedef struct rb_size_pool_struct {
     rb_heap_t tomb_heap;
 } rb_size_pool_t;
 
-typedef struct rb_objspace {
-    struct {
-        size_t limit;
-        size_t increase;
-    } malloc_params;
+enum {
+    gc_stress_no_major,
+    gc_stress_no_immediate_sweep,
+    gc_stress_full_mark_after_malloc,
+    gc_stress_max
+};
 
-    struct {
-        unsigned int mode : 2;
-        unsigned int immediate_sweep : 1;
-        unsigned int dont_gc : 1;
-        unsigned int dont_incremental : 1;
-        unsigned int during_gc : 1;
-        unsigned int during_compacting : 1;
-        unsigned int during_reference_updating : 1;
-        unsigned int gc_stressful: 1;
-        unsigned int has_newobj_hook: 1;
-        unsigned int during_minor_gc : 1;
-        unsigned int during_incremental_marking : 1;
-        unsigned int measure_gc : 1;
-    } flags;
-
-    rb_event_flag_t hook_events;
-    unsigned long long next_object_id;
-
-    rb_size_pool_t size_pools[SIZE_POOL_COUNT];
-
-    struct {
-        rb_atomic_t finalizing;
-    } atomic_flags;
-
-    mark_stack_t mark_stack;
-    size_t marked_slots;
-
-    struct {
-        struct heap_page **sorted;
-        size_t allocated_pages;
-        size_t allocatable_pages;
-        size_t sorted_length;
-        uintptr_t range[2];
-        size_t freeable_pages;
-
-        /* final */
-        size_t final_slots;
-        VALUE deferred_final;
-    } heap_pages;
-
-    st_table *finalizer_table;
-
-    VALUE gc_stress_mode;
-
-    struct {
-        VALUE parent_object;
-        int need_major_gc;
-        size_t last_major_gc;
-        size_t uncollectible_wb_unprotected_objects;
-        size_t uncollectible_wb_unprotected_objects_limit;
-        size_t old_objects;
-        size_t old_objects_limit;
-    } rgengc;
-
-    struct {
-        size_t considered_count_table[T_MASK];
-        size_t moved_count_table[T_MASK];
-        size_t moved_up_count_table[T_MASK];
-        size_t moved_down_count_table[T_MASK];
-        size_t total_moved;
-    } rcompactor;
-
-    struct {
-        size_t pooled_slots;
-        size_t step_slots;
-    } rincgc;
-
-    st_table *id_to_obj_tbl;
-    st_table *obj_to_id_tbl;
-
-    unsigned long live_ractor_cache_count;
-
-#ifdef RUBY_ASAN_ENABLED
-    rb_execution_context_t *marking_machine_context_ec;
-#endif
-
-} rb_objspace_t;
+enum gc_mode {
+    gc_mode_none,
+    gc_mode_marking,
+    gc_mode_sweeping,
+    gc_mode_compacting,
+};
 
 void *
 rb_gc_impl_objspace_alloc(void)
 {
     fprintf(stderr, "gc_impl: objspace_alloc\n");
-    return calloc(1, sizeof(rb_objspace_t));
+
+    return calloc(1, 2608);
 }
 
 void
 rb_gc_impl_objspace_init(void *objspace_ptr)
 {
     fprintf(stderr, "gc_impl: objspace_init\n");
-    rb_objspace_t *objspace = objspace_ptr;
-
-    objspace->flags.gc_stressful = 0;
-    objspace->gc_stress_mode = 0;
-    objspace->flags.measure_gc = false;
-    objspace->malloc_params.limit = 0;
-
-    rb_size_pool_t *size_pool = &objspace->size_pools[0];
-    size_pool->slot_size = 0;
-    ccan_list_head_init(&size_pool->eden_heap.pages);
-    ccan_list_head_init(&size_pool->tomb_heap.pages);
-
-    objspace->next_object_id = 1;
-    objspace->id_to_obj_tbl = st_init_table(&object_id_hash_type);
-    objspace->obj_to_id_tbl = st_init_numtable();
 }
 
 void
@@ -250,6 +148,7 @@ rb_gc_impl_shutdown_free_objects(void *objspace_ptr)
 void
 rb_gc_impl_start(void *objspace_ptr, bool full_mark, bool immediate_mark, bool immediate_sweep, bool compact)
 {
+    fprintf(stderr, "running GC from extension\n");
 }
 
 bool
@@ -399,7 +298,7 @@ rb_gc_impl_object_moved_p(void *objspace_ptr, VALUE obj)
 VALUE
 rb_gc_impl_location(void *objspace_ptr, VALUE value)
 {
-    return 0;
+    return value;
 }
 
 // Write barriers
@@ -438,13 +337,13 @@ rb_gc_impl_make_zombie(void *objspace_ptr, VALUE obj, void dfree(void *), void *
 VALUE
 rb_gc_impl_define_finalizer(void *objspace_ptr, VALUE obj, VALUE block)
 {
-    return Qnil;
+    return block;
 }
 
 VALUE
 rb_gc_impl_undefine_finalizer(void *objspace_ptr, VALUE obj)
 {
-    return Qnil;
+    return obj;
 }
 
 void

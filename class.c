@@ -816,6 +816,10 @@ make_singleton_class(VALUE obj)
 static VALUE
 boot_defclass(const char *name, VALUE super)
 {
+
+    /* if (super == rb_cBasicObject) { */
+    /*     fprintf(stderr, "here\n"); */
+    /* } */
     VALUE obj = rb_class_boot(super);
     ID id = rb_intern(name);
 

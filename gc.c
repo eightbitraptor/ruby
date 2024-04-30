@@ -669,8 +669,11 @@ void
 ruby_external_gc_init(void)
 {
     char *gc_so_path = getenv(RUBY_GC_LIBRARY_PATH);
+    fprintf(stderr, "ruby_external_gc_init: starting\n");
+
     void *handle = NULL;
     if (gc_so_path && dln_supported_p()) {
+        fprintf(stderr, "ruby_external_gc_init: found sopath %s\n", gc_so_path);
         char error[1024];
         handle = dln_open(gc_so_path, error, sizeof(error));
         if (!handle) {
@@ -691,6 +694,7 @@ ruby_external_gc_init(void)
     } \
 } while (0)
 
+    fprintf(stderr, "ruby_external_gc: mapping functions\n");
     // Bootup
     load_external_gc_func(objspace_alloc);
     load_external_gc_func(objspace_init);
@@ -765,6 +769,8 @@ ruby_external_gc_init(void)
     load_external_gc_func(copy_attributes);
 
 # undef load_external_gc_func
+
+    fprintf(stderr, "ruby_external_gc: done\n");
 }
 
 // Bootup
