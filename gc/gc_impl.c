@@ -440,3 +440,34 @@ void
 rb_gc_impl_copy_attributes(void *objspace_ptr, VALUE dest, VALUE obj)
 {
 }
+
+#include <malloc.h>
+
+void * __real_malloc(size_t size);
+void *
+__wrap_malloc(size_t size)
+{
+    fprintf(stderr, "__wrap_malloc: requesting size: %zu\n", size);
+    void *ptr = __real_malloc(size);
+    fprintf(stderr, "\t__wrap_malloc: allocated ptr: %p, requested_size: %zu, allocated_size: %zu\n", 
+            ptr, size, malloc_usable_size(ptr));
+    return ptr;
+}
+
+void * __real_calloc(int n, size_t size);
+void *
+__wrap_calloc(int n, size_t size)
+{
+    void *ptr = __real_calloc(n, size);
+    fprintf(stderr, "__wrap_calloc: allocated ptr: %p, count: %i, size: %zu, total_size: %zu\n", 
+            ptr, n, size, size * n);
+    return ptr;
+}
+
+void __real_free (void *ptr);
+void
+__wrap_free(void *ptr)
+{
+    __real_free(ptr);
+    fprintf(stderr, "__wrap_free: Freed %p\n", ptr);
+}
