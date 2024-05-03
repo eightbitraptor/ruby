@@ -108,7 +108,78 @@ extern int ruby_assert_critical_section_entered;
 
 #if USE_SHARED_GC
 typedef struct gc_function_map {
+    // Bootup
     void *(*objspace_alloc)(void);
+    void (*objspace_init)(void *objspace_ptr);
+    void (*objspace_free)(void *objspace_ptr);
+    void *(*ractor_cache_alloc)(void *objspace_ptr);
+    void (*ractor_cache_free)(void *objspace_ptr, void *cache);
+    void (*set_params)(void *objspace_ptr);
+    void (*init)(void);
+    int (*heap_count)(void *objspace_ptr);
+    void (*initial_stress_set)(VALUE flag);
+    // Shutdown
+    void (*shutdown_free_objects)(void *objspace_ptr);
+    // GC
+    void (*start)(void *objspace_ptr, bool full_mark, bool immediate_mark, bool immediate_sweep, bool compact);
+    bool (*during_gc_p)(void *objspace_ptr);
+    void (*prepare_heap)(void *objspace_ptr);
+    void (*gc_enable)(void *objspace_ptr);
+    void (*gc_disable)(void *objspace_ptr, bool finish_current_gc);
+    bool (*gc_enabled_p)(void *objspace_ptr);
+    void (*stress_set)(void *objspace_ptr, VALUE flag);
+    VALUE (*stress_get)(void *objspace_ptr);
+    // Object allocation
+    VALUE (*new_obj)(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, bool wb_protected, size_t alloc_size);
+    size_t (*obj_slot_size)(VALUE obj);
+    size_t (*size_pool_id_for_size)(void *objspace_ptr, size_t size);
+    // Malloc
+    void *(*malloc)(void *objspace_ptr, size_t size);
+    void *(*calloc)(void *objspace_ptr, size_t size);
+    void *(*realloc)(void *objspace_ptr, void *ptr, size_t new_size, size_t old_size);
+    void (*free)(void *objspace_ptr, void *ptr, size_t old_size);
+    void (*adjust_memory_usage)(void *objspace_ptr, ssize_t diff);
+    // Marking
+    void (*mark)(void *objspace_ptr, VALUE obj);
+    void (*mark_and_move)(void *objspace_ptr, VALUE *ptr);
+    void (*mark_and_pin)(void *objspace_ptr, VALUE obj);
+    void (*mark_maybe)(void *objspace_ptr, VALUE obj);
+    void (*mark_weak)(void *objspace_ptr, VALUE *ptr);
+    void (*remove_weak)(void *objspace_ptr, VALUE parent_obj, VALUE *ptr);
+    void (*objspace_mark)(void *objspace_ptr);
+    // Compaction
+    bool (*object_moved_p)(void *objspace_ptr, VALUE obj);
+    VALUE (*location)(void *objspace_ptr, VALUE value);
+    // Write barriers
+    void (*writebarrier)(void *objspace_ptr, VALUE a, VALUE b);
+    void (*writebarrier_unprotect)(void *objspace_ptr, VALUE obj);
+    void (*writebarrier_remember)(void *objspace_ptr, VALUE obj);
+    // Heap walking
+    void (*each_objects)(void *objspace_ptr, int (*callback)(void *, void *, size_t, void *), void *data);
+    void (*each_object)(void *objspace_ptr, void (*func)(VALUE obj, void *data), void *data);
+    // Finalizers
+    void (*make_zombie)(void *objspace_ptr, VALUE obj, void (*dfree)(void *), void *data);
+    VALUE (*define_finalizer)(void *objspace_ptr, VALUE obj, VALUE block);
+    VALUE (*undefine_finalizer)(void *objspace_ptr, VALUE obj);
+    void (*copy_finalizer)(void *objspace_ptr, VALUE dest, VALUE obj);
+    void (*shutdown_call_finalizer)(void *objspace_ptr);
+    // Object ID
+    VALUE (*object_id)(void *objspace_ptr, VALUE obj);
+    VALUE (*object_id_to_ref)(void *objspace_ptr, VALUE object_id);
+    // Statistics
+    VALUE (*set_measure_total_time)(void *objspace_ptr, VALUE flag);
+    VALUE (*get_measure_total_time)(void *objspace_ptr);
+    VALUE (*get_profile_total_time)(void *objspace_ptr);
+    size_t (*gc_count)(void *objspace_ptr);
+    VALUE (*latest_gc_info)(void *objspace_ptr, VALUE key);
+    size_t (*stat)(void *objspace_ptr, VALUE hash_or_sym);
+    size_t (*stat_heap)(void *objspace_ptr, int size_pool_idx, VALUE hash_or_sym);
+    // Miscellaneous
+    size_t (*obj_flags)(void *objspace_ptr, VALUE obj, ID* flags, size_t max);
+    bool (*pointer_to_heap_p)(void *objspace_ptr, const void *ptr);
+    bool (*garbage_object_p)(void *objspace_ptr, VALUE obj);
+    void (*set_event_hook)(void *objspace_ptr, const rb_event_flag_t event);
+    void (*copy_attributes)(void *objspace_ptr, VALUE dest, VALUE obj);
 } rb_gc_function_map_t;
 
 #define rb_gc_functions (&GET_VM()->gc_functions_map)
