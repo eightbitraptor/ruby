@@ -441,6 +441,7 @@ rb_gc_impl_copy_attributes(void *objspace_ptr, VALUE dest, VALUE obj)
 {
 }
 
+#if defined(__LINUX__)
 #include <malloc.h>
 
 void * __real_malloc(size_t size);
@@ -449,7 +450,7 @@ __wrap_malloc(size_t size)
 {
     fprintf(stderr, "__wrap_malloc: requesting size: %zu\n", size);
     void *ptr = __real_malloc(size);
-    fprintf(stderr, "\t__wrap_malloc: allocated ptr: %p, requested_size: %zu, allocated_size: %zu\n", 
+    fprintf(stderr, "\t__wrap_malloc: allocated ptr: %p, requested_size: %zu, allocated_size: %zu\n",
             ptr, size, malloc_usable_size(ptr));
     return ptr;
 }
@@ -459,7 +460,7 @@ void *
 __wrap_calloc(int n, size_t size)
 {
     void *ptr = __real_calloc(n, size);
-    fprintf(stderr, "__wrap_calloc: allocated ptr: %p, count: %i, size: %zu, total_size: %zu\n", 
+    fprintf(stderr, "__wrap_calloc: allocated ptr: %p, count: %i, size: %zu, total_size: %zu\n",
             ptr, n, size, size * n);
     return ptr;
 }
@@ -471,3 +472,4 @@ __wrap_free(void *ptr)
     __real_free(ptr);
     fprintf(stderr, "__wrap_free: Freed %p\n", ptr);
 }
+#endif
