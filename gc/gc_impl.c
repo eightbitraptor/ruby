@@ -511,10 +511,6 @@ typedef struct rb_objspace {
         VALUE deferred_final;
     } heap_pages;
 
-    st_table *finalizer_table;
-
-
-
     struct {
         size_t pooled_slots;
         size_t step_slots;
@@ -522,10 +518,6 @@ typedef struct rb_objspace {
 
     st_table *id_to_obj_tbl;
     st_table *obj_to_id_tbl;
-
-#if GC_DEBUG_STRESS_TO_CLASS
-    VALUE stress_to_class;
-#endif
 
     rb_postponed_job_handle_t finalize_deferred_pjob;
     unsigned long live_ractor_cache_count;
@@ -741,23 +733,6 @@ VALUE *ruby_initial_gc_stress_ptr = &ruby_initial_gc_stress;
 #define set_stress_to_class(c)  (objspace, (c))
 #endif
 
-static inline enum gc_mode
-gc_mode_verify(enum gc_mode mode)
-{
-#if RGENGC_CHECK_MODE > 0
-    switch (mode) {
-      case gc_mode_none:
-      case gc_mode_marking:
-      case gc_mode_sweeping:
-      case gc_mode_compacting:
-        break;
-      default:
-        rb_bug("gc_mode_verify: unreachable (%d)", (int)mode);
-    }
-#endif
-    return mode;
-}
-
 static inline bool
 has_sweeping_pages(rb_objspace_t *objspace)
 {
@@ -900,8 +875,6 @@ static double getrusage_time(void);
 # define gc_report if (!RGENGC_DEBUG_ENABLED(0)) {} else gc_report_body
 #endif
 PRINTF_ARGS(static void gc_report_body(int level, rb_objspace_t *objspace, const char *fmt, ...), 3, 4);
-
-static void gc_finalize_deferred(void *dmy);
 
 #if USE_TICK_T
 
@@ -2233,85 +2206,25 @@ rb_gc_impl_each_objects(void *objspace_ptr, each_obj_callback *callback, void *d
 VALUE
 rb_gc_impl_define_finalizer(void *objspace_ptr, VALUE obj, VALUE block)
 {
-    rb_objspace_t *objspace = objspace_ptr;
-    VALUE table;
-    st_data_t data;
-
-    RBASIC(obj)->flags |= FL_FINALIZE;
-
-    if (st_lookup(finalizer_table, obj, &data)) {
-        table = (VALUE)data;
-
-        /* avoid duplicate block, table is usually small */
-        {
-            long len = RARRAY_LEN(table);
-            long i;
-
-            for (i = 0; i < len; i++) {
-                VALUE recv = RARRAY_AREF(table, i);
-                if (rb_equal(recv, block)) {
-                    block = recv;
-                    goto end;
-                }
-            }
-        }
-
-        rb_ary_push(table, block);
-    }
-    else {
-        table = rb_ary_new3(1, block);
-        *(VALUE *)&RBASIC(table)->klass = 0;
-        st_add_direct(finalizer_table, obj, table);
-    }
-  end:
-    block = rb_ary_new3(2, INT2FIX(0), block);
-    OBJ_FREEZE(block);
-    return block;
+    rb_warn("NoGC does no collection - Finalizer will never be run.");
+    return Qnil;
 }
 
 VALUE
 rb_gc_impl_undefine_finalizer(void *objspace_ptr, VALUE obj)
 {
-    rb_objspace_t *objspace = objspace_ptr;
-    st_data_t data = obj;
-    rb_check_frozen(obj);
-    st_delete(finalizer_table, &data, 0);
-    FL_UNSET(obj, FL_FINALIZE);
     return obj;
 }
 
 VALUE
 rb_gc_impl_get_finalizers(void *objspace_ptr, VALUE obj)
 {
-    rb_objspace_t *objspace = objspace_ptr;
-
-    if (FL_TEST(obj, FL_FINALIZE)) {
-        st_data_t data;
-        if (st_lookup(finalizer_table, obj, &data)) {
-            return (VALUE)data;
-        }
-    }
-
     return Qnil;
 }
 
 void
 rb_gc_impl_copy_finalizer(void *objspace_ptr, VALUE dest, VALUE obj)
 {
-    rb_objspace_t *objspace = objspace_ptr;
-    VALUE table;
-    st_data_t data;
-
-    if (!FL_TEST(obj, FL_FINALIZE)) return;
-
-    if (RB_LIKELY(st_lookup(finalizer_table, obj, &data))) {
-        table = (VALUE)data;
-        st_insert(finalizer_table, dest, table);
-        FL_SET(dest, FL_FINALIZE);
-    }
-    else {
-        rb_bug("rb_gc_copy_finalizer: FL_FINALIZE set but not found in finalizer_table: %s", rb_obj_info(obj));
-    }
 }
 
 static VALUE
@@ -2320,108 +2233,6 @@ get_final(long i, void *data)
     VALUE table = (VALUE)data;
 
     return RARRAY_AREF(table, i);
-}
-
-static void
-run_final(rb_objspace_t *objspace, VALUE zombie)
-{
-    if (RZOMBIE(zombie)->dfree) {
-        RZOMBIE(zombie)->dfree(RZOMBIE(zombie)->data);
-    }
-
-    st_data_t key = (st_data_t)zombie;
-    if (FL_TEST_RAW(zombie, FL_FINALIZE)) {
-        FL_UNSET(zombie, FL_FINALIZE);
-        st_data_t table;
-        if (st_delete(finalizer_table, &key, &table)) {
-            rb_gc_run_obj_finalizer(rb_gc_impl_object_id(objspace, zombie), RARRAY_LEN(table), get_final, (void *)table);
-        }
-        else {
-            rb_bug("FL_FINALIZE flag is set, but finalizers are not found");
-        }
-    }
-    else {
-        GC_ASSERT(!st_lookup(finalizer_table, key, NULL));
-    }
-}
-
-static void
-finalize_list(rb_objspace_t *objspace, VALUE zombie)
-{
-    while (zombie) {
-        VALUE next_zombie;
-        struct heap_page *page;
-        asan_unpoison_object(zombie, false);
-        next_zombie = RZOMBIE(zombie)->next;
-        page = GET_HEAP_PAGE(zombie);
-
-        run_final(objspace, zombie);
-
-        int lev = rb_gc_vm_lock();
-        {
-            GC_ASSERT(BUILTIN_TYPE(zombie) == T_ZOMBIE);
-            if (FL_TEST(zombie, FL_SEEN_OBJ_ID)) {
-                obj_free_object_id(objspace, zombie);
-            }
-
-            GC_ASSERT(heap_pages_final_slots > 0);
-            GC_ASSERT(page->final_slots > 0);
-
-            heap_pages_final_slots--;
-            page->final_slots--;
-            page->free_slots++;
-            heap_page_add_freeobj(objspace, page, zombie);
-            page->size_pool->total_freed_objects++;
-        }
-        rb_gc_vm_unlock(lev);
-
-        zombie = next_zombie;
-    }
-}
-
-static void
-finalize_deferred_heap_pages(rb_objspace_t *objspace)
-{
-    VALUE zombie;
-    while ((zombie = RUBY_ATOMIC_VALUE_EXCHANGE(heap_pages_deferred_final, 0)) != 0) {
-        finalize_list(objspace, zombie);
-    }
-}
-
-static void
-finalize_deferred(rb_objspace_t *objspace)
-{
-    rb_gc_set_pending_interrupt();
-    finalize_deferred_heap_pages(objspace);
-    rb_gc_unset_pending_interrupt();
-}
-
-static void
-gc_finalize_deferred(void *dmy)
-{
-    rb_objspace_t *objspace = dmy;
-    if (RUBY_ATOMIC_EXCHANGE(finalizing, 1)) return;
-
-    finalize_deferred(objspace);
-    RUBY_ATOMIC_SET(finalizing, 0);
-}
-
-struct force_finalize_list {
-    VALUE obj;
-    VALUE table;
-    struct force_finalize_list *next;
-};
-
-static int
-force_chain_object(st_data_t key, st_data_t val, st_data_t arg)
-{
-    struct force_finalize_list **prev = (struct force_finalize_list **)arg;
-    struct force_finalize_list *curr = ALLOC(struct force_finalize_list);
-    curr->obj = key;
-    curr->table = val;
-    curr->next = *prev;
-    *prev = curr;
-    return ST_CONTINUE;
 }
 
 void
@@ -2452,65 +2263,6 @@ rb_gc_impl_shutdown_free_objects(void *objspace_ptr)
 void
 rb_gc_impl_shutdown_call_finalizer(void *objspace_ptr)
 {
-    rb_objspace_t *objspace = objspace_ptr;
-
-#if RGENGC_CHECK_MODE >= 2
-    rb_gc_impl_verify_internal_consistency(objspace);
-#endif
-    if (RUBY_ATOMIC_EXCHANGE(finalizing, 1)) return;
-
-    /* run finalizers */
-    finalize_deferred(objspace);
-    GC_ASSERT(heap_pages_deferred_final == 0);
-
-    /* prohibit incremental GC */
-    objspace->flags.dont_incremental = 1;
-
-    /* force to run finalizer */
-    while (finalizer_table->num_entries) {
-        struct force_finalize_list *list = 0;
-        st_foreach(finalizer_table, force_chain_object, (st_data_t)&list);
-        while (list) {
-            struct force_finalize_list *curr = list;
-
-            st_data_t obj = (st_data_t)curr->obj;
-            st_delete(finalizer_table, &obj, 0);
-            FL_UNSET(curr->obj, FL_FINALIZE);
-
-            rb_gc_run_obj_finalizer(rb_gc_impl_object_id(objspace, curr->obj), RARRAY_LEN(curr->table), get_final, (void *)curr->table);
-
-            list = curr->next;
-            xfree(curr);
-        }
-    }
-
-    /* run data/file object's finalizers */
-    for (size_t i = 0; i < heap_allocated_pages; i++) {
-        struct heap_page *page = heap_pages_sorted[i];
-        short stride = page->slot_size;
-
-        uintptr_t p = (uintptr_t)page->start;
-        uintptr_t pend = p + page->total_slots * stride;
-        for (; p < pend; p += stride) {
-            VALUE vp = (VALUE)p;
-            void *poisoned = asan_unpoison_object_temporary(vp);
-
-            if (rb_gc_shutdown_call_finalizer_p(vp)) {
-                rb_gc_obj_free(objspace, vp);
-            }
-
-            if (poisoned) {
-                GC_ASSERT(BUILTIN_TYPE(vp) == T_NONE);
-                asan_poison_object(vp);
-            }
-        }
-    }
-
-    finalize_deferred_heap_pages(objspace);
-
-    st_free_table(finalizer_table);
-    finalizer_table = 0;
-    RUBY_ATOMIC_SET(finalizing, 0);
 }
 
 void
@@ -4299,11 +4051,6 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
     rb_objspace_t *objspace = objspace_ptr;
 
     malloc_limit = gc_params.malloc_limit_min;
-    objspace->finalize_deferred_pjob = rb_postponed_job_preregister(0, gc_finalize_deferred, objspace);
-    if (objspace->finalize_deferred_pjob == POSTPONED_JOB_HANDLE_INVALID) {
-        rb_bug("Could not preregister postponed job for GC");
-    }
-
     for (int i = 0; i < SIZE_POOL_COUNT; i++) {
         rb_size_pool_t *size_pool = &size_pools[i];
 
@@ -4329,8 +4076,6 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
     }
 
     heap_pages_expand_sorted(objspace);
-
-    finalizer_table = st_init_numtable();
 }
 
 void
