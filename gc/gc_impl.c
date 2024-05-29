@@ -150,12 +150,9 @@ void rb_ractor_finish_marking(void);
 #define GC_OLDMALLOC_LIMIT_MAX (128 * 1024 * 1024 /* 128MB */)
 #endif
 
+
 #ifndef GC_CAN_COMPILE_COMPACTION
-#if defined(__wasi__) /* WebAssembly doesn't support signals */
 # define GC_CAN_COMPILE_COMPACTION 0
-#else
-# define GC_CAN_COMPILE_COMPACTION 1
-#endif
 #endif
 
 #ifndef PRINT_ENTER_EXIT_TICK
@@ -1064,9 +1061,6 @@ static void gc_marking_exit(rb_objspace_t *objspace);
 static void gc_sweeping_enter(rb_objspace_t *objspace);
 static void gc_sweeping_exit(rb_objspace_t *objspace);
 
-static void gc_sweep(rb_objspace_t *objspace);
-static void gc_sweep_finish_size_pool(rb_objspace_t *objspace, rb_size_pool_t *size_pool);
-
 static inline void gc_mark(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_pin(rb_objspace_t *objspace, VALUE ptr);
 static inline void gc_mark_and_pin(rb_objspace_t *objspace, VALUE ptr);
@@ -1077,14 +1071,6 @@ NO_SANITIZE("memory", static inline bool is_pointer_to_heap(rb_objspace_t *objsp
 static void rb_gc_impl_verify_internal_consistency(void *objspace_ptr);
 
 static double getrusage_time(void);
-static inline void gc_prof_setup_new_record(rb_objspace_t *objspace, unsigned int reason);
-static inline void gc_prof_timer_start(rb_objspace_t *);
-static inline void gc_prof_timer_stop(rb_objspace_t *);
-static inline void gc_prof_mark_timer_start(rb_objspace_t *);
-static inline void gc_prof_mark_timer_stop(rb_objspace_t *);
-static inline void gc_prof_sweep_timer_start(rb_objspace_t *);
-static inline void gc_prof_sweep_timer_stop(rb_objspace_t *);
-static inline void gc_prof_set_malloc_info(rb_objspace_t *);
 static inline void gc_prof_set_heap_info(rb_objspace_t *);
 
 #define gc_prof_record(objspace) (objspace)->profile.current_record
@@ -2152,22 +2138,6 @@ heap_assign_page(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *
     heap_add_freepage(heap, page);
 }
 
-#if GC_CAN_COMPILE_COMPACTION
-static void
-heap_add_pages(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap, size_t add)
-{
-    size_t i;
-
-    size_pool_allocatable_pages_set(objspace, size_pool, add);
-
-    for (i = 0; i < add; i++) {
-        heap_assign_page(objspace, size_pool, heap);
-    }
-
-    GC_ASSERT(size_pool->allocatable_pages == 0);
-}
-#endif
-
 static size_t
 heap_extend_pages(rb_objspace_t *objspace, rb_size_pool_t *size_pool, size_t free_slots, size_t total_slots, size_t used)
 {
@@ -2795,17 +2765,7 @@ objspace_each_objects_try(VALUE arg)
 static void
 objspace_each_exec(bool protected, struct each_obj_data *each_obj_data)
 {
-    /* Disable incremental GC */
-    rb_objspace_t *objspace = each_obj_data->objspace;
-    bool reenable_incremental = FALSE;
-    if (protected) {
-        reenable_incremental = !objspace->flags.dont_incremental;
-
-        gc_rest(objspace);
-        objspace->flags.dont_incremental = TRUE;
-    }
-
-    each_obj_data->reenable_incremental = reenable_incremental;
+    each_obj_data->reenable_incremental = FALSE;
     memset(&each_obj_data->pages, 0, sizeof(each_obj_data->pages));
     memset(&each_obj_data->pages_counts, 0, sizeof(each_obj_data->pages_counts));
     rb_ensure(objspace_each_objects_try, (VALUE)each_obj_data,
@@ -2829,20 +2789,6 @@ rb_gc_impl_each_objects(void *objspace_ptr, each_obj_callback *callback, void *d
 {
     objspace_each_objects(objspace_ptr, callback, data, TRUE);
 }
-
-#if GC_CAN_COMPILE_COMPACTION
-static void
-objspace_each_pages(rb_objspace_t *objspace, each_page_callback *callback, void *data, bool protected)
-{
-    struct each_obj_data each_obj_data = {
-        .objspace = objspace,
-        .each_obj_callback = NULL,
-        .each_page_callback = callback,
-        .data = data,
-    };
-    objspace_each_exec(protected, &each_obj_data);
-}
-#endif
 
 VALUE
 rb_gc_impl_define_finalizer(void *objspace_ptr, VALUE obj, VALUE block)
@@ -3341,9 +3287,6 @@ gc_unprotect_pages(rb_objspace_t *objspace, rb_heap_t *heap)
 }
 
 static void gc_update_references(rb_objspace_t *objspace);
-#if GC_CAN_COMPILE_COMPACTION
-static void invalidate_moved_page(rb_objspace_t *objspace, struct heap_page *page);
-#endif
 
 #if defined(__MINGW32__) || defined(_WIN32)
 # define GC_COMPACTION_SUPPORTED 1
@@ -3830,6 +3773,9 @@ gc_ractor_newobj_cache_clear(void *c, void *data)
 }
 
 static void
+gc_sweep_finish_size_pool(rb_objspace_t *objspace, rb_size_pool_t *size_pool);
+
+static void
 gc_sweep_start(rb_objspace_t *objspace)
 {
     gc_mode_transition(objspace, gc_mode_sweeping);
@@ -3971,10 +3917,6 @@ gc_sweep_step(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *hea
 
     if (sweep_page == NULL) return FALSE;
 
-#if GC_ENABLE_LAZY_SWEEP
-    gc_prof_sweep_timer_start(objspace);
-#endif
-
     do {
         RUBY_DEBUG_LOG("sweep_page:%p", (void *)sweep_page);
 
@@ -4026,10 +3968,6 @@ gc_sweep_step(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *hea
             gc_sweep_finish(objspace);
         }
     }
-
-#if GC_ENABLE_LAZY_SWEEP
-    gc_prof_sweep_timer_stop(objspace);
-#endif
 
     return heap->free_pages != NULL;
 }
@@ -6066,38 +6004,6 @@ garbage_collect(rb_objspace_t *objspace, unsigned int reason)
 }
 
 static void
-gc_rest(rb_objspace_t *objspace)
-{
-    if (is_incremental_marking(objspace) || is_lazy_sweeping(objspace)) {
-        unsigned int lock_lev;
-        gc_enter(objspace, gc_enter_event_rest, &lock_lev);
-
-        if (RGENGC_CHECK_MODE >= 2) rb_gc_impl_verify_internal_consistency(objspace);
-
-        if (is_incremental_marking(objspace)) {
-            gc_marking_enter(objspace);
-            gc_marks_rest(objspace);
-            gc_marking_exit(objspace);
-
-            gc_sweep(objspace);
-        }
-
-        if (is_lazy_sweeping(objspace)) {
-            gc_sweeping_enter(objspace);
-            gc_sweep_rest(objspace);
-            gc_sweeping_exit(objspace);
-        }
-
-        gc_exit(objspace, gc_enter_event_rest, &lock_lev);
-    }
-}
-
-struct objspace_and_reason {
-    rb_objspace_t *objspace;
-    unsigned int reason;
-};
-
-static void
 gc_current_status_fill(rb_objspace_t *objspace, char *buff)
 {
     int i = 0;
@@ -6342,26 +6248,7 @@ gc_set_candidate_object_i(void *vstart, void *vend, size_t stride, void *data)
 void
 rb_gc_impl_start(void *objspace_ptr, bool full_mark, bool immediate_mark, bool immediate_sweep, bool compact)
 {
-    rb_objspace_t *objspace = objspace_ptr;
-    unsigned int reason = (GPR_FLAG_FULL_MARK |
-                           GPR_FLAG_IMMEDIATE_MARK |
-                           GPR_FLAG_IMMEDIATE_SWEEP |
-                           GPR_FLAG_METHOD);
-
-    /* For now, compact implies full mark / sweep, so ignore other flags */
-    if (compact) {
-        GC_ASSERT(GC_COMPACTION_SUPPORTED);
-
-        reason |= GPR_FLAG_COMPACT;
-    }
-    else {
-        if (!full_mark)       reason &= ~GPR_FLAG_FULL_MARK;
-        if (!immediate_mark)  reason &= ~GPR_FLAG_IMMEDIATE_MARK;
-        if (!immediate_sweep) reason &= ~GPR_FLAG_IMMEDIATE_SWEEP;
-    }
-
-    garbage_collect(objspace, reason);
-    gc_finalize_deferred(objspace);
+    // Starting a GC is a no-op with Epsilon GC
 }
 
 static void
@@ -7456,8 +7343,6 @@ get_envparam_double(const char *name, double *default_value, double lower_bound,
 static void
 gc_set_initial_pages(rb_objspace_t *objspace)
 {
-    gc_rest(objspace);
-
     for (int i = 0; i < SIZE_POOL_COUNT; i++) {
         rb_size_pool_t *size_pool = &size_pools[i];
         char env_key[sizeof("RUBY_GC_HEAP_" "_INIT_SLOTS") + DECIMAL_SIZE_OF_BITS(sizeof(int) * CHAR_BIT)];
@@ -8607,8 +8492,6 @@ gc_verify_compaction_references(int argc, VALUE* argv, VALUE self)
 
     unsigned int lev = rb_gc_vm_lock();
     {
-        gc_rest(objspace);
-
         /* if both double_heap and expand_heap are set, expand_heap takes precedence */
         if (expand_heap) {
             struct desired_compaction_pages_i_data desired_compaction = {
