@@ -511,11 +511,6 @@ typedef struct rb_objspace {
         VALUE deferred_final;
     } heap_pages;
 
-    struct {
-        size_t pooled_slots;
-        size_t step_slots;
-    } rincgc;
-
     st_table *id_to_obj_tbl;
     st_table *obj_to_id_tbl;
 
@@ -2060,22 +2055,6 @@ rb_gc_impl_make_zombie(void *objspace_ptr, VALUE obj, void (*dfree)(void *), voi
     heap_pages_final_slots++;
 }
 
-static void
-obj_free_object_id(rb_objspace_t *objspace, VALUE obj)
-{
-    st_data_t o = (st_data_t)obj, id;
-
-    GC_ASSERT(BUILTIN_TYPE(obj) == T_NONE || FL_TEST(obj, FL_SEEN_OBJ_ID));
-    FL_UNSET(obj, FL_SEEN_OBJ_ID);
-
-    if (st_delete(objspace->obj_to_id_tbl, &o, &id)) {
-        GC_ASSERT(id);
-        st_delete(objspace->id_to_obj_tbl, &id, NULL);
-    }
-    else {
-        rb_bug("Object ID seen, but not in mapping table: %s", rb_obj_info(obj));
-    }
-}
 
 typedef int each_obj_callback(void *, void *, size_t, void *);
 typedef int each_page_callback(struct heap_page *, void *);
@@ -2225,14 +2204,6 @@ rb_gc_impl_get_finalizers(void *objspace_ptr, VALUE obj)
 void
 rb_gc_impl_copy_finalizer(void *objspace_ptr, VALUE dest, VALUE obj)
 {
-}
-
-static VALUE
-get_final(long i, void *data)
-{
-    VALUE table = (VALUE)data;
-
-    return RARRAY_AREF(table, i);
 }
 
 void
@@ -3136,12 +3107,6 @@ setup_gc_stat_symbols(void)
     }
 }
 
-static uint64_t
-ns_to_ms(uint64_t ns)
-{
-    return ns / (1000 * 1000);
-}
-
 size_t
 rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
 {
@@ -3913,18 +3878,6 @@ current_process_time(struct timespec *ts)
 #endif
 
     return false;
-}
-
-static double
-getrusage_time(void)
-{
-    struct timespec ts;
-    if (current_process_time(&ts)) {
-        return ts.tv_sec + ts.tv_nsec * 1e-9;
-    }
-    else {
-        return 0.0;
-    }
 }
 
 #if GC_PROFILE_MORE_DETAIL
