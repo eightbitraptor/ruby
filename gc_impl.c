@@ -26,7 +26,8 @@
 #include "debug_counter.h"
 #include "internal/sanitizers.h"
 
-#ifdef HAVE_MALLOC_USABLE_SIZE
+/* MALLOC_HEADERS_BEGIN */
+#ifndef HAVE_MALLOC_USABLE_SIZE
 # ifdef RUBY_ALTERNATIVE_MALLOC_HEADER
 /* Alternative malloc header is included in ruby/missing.h */
 # elif defined(HAVE_MALLOC_H)
@@ -36,6 +37,16 @@
 # elif defined(HAVE_MALLOC_MALLOC_H)
 #  include <malloc/malloc.h>
 # endif
+
+# ifdef _WIN32
+#  define HAVE_MALLOC_USABLE_SIZE
+#  define malloc_usable_size(a) _msize(a)
+# elif defined HAVE_MALLOC_SIZE
+#  define HAVE_MALLOC_USABLE_SIZE
+#  define malloc_usable_size(a) malloc_size(a)
+# endif
+#else
+# include <malloc.h>
 #endif
 
 #ifdef HAVE_MALLOC_TRIM
