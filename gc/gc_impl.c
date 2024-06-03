@@ -473,18 +473,7 @@ typedef struct rb_objspace {
     } malloc_params;
 
     struct {
-        unsigned int mode : 2;
-        unsigned int immediate_sweep : 1;
-        unsigned int dont_gc : 1;
-        unsigned int dont_incremental : 1;
-        unsigned int during_gc : 1;
-        unsigned int during_compacting : 1;
-        unsigned int during_reference_updating : 1;
-        unsigned int gc_stressful: 1;
         unsigned int has_newobj_hook: 1;
-        unsigned int during_minor_gc : 1;
-        unsigned int during_incremental_marking : 1;
-        unsigned int measure_gc : 1;
     } flags;
 
     rb_event_flag_t hook_events;
@@ -715,7 +704,6 @@ VALUE *ruby_initial_gc_stress_ptr = &ruby_initial_gc_stress;
 #define heap_pages_final_slots		objspace->heap_pages.final_slots
 #define heap_pages_deferred_final	objspace->heap_pages.deferred_final
 #define size_pools              objspace->size_pools
-#define during_gc		objspace->flags.during_gc
 #define finalizing		objspace->atomic_flags.finalizing
 #define finalizer_table 	objspace->finalizer_table
 #define ruby_gc_stressful	objspace->flags.gc_stressful
@@ -816,14 +804,6 @@ total_freed_objects(rb_objspace_t *objspace)
 #define gc_mode(objspace)                gc_mode_verify((enum gc_mode)(objspace)->flags.mode)
 #define gc_mode_set(objspace, m)         ((objspace)->flags.mode = (unsigned int)gc_mode_verify(m))
 
-#define is_marking(objspace)             (gc_mode(objspace) == gc_mode_marking)
-#define is_sweeping(objspace)            (gc_mode(objspace) == gc_mode_sweeping)
-#define is_full_marking(objspace)        ((objspace)->flags.during_minor_gc == FALSE)
-#define is_incremental_marking(objspace) ((objspace)->flags.during_incremental_marking != FALSE)
-#define will_be_incremental_marking(objspace) ((objspace)->rgengc.need_major_gc != GPR_FLAG_NONE)
-#define GC_INCREMENTAL_SWEEP_SLOT_COUNT 2048
-#define GC_INCREMENTAL_SWEEP_POOL_SLOT_COUNT 1024
-#define is_lazy_sweeping(objspace)           (GC_ENABLE_LAZY_SWEEP && has_sweeping_pages(objspace))
 
 #if SIZEOF_LONG == SIZEOF_VOIDP
 # define obj_id_to_ref(objid) ((objid) ^ FIXNUM_FLAG) /* unset FIXNUM_FLAG */
@@ -1724,17 +1704,6 @@ ractor_cache_allocate_slot(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *ca
     rb_ractor_newobj_size_pool_cache_t *size_pool_cache = &cache->size_pool_caches[size_pool_idx];
     struct free_slot *p = size_pool_cache->freelist;
 
-    if (is_incremental_marking(objspace)) {
-        // Not allowed to allocate without running an incremental marking step
-        if (cache->incremental_mark_step_allocated_slots >= INCREMENTAL_MARK_STEP_ALLOCATIONS) {
-            return Qfalse;
-        }
-
-        if (p) {
-            cache->incremental_mark_step_allocated_slots++;
-        }
-    }
-
     if (p) {
         VALUE obj = (VALUE)p;
         MAYBE_UNUSED(const size_t) stride = size_pool_slot_size(size_pool_idx);
@@ -1942,18 +1911,8 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
 
     rb_ractor_newobj_cache_t *cache = (rb_ractor_newobj_cache_t *)cache_ptr;
 
-    if (!RB_UNLIKELY(during_gc || ruby_gc_stressful) &&
-            wb_protected) {
-        obj = newobj_alloc(objspace, cache, size_pool_idx, false);
-        newobj_init(klass, flags, wb_protected, objspace, obj);
-    }
-    else {
-        RB_DEBUG_COUNTER_INC(obj_newobj_slowpath);
-
-        obj = wb_protected ?
-          newobj_slowpath_wb_protected(klass, flags, objspace, cache, size_pool_idx) :
-          newobj_slowpath_wb_unprotected(klass, flags, objspace, cache, size_pool_idx);
-    }
+    obj = newobj_alloc(objspace, cache, size_pool_idx, false);
+    newobj_init(klass, flags, wb_protected, objspace, obj);
 
     return newobj_fill(obj, v1, v2, v3);
 }
@@ -2076,11 +2035,6 @@ objspace_each_objects_ensure(VALUE arg)
 {
     struct each_obj_data *data = (struct each_obj_data *)arg;
     rb_objspace_t *objspace = data->objspace;
-
-    /* Reenable incremental GC */
-    if (data->reenable_incremental) {
-        objspace->flags.dont_incremental = FALSE;
-    }
 
     for (int i = 0; i < SIZE_POOL_COUNT; i++) {
         struct heap_page **pages = data->pages[i];
@@ -2863,18 +2817,6 @@ gc_report_body(int level, rb_objspace_t *objspace, const char *fmt, ...)
         FILE *out = stderr;
         va_list args;
         const char *status = " ";
-
-        if (during_gc) {
-            status = is_full_marking(objspace) ? "+" : "-";
-        }
-        else {
-            if (is_lazy_sweeping(objspace)) {
-                status = "S";
-            }
-            if (is_incremental_marking(objspace)) {
-                status = "M";
-            }
-        }
 
         va_start(args, fmt);
         vsnprintf(buf, 1024, fmt, args);
