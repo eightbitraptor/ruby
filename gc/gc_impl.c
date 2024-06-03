@@ -211,13 +211,6 @@ static ruby_gc_params_t gc_params = {
     FALSE,
 };
 
-/* GC_DEBUG:
- *  enable to embed GC debugging information.
- */
-#ifndef GC_DEBUG
-#define GC_DEBUG 0
-#endif
-
 /* RGENGC_DEBUG:
  * 1: basic information
  * 2: remember set operation
@@ -1615,10 +1608,6 @@ newobj_init(VALUE klass, VALUE flags, int wb_protected, rb_objspace_t *objspace,
         MARK_IN_BITMAP(GET_HEAP_WB_UNPROTECTED_BITS(obj), obj);
     }
 
-#if GC_DEBUG
-    GET_RVALUE_OVERHEAD(obj)->file = rb_source_location_cstr(&GET_RVALUE_OVERHEAD(obj)->line);
-    GC_ASSERT(!SPECIAL_CONST_P(obj)); /* check alignment */
-#endif
 
     gc_report(5, objspace, "newobj: %s\n", rb_obj_info(obj));
 
@@ -3883,7 +3872,6 @@ void
 rb_gc_impl_init(void)
 {
     VALUE gc_constants = rb_hash_new();
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("DEBUG")), GC_DEBUG ? Qtrue : Qfalse);
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("BASE_SLOT_SIZE")), SIZET2NUM(BASE_SLOT_SIZE - RVALUE_OVERHEAD));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_OVERHEAD")), SIZET2NUM(RVALUE_OVERHEAD));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_OBJ_LIMIT")), SIZET2NUM(HEAP_PAGE_OBJ_LIMIT));
@@ -3928,7 +3916,6 @@ rb_gc_impl_init(void)
         /* \GC build options */
         rb_define_const(rb_mGC, "OPTS", opts = rb_ary_new());
 #define OPT(o) if (o) rb_ary_push(opts, rb_interned_str(#o, sizeof(#o) - 1))
-        OPT(GC_DEBUG);
         OPT(USE_RGENGC);
         OPT(RGENGC_DEBUG);
         OPT(RGENGC_CHECK_MODE);
