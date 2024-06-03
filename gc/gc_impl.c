@@ -1991,7 +1991,7 @@ VALUE
 rb_gc_impl_define_finalizer(void *objspace_ptr, VALUE obj, VALUE block)
 {
     rb_warn("NoGC does no collection - Finalizer will never be run.");
-    return Qnil;
+    return block;
 }
 
 VALUE
