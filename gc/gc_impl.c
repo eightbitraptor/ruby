@@ -256,15 +256,6 @@ int ruby_rgengc_debug;
 // Note: using RUBY_ASSERT_WHEN() extend a macro in expr (info by nobu).
 #define GC_ASSERT(expr) RUBY_ASSERT_MESG_WHEN(RGENGC_CHECK_MODE > 0, expr, #expr)
 
-/* RGENGC_PROFILE
- * 0: disable RGenGC profiling
- * 1: enable profiling for basic information
- * 2: enable profiling for each types
- */
-#ifndef RGENGC_PROFILE
-# define RGENGC_PROFILE     0
-#endif
-
 /* RGENGC_ESTIMATE_OLDMALLOC
  * Enable/disable to estimate increase size of malloc'ed size by old objects.
  * If estimation exceeds threshold, then will invoke full GC.
@@ -368,11 +359,6 @@ typedef struct gc_profile_record {
     size_t allocated_size;
 #endif
 
-#if RGENGC_PROFILE > 0
-    size_t old_objects;
-    size_t remembered_normal_objects;
-    size_t remembered_shady_objects;
-#endif
 } gc_profile_record;
 
 struct RMoved {
@@ -1629,21 +1615,6 @@ newobj_init(VALUE klass, VALUE flags, int wb_protected, rb_objspace_t *objspace,
         MARK_IN_BITMAP(GET_HEAP_WB_UNPROTECTED_BITS(obj), obj);
     }
 
-#if RGENGC_PROFILE
-    if (wb_protected) {
-        objspace->profile.total_generated_normal_object_count++;
-#if RGENGC_PROFILE >= 2
-        objspace->profile.generated_normal_object_count_types[BUILTIN_TYPE(obj)]++;
-#endif
-    }
-    else {
-        objspace->profile.total_generated_shady_object_count++;
-#if RGENGC_PROFILE >= 2
-        objspace->profile.generated_shady_object_count_types[BUILTIN_TYPE(obj)]++;
-#endif
-    }
-#endif
-
 #if GC_DEBUG
     GET_RVALUE_OVERHEAD(obj)->file = rb_source_location_cstr(&GET_RVALUE_OVERHEAD(obj)->line);
     GC_ASSERT(!SPECIAL_CONST_P(obj)); /* check alignment */
@@ -2899,23 +2870,6 @@ rb_gc_impl_during_gc_p(void *objspace_ptr)
     return FALSE;
 }
 
-#if RGENGC_PROFILE >= 2
-
-static const char *type_name(int type, VALUE obj);
-
-static void
-gc_count_add_each_types(VALUE hash, const char *name, const size_t *types)
-{
-    VALUE result = rb_hash_new_with_size(T_MASK);
-    int i;
-    for (i=0; i<T_MASK; i++) {
-        const char *type = type_name(i, 0);
-        rb_hash_aset(result, ID2SYM(rb_intern(type)), SIZET2NUM(types[i]));
-    }
-    rb_hash_aset(hash, ID2SYM(rb_intern(name)), result);
-}
-#endif
-
 size_t
 rb_gc_impl_gc_count(void *objspace_ptr)
 {
@@ -2972,14 +2926,6 @@ enum gc_stat_sym {
     gc_stat_sym_oldmalloc_increase_bytes_limit,
 #endif
     gc_stat_sym_weak_references_count,
-#if RGENGC_PROFILE
-    gc_stat_sym_total_generated_normal_object_count,
-    gc_stat_sym_total_generated_shady_object_count,
-    gc_stat_sym_total_shade_operation_count,
-    gc_stat_sym_total_promoted_count,
-    gc_stat_sym_total_remembered_normal_object_count,
-    gc_stat_sym_total_remembered_shady_object_count,
-#endif
     gc_stat_sym_last
 };
 
@@ -3024,14 +2970,6 @@ setup_gc_stat_symbols(void)
         S(oldmalloc_increase_bytes_limit);
 #endif
         S(weak_references_count);
-#if RGENGC_PROFILE
-        S(total_generated_normal_object_count);
-        S(total_generated_shady_object_count);
-        S(total_shade_operation_count);
-        S(total_promoted_count);
-        S(total_remembered_normal_object_count);
-        S(total_remembered_shady_object_count);
-#endif /* RGENGC_PROFILE */
 #undef S
     }
 }
@@ -3077,30 +3015,11 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     SET(total_freed_objects, total_freed_objects(objspace));
     SET(malloc_increase_bytes, malloc_increase);
     SET(malloc_increase_bytes_limit, malloc_limit);
-#if RGENGC_PROFILE
-    SET(total_generated_normal_object_count, objspace->profile.total_generated_normal_object_count);
-    SET(total_generated_shady_object_count, objspace->profile.total_generated_shady_object_count);
-    SET(total_shade_operation_count, objspace->profile.total_shade_operation_count);
-    SET(total_promoted_count, objspace->profile.total_promoted_count);
-    SET(total_remembered_normal_object_count, objspace->profile.total_remembered_normal_object_count);
-    SET(total_remembered_shady_object_count, objspace->profile.total_remembered_shady_object_count);
-#endif /* RGENGC_PROFILE */
 #undef SET
 
     if (!NIL_P(key)) { /* matched key should return above */
         rb_raise(rb_eArgError, "unknown key: %"PRIsVALUE, rb_sym2str(key));
     }
-
-#if defined(RGENGC_PROFILE) && RGENGC_PROFILE >= 2
-    if (hash != Qnil) {
-        gc_count_add_each_types(hash, "generated_normal_object_count_types", objspace->profile.generated_normal_object_count_types);
-        gc_count_add_each_types(hash, "generated_shady_object_count_types", objspace->profile.generated_shady_object_count_types);
-        gc_count_add_each_types(hash, "shade_operation_count_types", objspace->profile.shade_operation_count_types);
-        gc_count_add_each_types(hash, "promoted_types", objspace->profile.promoted_types);
-        gc_count_add_each_types(hash, "remembered_normal_object_count_types", objspace->profile.remembered_normal_object_count_types);
-        gc_count_add_each_types(hash, "remembered_shady_object_count_types", objspace->profile.remembered_shady_object_count_types);
-    }
-#endif
 
     return 0;
 }
@@ -4013,7 +3932,6 @@ rb_gc_impl_init(void)
         OPT(USE_RGENGC);
         OPT(RGENGC_DEBUG);
         OPT(RGENGC_CHECK_MODE);
-        OPT(RGENGC_PROFILE);
         OPT(RGENGC_ESTIMATE_OLDMALLOC);
         OPT(GC_PROFILE_MORE_DETAIL);
         OPT(GC_ENABLE_LAZY_SWEEP);
