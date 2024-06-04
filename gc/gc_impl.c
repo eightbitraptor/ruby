@@ -120,11 +120,6 @@ size_t rb_obj_memsize_of(VALUE obj);
 #define GC_HEAP_FREE_SLOTS_MAX_RATIO  0.65
 #endif
 
-// TODO: Fire
-#ifndef GC_CAN_COMPILE_COMPACTION
-# define GC_CAN_COMPILE_COMPACTION 0
-#endif
-
 #ifndef PRINT_ENTER_EXIT_TICK
 # define PRINT_ENTER_EXIT_TICK 0
 #endif
