@@ -73,8 +73,6 @@ void rb_gc_set_shape(VALUE obj, uint32_t shape_id);
 uint32_t rb_gc_rebuild_shape(VALUE obj, size_t size_pool_id);
 size_t rb_obj_memsize_of(VALUE obj);
 
-void rb_ractor_finish_marking(void);
-
 #ifndef VM_CHECK_MODE
 # define VM_CHECK_MODE RUBY_DEBUG
 #endif
