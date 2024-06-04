@@ -62,9 +62,6 @@ unsigned int rb_gc_vm_lock_no_barrier(void);
 void rb_gc_vm_unlock_no_barrier(unsigned int lev);
 void rb_gc_vm_barrier(void);
 size_t rb_gc_obj_optimal_size(VALUE obj);
-void rb_gc_mark_children(void *objspace, VALUE obj);
-void rb_gc_update_object_references(void *objspace, VALUE obj);
-void rb_gc_update_vm_references(void *objspace);
 void rb_gc_reachable_objects_from_callback(VALUE obj);
 void rb_gc_event_hook(VALUE obj, rb_event_flag_t event);
 void *rb_gc_get_objspace(void);
@@ -245,10 +242,6 @@ static ruby_gc_params_t gc_params = {
 #endif
 #ifndef MALLOC_ALLOCATED_SIZE_CHECK
 # define MALLOC_ALLOCATED_SIZE_CHECK 0
-#endif
-
-#ifndef GC_DEBUG_STRESS_TO_CLASS
-# define GC_DEBUG_STRESS_TO_CLASS RUBY_DEBUG
 #endif
 
 typedef enum {
@@ -434,10 +427,6 @@ typedef struct rb_objspace {
     st_table *finalizer_table;
     st_table *id_to_obj_tbl;
     st_table *obj_to_id_tbl;
-
-#if GC_DEBUG_STRESS_TO_CLASS
-    VALUE stress_to_class;
-#endif
 
     rb_postponed_job_handle_t finalize_deferred_pjob;
     unsigned long live_ractor_cache_count;
@@ -644,41 +633,6 @@ VALUE *ruby_initial_gc_stress_ptr = &ruby_initial_gc_stress;
 #define finalizer_table 	objspace->finalizer_table
 #define ruby_gc_stressful	objspace->flags.gc_stressful
 #define ruby_gc_stress_mode     objspace->gc_stress_mode
-#if GC_DEBUG_STRESS_TO_CLASS
-#define stress_to_class         objspace->stress_to_class
-#define set_stress_to_class(c)  (stress_to_class = (c))
-#else
-#define stress_to_class         (objspace, 0)
-#define set_stress_to_class(c)  (objspace, (c))
-#endif
-
-static inline enum gc_mode
-gc_mode_verify(enum gc_mode mode)
-{
-#if RGENGC_CHECK_MODE > 0
-    switch (mode) {
-      case gc_mode_none:
-      case gc_mode_marking:
-      case gc_mode_sweeping:
-      case gc_mode_compacting:
-        break;
-      default:
-        rb_bug("gc_mode_verify: unreachable (%d)", (int)mode);
-    }
-#endif
-    return mode;
-}
-
-static inline bool
-has_sweeping_pages(rb_objspace_t *objspace)
-{
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        if (SIZE_POOL_EDEN_HEAP(&size_pools[i])->sweeping_page) {
-            return TRUE;
-        }
-    }
-    return FALSE;
-}
 
 static inline size_t
 heap_eden_total_pages(rb_objspace_t *objspace)
@@ -787,8 +741,6 @@ enum gc_enter_event {
 };
 
 NO_SANITIZE("memory", static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr));
-
-static double getrusage_time(void);
 
 #define gc_prof_record(objspace) (objspace)->profile.current_record
 #define gc_prof_enabled(objspace) ((objspace)->profile.run && (objspace)->profile.current_record)
@@ -1744,39 +1696,6 @@ newobj_alloc(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t si
     return obj;
 }
 
-ALWAYS_INLINE(static VALUE newobj_slowpath(VALUE klass, VALUE flags, rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, int wb_protected, size_t size_pool_idx));
-
-static inline VALUE
-newobj_slowpath(VALUE klass, VALUE flags, rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, int wb_protected, size_t size_pool_idx)
-{
-    VALUE obj;
-    unsigned int lev;
-
-    lev = rb_gc_cr_lock();
-    obj = newobj_alloc(objspace, cache, size_pool_idx, true);
-    newobj_init(klass, flags, wb_protected, objspace, obj);
-    rb_gc_cr_unlock(lev);
-
-    return obj;
-}
-
-NOINLINE(static VALUE newobj_slowpath_wb_protected(VALUE klass, VALUE flags,
-                                                   rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t size_pool_idx));
-NOINLINE(static VALUE newobj_slowpath_wb_unprotected(VALUE klass, VALUE flags,
-                                                     rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t size_pool_idx));
-
-static VALUE
-newobj_slowpath_wb_protected(VALUE klass, VALUE flags, rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t size_pool_idx)
-{
-    return newobj_slowpath(klass, flags, objspace, cache, TRUE, size_pool_idx);
-}
-
-static VALUE
-newobj_slowpath_wb_unprotected(VALUE klass, VALUE flags, rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t size_pool_idx)
-{
-    return newobj_slowpath(klass, flags, objspace, cache, FALSE, size_pool_idx);
-}
-
 VALUE
 rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, bool wb_protected, size_t alloc_size)
 {
@@ -1785,13 +1704,6 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
 
     RB_DEBUG_COUNTER_INC(obj_newobj);
     (void)RB_DEBUG_COUNTER_INC_IF(obj_newobj_wb_unprotected, !wb_protected);
-
-    if (RB_UNLIKELY(stress_to_class)) {
-        long cnt = RARRAY_LEN(stress_to_class);
-        for (long i = 0; i < cnt; i++) {
-            if (klass == RARRAY_AREF(stress_to_class, i)) rb_memerror();
-        }
-    }
 
     size_t size_pool_idx = size_pool_idx_for_size(alloc_size);
 
@@ -1920,7 +1832,6 @@ static VALUE
 objspace_each_objects_ensure(VALUE arg)
 {
     struct each_obj_data *data = (struct each_obj_data *)arg;
-    rb_objspace_t *objspace = data->objspace;
 
     for (int i = 0; i < SIZE_POOL_COUNT; i++) {
         struct heap_page **pages = data->pages[i];
@@ -2727,10 +2638,7 @@ rb_gc_impl_ractor_cache_free(void *objspace_ptr, void *cache)
     free(cache);
 }
 
-static bool current_process_time(struct timespec *ts);
-
 int ruby_thread_has_gvl_p(void);
-
 
 void
 rb_gc_impl_start(void *objspace_ptr, bool full_mark, bool immediate_mark, bool immediate_sweep, bool compact)
@@ -3573,54 +3481,6 @@ rb_gc_impl_adjust_memory_usage(void *objspace_ptr, ssize_t diff)
   ------------------------------ GC profiler ------------------------------
 */
 
-#define GC_PROFILE_RECORD_DEFAULT_SIZE 100
-
-static bool
-current_process_time(struct timespec *ts)
-{
-#if defined(HAVE_CLOCK_GETTIME) && defined(CLOCK_PROCESS_CPUTIME_ID)
-    {
-        static int try_clock_gettime = 1;
-        if (try_clock_gettime && clock_gettime(CLOCK_PROCESS_CPUTIME_ID, ts) == 0) {
-            return true;
-        }
-        else {
-            try_clock_gettime = 0;
-        }
-    }
-#endif
-
-#ifdef RUSAGE_SELF
-    {
-        struct rusage usage;
-        struct timeval time;
-        if (getrusage(RUSAGE_SELF, &usage) == 0) {
-            time = usage.ru_utime;
-            ts->tv_sec = time.tv_sec;
-            ts->tv_nsec = (int32_t)time.tv_usec * 1000;
-            return true;
-        }
-    }
-#endif
-
-#ifdef _WIN32
-    {
-        FILETIME creation_time, exit_time, kernel_time, user_time;
-        ULARGE_INTEGER ui;
-
-        if (GetProcessTimes(GetCurrentProcess(),
-                            &creation_time, &exit_time, &kernel_time, &user_time) != 0) {
-            memcpy(&ui, &user_time, sizeof(FILETIME));
-#define PER100NSEC (uint64_t)(1000 * 1000 * 10)
-            ts->tv_nsec = (long)(ui.QuadPart % PER100NSEC);
-            ts->tv_sec  = (time_t)(ui.QuadPart / PER100NSEC);
-            return true;
-        }
-    }
-#endif
-
-    return false;
-}
 
 #if GC_PROFILE_MORE_DETAIL
 #define MAJOR_REASON_MAX 0x10
