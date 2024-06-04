@@ -409,8 +409,6 @@ typedef struct rb_objspace {
         rb_atomic_t finalizing;
     } atomic_flags;
 
-    size_t marked_slots;
-
     struct {
         struct heap_page **sorted;
         size_t allocated_pages;
@@ -2705,7 +2703,6 @@ enum gc_stat_sym {
     gc_stat_sym_heap_live_slots,
     gc_stat_sym_heap_free_slots,
     gc_stat_sym_heap_final_slots,
-    gc_stat_sym_heap_marked_slots,
     gc_stat_sym_heap_eden_pages,
     gc_stat_sym_heap_tomb_pages,
     gc_stat_sym_total_allocated_pages,
@@ -2749,7 +2746,6 @@ setup_gc_stat_symbols(void)
         S(heap_live_slots);
         S(heap_free_slots);
         S(heap_final_slots);
-        S(heap_marked_slots);
         S(heap_eden_pages);
         S(heap_tomb_pages);
         S(total_allocated_pages);
@@ -2808,7 +2804,6 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     SET(heap_live_slots, objspace_live_slots(objspace));
     SET(heap_free_slots, objspace_free_slots(objspace));
     SET(heap_final_slots, heap_pages_final_slots);
-    SET(heap_marked_slots, objspace->marked_slots);
     SET(heap_eden_pages, heap_eden_total_pages(objspace));
     SET(heap_tomb_pages, heap_tomb_total_pages(objspace));
     SET(total_allocated_pages, total_allocated_pages(objspace));
