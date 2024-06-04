@@ -2077,9 +2077,6 @@ rb_gc_impl_shutdown_call_finalizer(void *objspace_ptr)
 {
     rb_objspace_t *objspace = objspace_ptr;
 
-#if RGENGC_CHECK_MODE >= 2
-    rb_gc_impl_verify_internal_consistency(objspace);
-#endif
     if (RUBY_ATOMIC_EXCHANGE(finalizing, 1)) return;
 
     /* run finalizers */
@@ -2458,18 +2455,6 @@ void
 rb_gc_impl_remove_weak(void *objspace_ptr, VALUE parent_obj, VALUE *ptr)
 {
 }
-
-// TODO: Burn this
-struct verify_internal_consistency_struct {
-    rb_objspace_t *objspace;
-    int err_count;
-    size_t live_object_count;
-    size_t zombie_object_count;
-
-    VALUE parent;
-    size_t old_object_count;
-    size_t remembered_shady_count;
-};
 
 static void
 gc_report_body(rb_objspace_t *objspace, const char *fmt, ...)
