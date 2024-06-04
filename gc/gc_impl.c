@@ -109,9 +109,6 @@ size_t rb_obj_memsize_of(VALUE obj);
 #ifndef GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO
 # define GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO 0.01
 #endif
-#ifndef GC_HEAP_OLDOBJECT_LIMIT_FACTOR
-#define GC_HEAP_OLDOBJECT_LIMIT_FACTOR 2.0
-#endif
 
 #ifndef GC_HEAP_FREE_SLOTS_MIN_RATIO
 #define GC_HEAP_FREE_SLOTS_MIN_RATIO  0.20
@@ -183,7 +180,6 @@ typedef struct {
     double heap_free_slots_goal_ratio;
     double heap_free_slots_max_ratio;
     double uncollectible_wb_unprotected_objects_limit_ratio;
-    double oldobject_limit_factor;
 
     size_t malloc_limit_min;
     size_t malloc_limit_max;
@@ -206,7 +202,6 @@ static ruby_gc_params_t gc_params = {
     GC_HEAP_FREE_SLOTS_GOAL_RATIO,
     GC_HEAP_FREE_SLOTS_MAX_RATIO,
     GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO,
-    GC_HEAP_OLDOBJECT_LIMIT_FACTOR,
 
     GC_MALLOC_LIMIT_MIN,
     GC_MALLOC_LIMIT_MAX,
@@ -2506,6 +2501,7 @@ rb_gc_impl_remove_weak(void *objspace_ptr, VALUE parent_obj, VALUE *ptr)
 {
 }
 
+// TODO: Burn this
 struct verify_internal_consistency_struct {
     rb_objspace_t *objspace;
     int err_count;
@@ -2663,8 +2659,6 @@ enum gc_stat_sym {
     gc_stat_sym_total_moved_objects,
     gc_stat_sym_remembered_wb_unprotected_objects,
     gc_stat_sym_remembered_wb_unprotected_objects_limit,
-    gc_stat_sym_old_objects,
-    gc_stat_sym_old_objects_limit,
 #if RGENGC_ESTIMATE_OLDMALLOC
     gc_stat_sym_oldmalloc_increase_bytes,
     gc_stat_sym_oldmalloc_increase_bytes_limit,
@@ -2706,8 +2700,6 @@ setup_gc_stat_symbols(void)
         S(total_moved_objects);
         S(remembered_wb_unprotected_objects);
         S(remembered_wb_unprotected_objects_limit);
-        S(old_objects);
-        S(old_objects_limit);
 #if RGENGC_ESTIMATE_OLDMALLOC
         S(oldmalloc_increase_bytes);
         S(oldmalloc_increase_bytes_limit);
@@ -3016,10 +3008,6 @@ gc_set_initial_pages(rb_objspace_t *objspace)
  * * RUBY_GC_HEAP_FREE_SLOTS_MAX_RATIO (new from 2.4)
  *   - Allow to free pages when the number of free slots is
  *     greater than the value (total_slots * (this ratio)).
- * * RUBY_GC_HEAP_OLDOBJECT_LIMIT_FACTOR (new from 2.1.1)
- *   - Do full GC when the number of old objects is more than R * N
- *     where R is this factor and
- *           N is the number of old objects just after last full GC.
  *
  *  * obsolete
  *    * RUBY_FREE_MIN       -> RUBY_GC_HEAP_FREE_SLOTS (from 2.1)
@@ -3053,7 +3041,6 @@ rb_gc_impl_set_params(void *objspace_ptr)
                         gc_params.heap_free_slots_min_ratio, 1.0, FALSE);
     get_envparam_double("RUBY_GC_HEAP_FREE_SLOTS_GOAL_RATIO", &gc_params.heap_free_slots_goal_ratio,
                         gc_params.heap_free_slots_min_ratio, gc_params.heap_free_slots_max_ratio, TRUE);
-    get_envparam_double("RUBY_GC_HEAP_OLDOBJECT_LIMIT_FACTOR", &gc_params.oldobject_limit_factor, 0.0, 0.0, TRUE);
     get_envparam_double("RUBY_GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO", &gc_params.uncollectible_wb_unprotected_objects_limit_ratio, 0.0, 0.0, TRUE);
 
     if (get_envparam_size("RUBY_GC_MALLOC_LIMIT", &gc_params.malloc_limit_min, 0)) {
