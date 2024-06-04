@@ -70,12 +70,10 @@ void rb_gc_run_obj_finalizer(VALUE objid, long count, VALUE (*callback)(long i, 
 void rb_gc_set_pending_interrupt(void);
 void rb_gc_unset_pending_interrupt(void);
 bool rb_gc_obj_free(void *objspace, VALUE obj);
-void rb_gc_mark_roots(void *objspace, const char **categoryp);
 void rb_gc_ractor_newobj_cache_foreach(void (*func)(void *cache, void *data), void *data);
 bool rb_gc_multi_ractor_p(void);
 void rb_objspace_reachable_objects_from_root(void (func)(const char *category, VALUE, void *), void *passing_data);
 void rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *data);
-void rb_obj_info_dump(VALUE obj);
 const char *rb_obj_info(VALUE obj);
 bool rb_gc_shutdown_call_finalizer_p(VALUE obj);
 uint32_t rb_gc_get_shape(VALUE obj);
@@ -2451,11 +2449,6 @@ heap_page_freelist_append(struct heap_page *page, struct free_slot *freelist)
 __attribute__((noinline))
 #endif
 
-#if GC_CAN_COMPILE_COMPACTION
-static void gc_sort_heap_by_compare_func(rb_objspace_t *objspace, gc_compact_compare_func compare_func);
-static int compare_pinned_slots(const void *left, const void *right, void *d);
-#endif
-
 static void
 gc_ractor_newobj_cache_clear(void *c, void *data)
 {
@@ -3456,41 +3449,7 @@ gc_profile_dump_major_reason(unsigned int flags, char *buff)
 }
 #endif
 
-
-#if GC_CAN_COMPILE_COMPACTION
-/*
- *  call-seq:
- *     GC.auto_compact = flag
- *
- *  Updates automatic compaction mode.
- *
- *  When enabled, the compactor will execute on every major collection.
- *
- *  Enabling compaction will degrade performance on major collections.
- */
-static VALUE
-gc_set_auto_compact(VALUE _, VALUE v)
-{
-    GC_ASSERT(GC_COMPACTION_SUPPORTED);
-
-    ruby_enable_autocompact = RTEST(v);
-
-#if RGENGC_CHECK_MODE
-    ruby_autocompact_compare_func = NULL;
-
-    if (SYMBOL_P(val)) {
-        ID id = RB_SYM2ID(val);
-        if (id == rb_intern("empty")) {
-            ruby_autocompact_compare_func = compare_free_slots;
-        }
-    }
-#endif
-
-    return v;
-}
-#else
-#  define gc_set_auto_compact rb_f_notimplement
-#endif
+#define gc_set_auto_compact rb_f_notimplement
 
 void
 rb_gc_impl_objspace_free(void *objspace_ptr)
@@ -3593,7 +3552,6 @@ rb_gc_impl_init(void)
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_SIZE")), SIZET2NUM(HEAP_PAGE_SIZE));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("SIZE_POOL_COUNT")), LONG2FIX(SIZE_POOL_COUNT));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVARGC_MAX_ALLOCATE_SIZE")), LONG2FIX(size_pool_slot_size(SIZE_POOL_COUNT - 1)));
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_OLD_AGE")), LONG2FIX(RVALUE_OLD_AGE));
     if (RB_BUG_INSTEAD_OF_RB_MEMERROR+0) {
         rb_hash_aset(gc_constants, ID2SYM(rb_intern("RB_BUG_INSTEAD_OF_RB_MEMERROR")), Qtrue);
     }
@@ -3631,12 +3589,10 @@ rb_gc_impl_init(void)
         rb_define_const(rb_mGC, "OPTS", opts = rb_ary_new());
 #define OPT(o) if (o) rb_ary_push(opts, rb_interned_str(#o, sizeof(#o) - 1))
         OPT(GC_PROFILE_MORE_DETAIL);
-        OPT(GC_ENABLE_LAZY_SWEEP);
         OPT(CALC_EXACT_MALLOC_SIZE);
         OPT(MALLOC_ALLOCATED_SIZE);
         OPT(MALLOC_ALLOCATED_SIZE_CHECK);
         OPT(GC_PROFILE_DETAIL_MEMORY);
-        OPT(GC_COMPACTION_SUPPORTED);
 #undef OPT
         OBJ_FREEZE(opts);
     }
