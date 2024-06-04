@@ -120,27 +120,7 @@ size_t rb_obj_memsize_of(VALUE obj);
 #define GC_HEAP_FREE_SLOTS_MAX_RATIO  0.65
 #endif
 
-#ifndef GC_MALLOC_LIMIT_MIN
-#define GC_MALLOC_LIMIT_MIN (16 * 1024 * 1024 /* 16MB */)
-#endif
-#ifndef GC_MALLOC_LIMIT_MAX
-#define GC_MALLOC_LIMIT_MAX (32 * 1024 * 1024 /* 32MB */)
-#endif
-#ifndef GC_MALLOC_LIMIT_GROWTH_FACTOR
-#define GC_MALLOC_LIMIT_GROWTH_FACTOR 1.4
-#endif
-
-#ifndef GC_OLDMALLOC_LIMIT_MIN
-#define GC_OLDMALLOC_LIMIT_MIN (16 * 1024 * 1024 /* 16MB */)
-#endif
-#ifndef GC_OLDMALLOC_LIMIT_GROWTH_FACTOR
-#define GC_OLDMALLOC_LIMIT_GROWTH_FACTOR 1.2
-#endif
-#ifndef GC_OLDMALLOC_LIMIT_MAX
-#define GC_OLDMALLOC_LIMIT_MAX (128 * 1024 * 1024 /* 128MB */)
-#endif
-
-
+// TODO: Fire
 #ifndef GC_CAN_COMPILE_COMPACTION
 # define GC_CAN_COMPILE_COMPACTION 0
 #endif
@@ -181,14 +161,6 @@ typedef struct {
     double heap_free_slots_max_ratio;
     double uncollectible_wb_unprotected_objects_limit_ratio;
 
-    size_t malloc_limit_min;
-    size_t malloc_limit_max;
-    double malloc_limit_growth_factor;
-
-    size_t oldmalloc_limit_min;
-    size_t oldmalloc_limit_max;
-    double oldmalloc_limit_growth_factor;
-
     VALUE gc_stress;
 } ruby_gc_params_t;
 
@@ -202,14 +174,6 @@ static ruby_gc_params_t gc_params = {
     GC_HEAP_FREE_SLOTS_GOAL_RATIO,
     GC_HEAP_FREE_SLOTS_MAX_RATIO,
     GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO,
-
-    GC_MALLOC_LIMIT_MIN,
-    GC_MALLOC_LIMIT_MAX,
-    GC_MALLOC_LIMIT_GROWTH_FACTOR,
-
-    GC_OLDMALLOC_LIMIT_MIN,
-    GC_OLDMALLOC_LIMIT_MAX,
-    GC_OLDMALLOC_LIMIT_GROWTH_FACTOR,
 
     FALSE,
 };
@@ -583,7 +547,6 @@ asan_unlock_freelist(struct heap_page *page)
 
 VALUE *ruby_initial_gc_stress_ptr = &ruby_initial_gc_stress;
 
-#define malloc_limit		objspace->malloc_params.limit
 #define malloc_increase 	objspace->malloc_params.increase
 #define malloc_allocated_size 	objspace->malloc_params.allocated_size
 #define heap_pages_sorted       objspace->heap_pages.sorted
@@ -2748,7 +2711,6 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     SET(total_allocated_objects, total_allocated_objects(objspace));
     SET(total_freed_objects, total_freed_objects(objspace));
     SET(malloc_increase_bytes, malloc_increase);
-    SET(malloc_increase_bytes_limit, malloc_limit);
 #undef SET
 
     if (!NIL_P(key)) { /* matched key should return above */
@@ -3013,13 +2975,6 @@ gc_set_initial_pages(rb_objspace_t *objspace)
  *    * RUBY_FREE_MIN       -> RUBY_GC_HEAP_FREE_SLOTS (from 2.1)
  *    * RUBY_HEAP_MIN_SLOTS -> RUBY_GC_HEAP_INIT_SLOTS (from 2.1)
  *
- * * RUBY_GC_MALLOC_LIMIT
- * * RUBY_GC_MALLOC_LIMIT_MAX (new from 2.1)
- * * RUBY_GC_MALLOC_LIMIT_GROWTH_FACTOR (new from 2.1)
- *
- * * RUBY_GC_OLDMALLOC_LIMIT (new from 2.1)
- * * RUBY_GC_OLDMALLOC_LIMIT_MAX (new from 2.1)
- * * RUBY_GC_OLDMALLOC_LIMIT_GROWTH_FACTOR (new from 2.1)
  */
 
 void
@@ -3042,15 +2997,6 @@ rb_gc_impl_set_params(void *objspace_ptr)
     get_envparam_double("RUBY_GC_HEAP_FREE_SLOTS_GOAL_RATIO", &gc_params.heap_free_slots_goal_ratio,
                         gc_params.heap_free_slots_min_ratio, gc_params.heap_free_slots_max_ratio, TRUE);
     get_envparam_double("RUBY_GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO", &gc_params.uncollectible_wb_unprotected_objects_limit_ratio, 0.0, 0.0, TRUE);
-
-    if (get_envparam_size("RUBY_GC_MALLOC_LIMIT", &gc_params.malloc_limit_min, 0)) {
-        malloc_limit = gc_params.malloc_limit_min;
-    }
-    get_envparam_size  ("RUBY_GC_MALLOC_LIMIT_MAX", &gc_params.malloc_limit_max, 0);
-    if (!gc_params.malloc_limit_max) { /* ignore max-check if 0 */
-        gc_params.malloc_limit_max = SIZE_MAX;
-    }
-    get_envparam_double("RUBY_GC_MALLOC_LIMIT_GROWTH_FACTOR", &gc_params.malloc_limit_growth_factor, 1.0, 0.0, FALSE);
 }
 
 static inline size_t
@@ -3493,7 +3439,6 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
 {
     rb_objspace_t *objspace = objspace_ptr;
 
-    malloc_limit = gc_params.malloc_limit_min;
     objspace->finalize_deferred_pjob = rb_postponed_job_preregister(0, gc_finalize_deferred, objspace);
     if (objspace->finalize_deferred_pjob == POSTPONED_JOB_HANDLE_INVALID) {
         rb_bug("Could not preregister postponed job for GC");
