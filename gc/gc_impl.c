@@ -56,28 +56,13 @@ unsigned int rb_gc_vm_lock(void);
 void rb_gc_vm_unlock(unsigned int lev);
 unsigned int rb_gc_cr_lock(void);
 void rb_gc_cr_unlock(unsigned int lev);
-unsigned int rb_gc_vm_lock_no_barrier(void);
-void rb_gc_vm_unlock_no_barrier(unsigned int lev);
-void rb_gc_vm_barrier(void);
-size_t rb_gc_obj_optimal_size(VALUE obj);
-void rb_gc_reachable_objects_from_callback(VALUE obj);
-void rb_gc_event_hook(VALUE obj, rb_event_flag_t event);
-void *rb_gc_get_objspace(void);
 size_t rb_size_mul_or_raise(size_t x, size_t y, VALUE exc);
 void rb_gc_run_obj_finalizer(VALUE objid, long count, VALUE (*callback)(long i, void *data), void *data);
 void rb_gc_set_pending_interrupt(void);
 void rb_gc_unset_pending_interrupt(void);
 bool rb_gc_obj_free(void *objspace, VALUE obj);
-void rb_gc_ractor_newobj_cache_foreach(void (*func)(void *cache, void *data), void *data);
-bool rb_gc_multi_ractor_p(void);
-void rb_objspace_reachable_objects_from_root(void (func)(const char *category, VALUE, void *), void *passing_data);
-void rb_objspace_reachable_objects_from(VALUE obj, void (func)(VALUE, void *), void *data);
 const char *rb_obj_info(VALUE obj);
 bool rb_gc_shutdown_call_finalizer_p(VALUE obj);
-uint32_t rb_gc_get_shape(VALUE obj);
-void rb_gc_set_shape(VALUE obj, uint32_t shape_id);
-uint32_t rb_gc_rebuild_shape(VALUE obj, size_t size_pool_id);
-size_t rb_obj_memsize_of(VALUE obj);
 
 #ifndef VM_CHECK_MODE
 # define VM_CHECK_MODE RUBY_DEBUG
@@ -161,28 +146,6 @@ static ruby_gc_params_t gc_params = {
 
     FALSE,
 };
-
-#ifndef GC_PROFILE_MORE_DETAIL
-# define GC_PROFILE_MORE_DETAIL 0
-#endif
-#ifndef GC_PROFILE_DETAIL_MEMORY
-# define GC_PROFILE_DETAIL_MEMORY 0
-#endif
-#ifndef CALC_EXACT_MALLOC_SIZE
-# define CALC_EXACT_MALLOC_SIZE USE_GC_MALLOC_OBJ_INFO_DETAILS
-#endif
-typedef struct gc_profile_record {
-    unsigned int flags;
-
-    double gc_time;
-    double gc_invoke_time;
-
-    size_t heap_total_objects;
-    size_t heap_use_size;
-    size_t heap_total_size;
-    size_t moved_objects;
-
-} gc_profile_record;
 
 struct heap_page_header {
     struct heap_page *page;
@@ -516,10 +479,7 @@ struct RZombie {
 
 #define RZOMBIE(o) ((struct RZombie *)(o))
 
-NO_SANITIZE("memory", static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr));
-
-#define gc_prof_record(objspace) (objspace)->profile.current_record
-#define gc_prof_enabled(objspace) ((objspace)->profile.run && (objspace)->profile.current_record)
+NO_SANITIZE("memory", static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr))
 
 # define gc_report if (!RUBY_DEBUG) {} else gc_report_body
 PRINTF_ARGS(static void gc_report_body(rb_objspace_t *objspace, const char *fmt, ...), 2, 3);
@@ -1321,6 +1281,7 @@ newobj_alloc(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t si
         unsigned int lev;
         bool unlock_vm = false;
 
+        // TODO: vm_locked can be removed from this function
         if (!vm_locked) {
             lev = rb_gc_cr_lock();
             vm_locked = true;
@@ -1930,176 +1891,6 @@ enum {HEAP_PAGE_LOCK = PROT_NONE, HEAP_PAGE_UNLOCK = PROT_READ | PROT_WRITE};
 #define protect_page_body(body, protect) !mprotect((body), HEAP_PAGE_SIZE, (protect))
 #endif
 
-#if defined(__MINGW32__) || defined(_WIN32)
-# define GC_COMPACTION_SUPPORTED 1
-#else
-/* If not MinGW, Windows, or does not have mmap, we cannot use mprotect for
- * the read barrier, so we must disable compaction. */
-# define GC_COMPACTION_SUPPORTED (GC_CAN_COMPILE_COMPACTION && HEAP_PAGE_ALLOC_USE_MMAP)
-#endif
-
-#if GC_CAN_COMPILE_COMPACTION
-static void
-read_barrier_handler(uintptr_t original_address)
-{
-    VALUE obj;
-    rb_objspace_t *objspace = (rb_objspace_t *)rb_gc_get_objspace();
-
-    /* Calculate address aligned to slots. */
-    uintptr_t address = original_address - (original_address % BASE_SLOT_SIZE);
-
-    obj = (VALUE)address;
-
-    struct heap_page_body *page_body = GET_PAGE_BODY(obj);
-
-    /* If the page_body is NULL, then mprotect cannot handle it and will crash
-     * with "Cannot allocate memory". */
-    if (page_body == NULL) {
-        rb_bug("read_barrier_handler: segmentation fault at %p", (void *)original_address);
-    }
-
-    int lev = rb_gc_vm_lock();
-    {
-        unlock_page_body(objspace, page_body);
-
-        objspace->profile.read_barrier_faults++;
-
-        invalidate_moved_page(objspace, GET_HEAP_PAGE(obj));
-    }
-    rb_gc_vm_unlock(lev);
-}
-#endif
-
-#if !GC_CAN_COMPILE_COMPACTION
-#elif defined(_WIN32)
-static LPTOP_LEVEL_EXCEPTION_FILTER old_handler;
-typedef void (*signal_handler)(int);
-static signal_handler old_sigsegv_handler;
-
-static LONG WINAPI
-read_barrier_signal(EXCEPTION_POINTERS *info)
-{
-    /* EXCEPTION_ACCESS_VIOLATION is what's raised by access to protected pages */
-    if (info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
-        /* > The second array element specifies the virtual address of the inaccessible data.
-         * https://docs.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-exception_record
-         *
-         * Use this address to invalidate the page */
-        read_barrier_handler((uintptr_t)info->ExceptionRecord->ExceptionInformation[1]);
-        return EXCEPTION_CONTINUE_EXECUTION;
-    }
-    else {
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
-}
-
-static void
-uninstall_handlers(void)
-{
-    signal(SIGSEGV, old_sigsegv_handler);
-    SetUnhandledExceptionFilter(old_handler);
-}
-
-static void
-install_handlers(void)
-{
-    /* Remove SEGV handler so that the Unhandled Exception Filter handles it */
-    old_sigsegv_handler = signal(SIGSEGV, NULL);
-    /* Unhandled Exception Filter has access to the violation address similar
-     * to si_addr from sigaction */
-    old_handler = SetUnhandledExceptionFilter(read_barrier_signal);
-}
-#else
-static struct sigaction old_sigbus_handler;
-static struct sigaction old_sigsegv_handler;
-
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-static exception_mask_t old_exception_masks[32];
-static mach_port_t old_exception_ports[32];
-static exception_behavior_t old_exception_behaviors[32];
-static thread_state_flavor_t old_exception_flavors[32];
-static mach_msg_type_number_t old_exception_count;
-
-static void
-disable_mach_bad_access_exc(void)
-{
-    old_exception_count = sizeof(old_exception_masks) / sizeof(old_exception_masks[0]);
-    task_swap_exception_ports(
-        mach_task_self(), EXC_MASK_BAD_ACCESS,
-        MACH_PORT_NULL, EXCEPTION_DEFAULT, 0,
-        old_exception_masks, &old_exception_count,
-        old_exception_ports, old_exception_behaviors, old_exception_flavors
-    );
-}
-
-static void
-restore_mach_bad_access_exc(void)
-{
-    for (mach_msg_type_number_t i = 0; i < old_exception_count; i++) {
-        task_set_exception_ports(
-            mach_task_self(),
-            old_exception_masks[i], old_exception_ports[i],
-            old_exception_behaviors[i], old_exception_flavors[i]
-        );
-    }
-}
-#endif
-
-static void
-read_barrier_signal(int sig, siginfo_t *info, void *data)
-{
-    // setup SEGV/BUS handlers for errors
-    struct sigaction prev_sigbus, prev_sigsegv;
-    sigaction(SIGBUS, &old_sigbus_handler, &prev_sigbus);
-    sigaction(SIGSEGV, &old_sigsegv_handler, &prev_sigsegv);
-
-    // enable SIGBUS/SEGV
-    sigset_t set, prev_set;
-    sigemptyset(&set);
-    sigaddset(&set, SIGBUS);
-    sigaddset(&set, SIGSEGV);
-    sigprocmask(SIG_UNBLOCK, &set, &prev_set);
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-    disable_mach_bad_access_exc();
-#endif
-    // run handler
-    read_barrier_handler((uintptr_t)info->si_addr);
-
-    // reset SEGV/BUS handlers
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-    restore_mach_bad_access_exc();
-#endif
-    sigaction(SIGBUS, &prev_sigbus, NULL);
-    sigaction(SIGSEGV, &prev_sigsegv, NULL);
-    sigprocmask(SIG_SETMASK, &prev_set, NULL);
-}
-
-static void
-uninstall_handlers(void)
-{
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-    restore_mach_bad_access_exc();
-#endif
-    sigaction(SIGBUS, &old_sigbus_handler, NULL);
-    sigaction(SIGSEGV, &old_sigsegv_handler, NULL);
-}
-
-static void
-install_handlers(void)
-{
-    struct sigaction action;
-    memset(&action, 0, sizeof(struct sigaction));
-    sigemptyset(&action.sa_mask);
-    action.sa_sigaction = read_barrier_signal;
-    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
-
-    sigaction(SIGBUS, &action, &old_sigbus_handler);
-    sigaction(SIGSEGV, &action, &old_sigsegv_handler);
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-    disable_mach_bad_access_exc();
-#endif
-}
-#endif
 
 static void
 heap_page_freelist_append(struct heap_page *page, struct free_slot *freelist)
@@ -3018,50 +2809,12 @@ rb_gc_impl_adjust_memory_usage(void *objspace_ptr, ssize_t diff)
     }
 }
 
-// TODO: move GC profiler stuff back into gc.c
-/*
-  ------------------------------ GC profiler ------------------------------
-*/
-
-
-#if GC_PROFILE_MORE_DETAIL
-#define MAJOR_REASON_MAX 0x10
-
-static char *
-gc_profile_dump_major_reason(unsigned int flags, char *buff)
-{
-    unsigned int reason = flags & GPR_FLAG_MAJOR_MASK;
-    int i = 0;
-
-    if (reason == GPR_FLAG_NONE) {
-        buff[0] = '-';
-        buff[1] = 0;
-    }
-    else {
-#define C(x, s) \
-  if (reason & GPR_FLAG_MAJOR_BY_##x) { \
-      buff[i++] = #x[0]; \
-      if (i >= MAJOR_REASON_MAX) rb_bug("gc_profile_dump_major_reason: overflow"); \
-      buff[i] = 0; \
-  }
-        C(NOFREE, N);
-        C(OLDGEN, O);
-        C(SHADY,  S);
-#if RGENGC_ESTIMATE_OLDMALLOC
-        C(OLDMALLOC, M);
-#endif
-#undef C
-    }
-    return buff;
-}
-#endif
-
 void
 rb_gc_impl_objspace_free(void *objspace_ptr)
 {
 }
 
-void
+    void
 rb_gc_impl_objspace_mark(void *objspace_ptr)
 {
 }
@@ -3152,13 +2905,7 @@ rb_gc_impl_init(void)
 
     {
         VALUE opts;
-        /* \GC build options */
         rb_define_const(rb_mGC, "OPTS", opts = rb_ary_new());
-#define OPT(o) if (o) rb_ary_push(opts, rb_interned_str(#o, sizeof(#o) - 1))
-        OPT(GC_PROFILE_MORE_DETAIL);
-        OPT(CALC_EXACT_MALLOC_SIZE);
-        OPT(GC_PROFILE_DETAIL_MEMORY);
-#undef OPT
         OBJ_FREEZE(opts);
     }
 }
