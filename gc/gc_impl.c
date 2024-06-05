@@ -181,8 +181,6 @@ typedef struct rb_size_pool_struct {
     size_t total_allocated_objects;
     size_t total_freed_objects;
 
-    /* Sweeping statistics */
-    size_t freed_slots;
     size_t empty_slots;
 
     rb_heap_t eden_heap;
@@ -599,8 +597,7 @@ rb_gc_impl_object_id_to_ref(void *objspace_ptr, VALUE object_id)
     rb_objspace_t *objspace = objspace_ptr;
 
     VALUE obj;
-    if (st_lookup(objspace->id_to_obj_tbl, object_id, &obj) &&
-            !rb_gc_impl_garbage_object_p(objspace, obj)) {
+    if (st_lookup(objspace->id_to_obj_tbl, object_id, &obj)) {
         return obj;
     }
 
@@ -983,15 +980,6 @@ heap_extend_pages(rb_objspace_t *objspace, rb_size_pool_t *size_pool, size_t fre
         if (f < 1.0) f = 1.1;
 
         next_used = (size_t)(f * used);
-
-        if (0) {
-            fprintf(stderr,
-                    "free_slots(%8"PRIuSIZE")/total_slots(%8"PRIuSIZE")=%1.2f,"
-                    " G(%1.2f), f(%1.2f),"
-                    " used(%8"PRIuSIZE") => next_used(%8"PRIuSIZE")\n",
-                    free_slots, total_slots, free_slots/(double)total_slots,
-                    goal_ratio, f, used, next_used);
-        }
     }
 
     if (gc_params.growth_max_slots > 0) {
@@ -1028,7 +1016,7 @@ heap_prepare(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap
 {
     GC_ASSERT(heap->free_pages == NULL);
     size_pool_allocatable_pages_expand(objspace, size_pool,
-                                       size_pool->freed_slots + size_pool->empty_slots,
+                                       size_pool->empty_slots,
                                        heap->total_slots,
                                        heap->total_pages);
     GC_ASSERT(size_pool->allocatable_pages > 0);
