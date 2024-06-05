@@ -115,7 +115,6 @@ typedef struct ractor_newobj_size_pool_cache {
 } rb_ractor_newobj_size_pool_cache_t;
 
 typedef struct ractor_newobj_cache {
-    size_t incremental_mark_step_allocated_slots;
     rb_ractor_newobj_size_pool_cache_t size_pool_caches[SIZE_POOL_COUNT];
 } rb_ractor_newobj_cache_t;
 
@@ -1802,8 +1801,6 @@ static void
 gc_ractor_newobj_cache_clear(void *c, void *data)
 {
     rb_ractor_newobj_cache_t *newobj_cache = c;
-
-    newobj_cache->incremental_mark_step_allocated_slots = 0;
 
     for (size_t size_pool_idx = 0; size_pool_idx < SIZE_POOL_COUNT; size_pool_idx++) {
         rb_ractor_newobj_size_pool_cache_t *cache = &newobj_cache->size_pool_caches[size_pool_idx];
