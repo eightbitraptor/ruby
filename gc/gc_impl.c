@@ -202,26 +202,6 @@ typedef struct gc_profile_record {
     size_t heap_total_size;
     size_t moved_objects;
 
-#if GC_PROFILE_MORE_DETAIL
-    double gc_mark_time;
-    double gc_sweep_time;
-
-    size_t heap_use_pages;
-    size_t heap_live_objects;
-    size_t heap_free_objects;
-
-    size_t allocate_increase;
-    size_t allocate_limit;
-
-    double prepare_time;
-    size_t removing_objects;
-    size_t empty_objects;
-#if GC_PROFILE_DETAIL_MEMORY
-    long maxrss;
-    long minflt;
-    long majflt;
-#endif
-#endif
 #if MALLOC_ALLOCATED_SIZE
     size_t allocated_size;
 #endif
