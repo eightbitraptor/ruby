@@ -628,12 +628,9 @@ minimum_pages_for_size_pool(rb_objspace_t *objspace, rb_size_pool_t *size_pool)
     return slots_to_pages_for_size_pool(objspace, size_pool, init_slots);
 }
 
-static VALUE initial_stress = Qfalse;
-
 void
 rb_gc_impl_initial_stress_set(VALUE flag)
 {
-    initial_stress = flag;
 }
 
 static int
