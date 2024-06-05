@@ -452,10 +452,6 @@ static const bool HEAP_PAGE_ALLOC_USE_MMAP = false;
 static bool heap_page_alloc_use_mmap;
 #endif
 
-#define RVALUE_AGE_BIT_COUNT 2
-#define RVALUE_AGE_BIT_MASK (((bits_t)1 << RVALUE_AGE_BIT_COUNT) - 1)
-#define RVALUE_OLD_AGE   3
-
 struct free_slot {
     VALUE flags;		/* always 0 for freed obj */
     struct free_slot *next;
@@ -482,16 +478,6 @@ struct heap_page {
     struct ccan_list_node page_node;
 
     bits_t wb_unprotected_bits[HEAP_PAGE_BITMAP_LIMIT];
-    /* the following three bitmaps are cleared at the beginning of full GC */
-    bits_t mark_bits[HEAP_PAGE_BITMAP_LIMIT];
-    bits_t uncollectible_bits[HEAP_PAGE_BITMAP_LIMIT];
-    bits_t marking_bits[HEAP_PAGE_BITMAP_LIMIT];
-
-    bits_t remembered_bits[HEAP_PAGE_BITMAP_LIMIT];
-
-    /* If set, the object is not movable */
-    bits_t pinned_bits[HEAP_PAGE_BITMAP_LIMIT];
-    bits_t age_bits[HEAP_PAGE_BITMAP_LIMIT * RVALUE_AGE_BIT_COUNT];
 };
 
 /*
