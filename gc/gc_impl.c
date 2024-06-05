@@ -2,10 +2,8 @@
 
 #include <signal.h>
 
-#ifndef _WIN32
-# include <sys/mman.h>
-# include <unistd.h>
-#endif
+#include <sys/mman.h>
+#include <unistd.h>
 
 #if !defined(PAGE_SIZE) && defined(HAVE_SYS_USER_H)
 /* LIST_HEAD conflicts with sys/queue.h on macOS */
@@ -178,9 +176,6 @@ static ruby_gc_params_t gc_params = {
 #endif
 #ifndef GC_PROFILE_DETAIL_MEMORY
 # define GC_PROFILE_DETAIL_MEMORY 0
-#endif
-#ifndef GC_ENABLE_LAZY_SWEEP
-# define GC_ENABLE_LAZY_SWEEP   1
 #endif
 #ifndef CALC_EXACT_MALLOC_SIZE
 # define CALC_EXACT_MALLOC_SIZE USE_GC_MALLOC_OBJ_INFO_DETAILS
@@ -476,8 +471,6 @@ struct heap_page {
     uintptr_t start;
     struct free_slot *freelist;
     struct ccan_list_node page_node;
-
-    bits_t wb_unprotected_bits[HEAP_PAGE_BITMAP_LIMIT];
 };
 
 /*
@@ -507,22 +500,7 @@ asan_unlock_freelist(struct heap_page *page)
 #define BITMAP_OFFSET(p) (NUM_IN_PAGE(p) & (BITS_BITLENGTH-1))
 #define BITMAP_BIT(p)    ((bits_t)1 << BITMAP_OFFSET(p))
 
-/* Bitmap Operations */
-#define MARKED_IN_BITMAP(bits, p)    ((bits)[BITMAP_INDEX(p)] & BITMAP_BIT(p))
-#define MARK_IN_BITMAP(bits, p)      ((bits)[BITMAP_INDEX(p)] = (bits)[BITMAP_INDEX(p)] | BITMAP_BIT(p))
-#define CLEAR_IN_BITMAP(bits, p)     ((bits)[BITMAP_INDEX(p)] = (bits)[BITMAP_INDEX(p)] & ~BITMAP_BIT(p))
-
-/* getting bitmap */
-#define GET_HEAP_MARK_BITS(x)           (&GET_HEAP_PAGE(x)->mark_bits[0])
-#define GET_HEAP_PINNED_BITS(x)         (&GET_HEAP_PAGE(x)->pinned_bits[0])
-#define GET_HEAP_UNCOLLECTIBLE_BITS(x)  (&GET_HEAP_PAGE(x)->uncollectible_bits[0])
-#define GET_HEAP_WB_UNPROTECTED_BITS(x) (&GET_HEAP_PAGE(x)->wb_unprotected_bits[0])
-#define GET_HEAP_MARKING_BITS(x)        (&GET_HEAP_PAGE(x)->marking_bits[0])
-
 #define GC_SWEEP_PAGES_FREEABLE_PER_STEP 3
-
-#define RVALUE_AGE_BITMAP_INDEX(n)  (NUM_IN_PAGE(n) / (BITS_BITLENGTH / RVALUE_AGE_BIT_COUNT))
-#define RVALUE_AGE_BITMAP_OFFSET(n) ((NUM_IN_PAGE(n) % (BITS_BITLENGTH / RVALUE_AGE_BIT_COUNT)) * RVALUE_AGE_BIT_COUNT)
 
 #define ruby_initial_gc_stress	gc_params.gc_stress
 
@@ -1420,11 +1398,6 @@ newobj_init(VALUE klass, VALUE flags, int wb_protected, rb_objspace_t *objspace,
     void rb_ractor_setup_belonging(VALUE obj);
     rb_ractor_setup_belonging(obj);
 #endif
-
-    if (RB_UNLIKELY(wb_protected == FALSE)) {
-        MARK_IN_BITMAP(GET_HEAP_WB_UNPROTECTED_BITS(obj), obj);
-    }
-
 
     gc_report(objspace, "newobj: %s\n", rb_obj_info(obj));
 
