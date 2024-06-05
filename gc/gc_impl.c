@@ -127,9 +127,6 @@ typedef struct {
     double heap_free_slots_min_ratio;
     double heap_free_slots_goal_ratio;
     double heap_free_slots_max_ratio;
-    double uncollectible_wb_unprotected_objects_limit_ratio;
-
-    VALUE gc_stress;
 } ruby_gc_params_t;
 
 static ruby_gc_params_t gc_params = {
@@ -141,9 +138,6 @@ static ruby_gc_params_t gc_params = {
     GC_HEAP_FREE_SLOTS_MIN_RATIO,
     GC_HEAP_FREE_SLOTS_GOAL_RATIO,
     GC_HEAP_FREE_SLOTS_MAX_RATIO,
-    GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO,
-
-    FALSE,
 };
 
 struct heap_page_header {
@@ -2363,7 +2357,7 @@ rb_gc_impl_set_params(void *objspace_ptr)
                         gc_params.heap_free_slots_min_ratio, 1.0, FALSE);
     get_envparam_double("RUBY_GC_HEAP_FREE_SLOTS_GOAL_RATIO", &gc_params.heap_free_slots_goal_ratio,
                         gc_params.heap_free_slots_min_ratio, gc_params.heap_free_slots_max_ratio, TRUE);
-    get_envparam_double("RUBY_GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO", &gc_params.uncollectible_wb_unprotected_objects_limit_ratio, 0.0, 0.0, TRUE);
+    get_envparam_double("RUBY_GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO", 0, 0.0, 0.0, TRUE);
 }
 
 static inline size_t
