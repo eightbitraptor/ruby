@@ -208,12 +208,6 @@ typedef struct gc_profile_record {
 
 } gc_profile_record;
 
-typedef uintptr_t bits_t;
-enum {
-    BITS_SIZE = sizeof(bits_t),
-    BITS_BITLENGTH = ( BITS_SIZE * CHAR_BIT )
-};
-
 struct heap_page_header {
     struct heap_page *page;
 };
@@ -344,8 +338,6 @@ enum {
     HEAP_PAGE_ALIGN_MASK = (~(~0UL << HEAP_PAGE_ALIGN_LOG)),
     HEAP_PAGE_SIZE = HEAP_PAGE_ALIGN,
     HEAP_PAGE_OBJ_LIMIT = (unsigned int)((HEAP_PAGE_SIZE - sizeof(struct heap_page_header)) / BASE_SLOT_SIZE),
-    HEAP_PAGE_BITMAP_LIMIT = CEILDIV(CEILDIV(HEAP_PAGE_SIZE, BASE_SLOT_SIZE), BITS_BITLENGTH),
-    HEAP_PAGE_BITMAP_SIZE = (BITS_SIZE * HEAP_PAGE_BITMAP_LIMIT),
 };
 #define HEAP_PAGE_ALIGN (1 << HEAP_PAGE_ALIGN_LOG)
 #define HEAP_PAGE_SIZE HEAP_PAGE_ALIGN
@@ -440,14 +432,11 @@ asan_unlock_freelist(struct heap_page *page)
     asan_unpoison_memory_region(&page->freelist, sizeof(struct free_list *), false);
 }
 
-#define GET_PAGE_BODY(x)   ((struct heap_page_body *)((bits_t)(x) & ~(HEAP_PAGE_ALIGN_MASK)))
+#define GET_PAGE_BODY(x)   ((struct heap_page_body *)((uintptr_t)(x) & ~(HEAP_PAGE_ALIGN_MASK)))
 #define GET_PAGE_HEADER(x) (&GET_PAGE_BODY(x)->header)
 #define GET_HEAP_PAGE(x)   (GET_PAGE_HEADER(x)->page)
 
-#define NUM_IN_PAGE(p)   (((bits_t)(p) & HEAP_PAGE_ALIGN_MASK) / BASE_SLOT_SIZE)
-#define BITMAP_INDEX(p)  (NUM_IN_PAGE(p) / BITS_BITLENGTH )
-#define BITMAP_OFFSET(p) (NUM_IN_PAGE(p) & (BITS_BITLENGTH-1))
-#define BITMAP_BIT(p)    ((bits_t)1 << BITMAP_OFFSET(p))
+#define NUM_IN_PAGE(p)   (((uintptr_t)(p) & HEAP_PAGE_ALIGN_MASK) / BASE_SLOT_SIZE)
 
 #define GC_SWEEP_PAGES_FREEABLE_PER_STEP 3
 
@@ -3368,7 +3357,7 @@ rb_gc_impl_init(void)
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("BASE_SLOT_SIZE")), SIZET2NUM(BASE_SLOT_SIZE - RVALUE_OVERHEAD));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_OVERHEAD")), SIZET2NUM(RVALUE_OVERHEAD));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_OBJ_LIMIT")), SIZET2NUM(HEAP_PAGE_OBJ_LIMIT));
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_BITMAP_SIZE")), SIZET2NUM(HEAP_PAGE_BITMAP_SIZE));
+    rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_BITMAP_SIZE")), SIZET2NUM(0));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_SIZE")), SIZET2NUM(HEAP_PAGE_SIZE));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("SIZE_POOL_COUNT")), LONG2FIX(SIZE_POOL_COUNT));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVARGC_MAX_ALLOCATE_SIZE")), LONG2FIX(size_pool_slot_size(SIZE_POOL_COUNT - 1)));
