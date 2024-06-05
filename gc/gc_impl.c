@@ -427,9 +427,10 @@ struct RZombie {
 
 #define RZOMBIE(o) ((struct RZombie *)(o))
 
-NO_SANITIZE("memory", static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr))
+NO_SANITIZE("memory", static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr));
 
-# define gc_report if (!RUBY_DEBUG) {} else gc_report_body
+# define gc_report(objspace, ...) \
+    if (!RUBY_DEBUG) {} else gc_report_body(objspace, __VA_ARGS__)
 PRINTF_ARGS(static void gc_report_body(rb_objspace_t *objspace, const char *fmt, ...), 2, 3);
 
 static void gc_finalize_deferred(void *dmy);
