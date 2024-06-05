@@ -191,37 +191,6 @@ static ruby_gc_params_t gc_params = {
 # define MALLOC_ALLOCATED_SIZE_CHECK 0
 #endif
 
-typedef enum {
-    GPR_FLAG_NONE               = 0x000,
-    /* major reason */
-    GPR_FLAG_MAJOR_BY_NOFREE    = 0x001,
-    GPR_FLAG_MAJOR_BY_OLDGEN    = 0x002,
-    GPR_FLAG_MAJOR_BY_SHADY     = 0x004,
-    GPR_FLAG_MAJOR_BY_FORCE     = 0x008,
-#if RGENGC_ESTIMATE_OLDMALLOC
-    GPR_FLAG_MAJOR_BY_OLDMALLOC = 0x020,
-#endif
-    GPR_FLAG_MAJOR_MASK         = 0x0ff,
-
-    /* gc reason */
-    GPR_FLAG_NEWOBJ             = 0x100,
-    GPR_FLAG_MALLOC             = 0x200,
-    GPR_FLAG_METHOD             = 0x400,
-    GPR_FLAG_CAPI               = 0x800,
-    GPR_FLAG_STRESS            = 0x1000,
-
-    /* others */
-    GPR_FLAG_IMMEDIATE_SWEEP   = 0x2000,
-    GPR_FLAG_HAVE_FINALIZE     = 0x4000,
-    GPR_FLAG_IMMEDIATE_MARK    = 0x8000,
-    GPR_FLAG_FULL_MARK        = 0x10000,
-    GPR_FLAG_COMPACT          = 0x20000,
-
-    GPR_DEFAULT_REASON =
-        (GPR_FLAG_FULL_MARK | GPR_FLAG_IMMEDIATE_MARK |
-         GPR_FLAG_IMMEDIATE_SWEEP | GPR_FLAG_CAPI),
-} gc_profile_record_flag;
-
 typedef struct gc_profile_record {
     unsigned int flags;
 
