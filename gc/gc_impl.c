@@ -769,11 +769,7 @@ heap_unlink_page(rb_objspace_t *objspace, rb_heap_t *heap, struct heap_page *pag
 static void
 gc_aligned_free(void *ptr, size_t size)
 {
-#if defined __MINGW32__
-    __mingw_aligned_free(ptr);
-#elif defined _WIN32
-    _aligned_free(ptr);
-#elif defined(HAVE_POSIX_MEMALIGN) || defined(HAVE_MEMALIGN)
+#if defined(HAVE_POSIX_MEMALIGN) || defined(HAVE_MEMALIGN)
     free(ptr);
 #else
     free(((void**)ptr)[-1]);
@@ -807,12 +803,7 @@ gc_aligned_malloc(size_t alignment, size_t size)
 
     void *res;
 
-#if defined __MINGW32__
-    res = __mingw_aligned_malloc(size, alignment);
-#elif defined _WIN32
-    void *_aligned_malloc(size_t, size_t);
-    res = _aligned_malloc(size, alignment);
-#elif defined(HAVE_POSIX_MEMALIGN)
+#if defined(HAVE_POSIX_MEMALIGN)
     if (posix_memalign(&res, alignment, size) != 0) {
         return NULL;
     }
@@ -1864,20 +1855,8 @@ objspace_free_slots(rb_objspace_t *objspace)
     return objspace_available_slots(objspace) - objspace_live_slots(objspace) - heap_pages_final_slots;
 }
 
-#if defined(_WIN32)
-enum {HEAP_PAGE_LOCK = PAGE_NOACCESS, HEAP_PAGE_UNLOCK = PAGE_READWRITE};
-
-static BOOL
-protect_page_body(struct heap_page_body *body, DWORD protect)
-{
-    DWORD old_protect;
-    return VirtualProtect(body, HEAP_PAGE_SIZE, protect, &old_protect) != 0;
-}
-#else
 enum {HEAP_PAGE_LOCK = PROT_NONE, HEAP_PAGE_UNLOCK = PROT_READ | PROT_WRITE};
 #define protect_page_body(body, protect) !mprotect((body), HEAP_PAGE_SIZE, (protect))
-#endif
-
 
 static void
 heap_page_freelist_append(struct heap_page *page, struct free_slot *freelist)
