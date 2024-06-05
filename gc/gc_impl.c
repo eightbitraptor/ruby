@@ -590,14 +590,7 @@ static const struct st_hash_type object_id_hash_type = {
 bool
 rb_gc_impl_garbage_object_p(void *objspace_ptr, VALUE ptr)
 {
-    switch (BUILTIN_TYPE(ptr)) {
-      case T_NONE:
-      case T_MOVED:
-      case T_ZOMBIE:
-        return true;
-      default:
-        return false;
-    }
+    return false;
 }
 
 VALUE
@@ -954,7 +947,6 @@ heap_page_create(rb_objspace_t *objspace, rb_size_pool_t *size_pool)
 static void
 heap_add_page(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap, struct heap_page *page)
 {
-    /* Adding to eden heap during incremental sweeping is forbidden */
     GC_ASSERT(!(heap == SIZE_POOL_EDEN_HEAP(size_pool) && heap->sweeping_page));
     ccan_list_add_tail(&heap->pages, &page->page_node);
     heap->total_pages++;
