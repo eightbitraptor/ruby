@@ -164,9 +164,7 @@ typedef struct rb_size_pool_struct {
 
     /* Basic statistics */
     size_t total_allocated_pages;
-    size_t total_freed_pages;
     size_t total_allocated_objects;
-    size_t total_freed_objects;
 
     size_t empty_slots;
 
@@ -401,34 +399,12 @@ total_allocated_pages(rb_objspace_t *objspace)
 }
 
 static inline size_t
-total_freed_pages(rb_objspace_t *objspace)
-{
-    size_t count = 0;
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        count += size_pool->total_freed_pages;
-    }
-    return count;
-}
-
-static inline size_t
 total_allocated_objects(rb_objspace_t *objspace)
 {
     size_t count = 0;
     for (int i = 0; i < SIZE_POOL_COUNT; i++) {
         rb_size_pool_t *size_pool = &size_pools[i];
         count += size_pool->total_allocated_objects;
-    }
-    return count;
-}
-
-static inline size_t
-total_freed_objects(rb_objspace_t *objspace)
-{
-    size_t count = 0;
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        count += size_pool->total_freed_objects;
     }
     return count;
 }
@@ -1563,7 +1539,6 @@ finalize_list(rb_objspace_t *objspace, VALUE zombie)
             page->final_slots--;
             page->free_slots++;
             heap_page_add_freeobj(objspace, page, zombie);
-            page->size_pool->total_freed_objects++;
         }
         rb_gc_vm_unlock(lev);
 
@@ -1745,7 +1720,7 @@ objspace_available_slots(rb_objspace_t *objspace)
 static size_t
 objspace_live_slots(rb_objspace_t *objspace)
 {
-    return total_allocated_objects(objspace) - total_freed_objects(objspace) - heap_pages_final_slots;
+    return total_allocated_objects(objspace) - heap_pages_final_slots;
 }
 
 static size_t
@@ -1973,9 +1948,7 @@ enum gc_stat_sym {
     gc_stat_sym_heap_final_slots,
     gc_stat_sym_heap_eden_pages,
     gc_stat_sym_total_allocated_pages,
-    gc_stat_sym_total_freed_pages,
     gc_stat_sym_total_allocated_objects,
-    gc_stat_sym_total_freed_objects,
     gc_stat_sym_malloc_increase_bytes,
     gc_stat_sym_malloc_increase_bytes_limit,
     gc_stat_sym_minor_gc_count,
@@ -2013,9 +1986,7 @@ setup_gc_stat_symbols(void)
         S(heap_final_slots);
         S(heap_eden_pages);
         S(total_allocated_pages);
-        S(total_freed_pages);
         S(total_allocated_objects);
-        S(total_freed_objects);
         S(malloc_increase_bytes);
         S(malloc_increase_bytes_limit);
         S(minor_gc_count);
@@ -2068,9 +2039,7 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     SET(heap_final_slots, heap_pages_final_slots);
     SET(heap_eden_pages, heap_eden_total_pages(objspace));
     SET(total_allocated_pages, total_allocated_pages(objspace));
-    SET(total_freed_pages, total_freed_pages(objspace));
     SET(total_allocated_objects, total_allocated_objects(objspace));
-    SET(total_freed_objects, total_freed_objects(objspace));
     SET(malloc_increase_bytes, malloc_increase);
 #undef SET
 
@@ -2087,10 +2056,8 @@ enum gc_stat_heap_sym {
     gc_stat_heap_sym_heap_eden_pages,
     gc_stat_heap_sym_heap_eden_slots,
     gc_stat_heap_sym_total_allocated_pages,
-    gc_stat_heap_sym_total_freed_pages,
     gc_stat_heap_sym_force_incremental_marking_finish_count,
     gc_stat_heap_sym_total_allocated_objects,
-    gc_stat_heap_sym_total_freed_objects,
     gc_stat_heap_sym_last
 };
 
@@ -2112,9 +2079,7 @@ setup_gc_stat_heap_symbols(void)
         S(heap_eden_pages);
         S(heap_eden_slots);
         S(total_allocated_pages);
-        S(total_freed_pages);
         S(total_allocated_objects);
-        S(total_freed_objects);
 #undef S
     }
 }
@@ -2154,9 +2119,7 @@ rb_gc_impl_stat_heap(void *objspace_ptr, int size_pool_idx, VALUE hash_or_sym)
     SET(heap_eden_pages, SIZE_POOL_EDEN_HEAP(size_pool)->total_pages);
     SET(heap_eden_slots, SIZE_POOL_EDEN_HEAP(size_pool)->total_slots);
     SET(total_allocated_pages, size_pool->total_allocated_pages);
-    SET(total_freed_pages, size_pool->total_freed_pages);
     SET(total_allocated_objects, size_pool->total_allocated_objects);
-    SET(total_freed_objects, size_pool->total_freed_objects);
 #undef SET
 
     if (!NIL_P(key)) { /* matched key should return above */
