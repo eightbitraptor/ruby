@@ -146,8 +146,6 @@ struct heap_page_header {
 
 struct heap_page_body {
     struct heap_page_header header;
-    /* char gap[];      */
-    /* RVALUE values[]; */
 };
 
 #define SIZE_POOL_EDEN_HEAP(size_pool) (&(size_pool)->eden_heap)
@@ -155,10 +153,6 @@ struct heap_page_body {
 typedef struct rb_heap_struct {
     struct heap_page *free_pages;
     struct ccan_list_head pages;
-    struct heap_page *sweeping_page; /* iterator for .pages */
-    struct heap_page *compact_cursor;
-    uintptr_t compact_cursor_index;
-    struct heap_page *pooled_pages;
     size_t total_pages;      /* total page count in a heap */
     size_t total_slots;      /* total slot count (about total_pages * HEAP_PAGE_OBJ_LIMIT) */
 } rb_heap_t;
