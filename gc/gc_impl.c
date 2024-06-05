@@ -1270,7 +1270,7 @@ rb_gc_size_pool_sizes(void)
 }
 
 static VALUE
-newobj_alloc(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t size_pool_idx, bool vm_locked)
+newobj_alloc(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t size_pool_idx)
 {
     rb_size_pool_t *size_pool = &size_pools[size_pool_idx];
     rb_heap_t *heap = SIZE_POOL_EDEN_HEAP(size_pool);
@@ -1279,31 +1279,18 @@ newobj_alloc(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t si
 
     if (RB_UNLIKELY(obj == Qfalse)) {
         unsigned int lev;
-        bool unlock_vm = false;
+        lev = rb_gc_cr_lock();
+        if (obj == Qfalse) {
+            // Get next free page (possibly running GC)
+            struct heap_page *page = heap_next_free_page(objspace, size_pool, heap);
+            ractor_cache_set_page(objspace, cache, size_pool_idx, page);
 
-        // TODO: vm_locked can be removed from this function
-        if (!vm_locked) {
-            lev = rb_gc_cr_lock();
-            vm_locked = true;
-            unlock_vm = true;
+            // Retry allocation after moving to new page
+            obj = ractor_cache_allocate_slot(objspace, cache, size_pool_idx);
+
+            GC_ASSERT(obj != Qfalse);
         }
-
-        {
-            if (obj == Qfalse) {
-                // Get next free page (possibly running GC)
-                struct heap_page *page = heap_next_free_page(objspace, size_pool, heap);
-                ractor_cache_set_page(objspace, cache, size_pool_idx, page);
-
-                // Retry allocation after moving to new page
-                obj = ractor_cache_allocate_slot(objspace, cache, size_pool_idx);
-
-                GC_ASSERT(obj != Qfalse);
-            }
-        }
-
-        if (unlock_vm) {
-            rb_gc_cr_unlock(lev);
-        }
+        rb_gc_cr_unlock(lev);
     }
 
     size_pool->total_allocated_objects++;
@@ -1324,7 +1311,7 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
 
     rb_ractor_newobj_cache_t *cache = (rb_ractor_newobj_cache_t *)cache_ptr;
 
-    obj = newobj_alloc(objspace, cache, size_pool_idx, false);
+    obj = newobj_alloc(objspace, cache, size_pool_idx);
     newobj_init(klass, flags, wb_protected, objspace, obj);
 
     return newobj_fill(obj, v1, v2, v3);
