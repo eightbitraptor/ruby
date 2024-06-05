@@ -118,15 +118,6 @@ size_t rb_obj_memsize_of(VALUE obj);
 #define GC_HEAP_FREE_SLOTS_MAX_RATIO  0.65
 #endif
 
-#ifndef PRINT_ENTER_EXIT_TICK
-# define PRINT_ENTER_EXIT_TICK 0
-#endif
-#ifndef PRINT_ROOT_TICKS
-#define PRINT_ROOT_TICKS 0
-#endif
-
-#define USE_TICK_T                 (PRINT_ENTER_EXIT_TICK || PRINT_ROOT_TICKS)
-
 #define GC_ASSERT RUBY_ASSERT
 
 #ifndef SIZE_POOL_COUNT
@@ -438,12 +429,6 @@ asan_unlock_freelist(struct heap_page *page)
 
 #define NUM_IN_PAGE(p)   (((uintptr_t)(p) & HEAP_PAGE_ALIGN_MASK) / BASE_SLOT_SIZE)
 
-#define GC_SWEEP_PAGES_FREEABLE_PER_STEP 3
-
-#define ruby_initial_gc_stress	gc_params.gc_stress
-
-VALUE *ruby_initial_gc_stress_ptr = &ruby_initial_gc_stress;
-
 #define malloc_increase 	objspace->malloc_params.increase
 #define malloc_allocated_size 	objspace->malloc_params.allocated_size
 #define heap_pages_sorted       objspace->heap_pages.sorted
@@ -457,8 +442,6 @@ VALUE *ruby_initial_gc_stress_ptr = &ruby_initial_gc_stress;
 #define size_pools              objspace->size_pools
 #define finalizing		objspace->atomic_flags.finalizing
 #define finalizer_table 	objspace->finalizer_table
-#define ruby_gc_stressful	objspace->flags.gc_stressful
-#define ruby_gc_stress_mode     objspace->gc_stress_mode
 
 static inline size_t
 heap_eden_total_pages(rb_objspace_t *objspace)
@@ -534,10 +517,6 @@ total_freed_objects(rb_objspace_t *objspace)
     return count;
 }
 
-#define gc_mode(objspace)                gc_mode_verify((enum gc_mode)(objspace)->flags.mode)
-#define gc_mode_set(objspace, m)         ((objspace)->flags.mode = (unsigned int)gc_mode_verify(m))
-
-
 #if SIZEOF_LONG == SIZEOF_VOIDP
 # define obj_id_to_ref(objid) ((objid) ^ FIXNUM_FLAG) /* unset FIXNUM_FLAG */
 #elif SIZEOF_LONG_LONG == SIZEOF_VOIDP
@@ -556,16 +535,6 @@ struct RZombie {
 
 #define RZOMBIE(o) ((struct RZombie *)(o))
 
-int ruby_disable_gc = 0;
-int ruby_enable_autocompact = 0;
-
-enum gc_enter_event {
-    gc_enter_event_start,
-    gc_enter_event_continue,
-    gc_enter_event_rest,
-    gc_enter_event_finalizer,
-};
-
 NO_SANITIZE("memory", static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr));
 
 #define gc_prof_record(objspace) (objspace)->profile.current_record
@@ -576,108 +545,6 @@ PRINTF_ARGS(static void gc_report_body(rb_objspace_t *objspace, const char *fmt,
 
 static void gc_finalize_deferred(void *dmy);
 
-#if USE_TICK_T
-
-/* the following code is only for internal tuning. */
-
-/* Source code to use RDTSC is quoted and modified from
- * https://www.mcs.anl.gov/~kazutomo/rdtsc.html
- * written by Kazutomo Yoshii <kazutomo@mcs.anl.gov>
- */
-
-#if defined(__GNUC__) && defined(__i386__)
-typedef unsigned long long tick_t;
-#define PRItick "llu"
-static inline tick_t
-tick(void)
-{
-    unsigned long long int x;
-    __asm__ __volatile__ ("rdtsc" : "=A" (x));
-    return x;
-}
-
-#elif defined(__GNUC__) && defined(__x86_64__)
-typedef unsigned long long tick_t;
-#define PRItick "llu"
-
-static __inline__ tick_t
-tick(void)
-{
-    unsigned long hi, lo;
-    __asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
-    return ((unsigned long long)lo)|( ((unsigned long long)hi)<<32);
-}
-
-#elif defined(__powerpc64__) && (GCC_VERSION_SINCE(4,8,0) || defined(__clang__))
-typedef unsigned long long tick_t;
-#define PRItick "llu"
-
-static __inline__ tick_t
-tick(void)
-{
-    unsigned long long val = __builtin_ppc_get_timebase();
-    return val;
-}
-
-/* Implementation for macOS PPC by @nobu
- * See: https://github.com/ruby/ruby/pull/5975#discussion_r890045558
- */
-#elif defined(__POWERPC__) && defined(__APPLE__)
-typedef unsigned long long tick_t;
-#define PRItick "llu"
-
-static __inline__ tick_t
-tick(void)
-{
-    unsigned long int upper, lower, tmp;
-    # define mftbu(r) __asm__ volatile("mftbu   %0" : "=r"(r))
-    # define mftb(r)  __asm__ volatile("mftb    %0" : "=r"(r))
-        do {
-            mftbu(upper);
-            mftb(lower);
-            mftbu(tmp);
-        } while (tmp != upper);
-    return ((tick_t)upper << 32) | lower;
-}
-
-#elif defined(__aarch64__) &&  defined(__GNUC__)
-typedef unsigned long tick_t;
-#define PRItick "lu"
-
-static __inline__ tick_t
-tick(void)
-{
-    unsigned long val;
-    __asm__ __volatile__ ("mrs %0, cntvct_el0" : "=r" (val));
-    return val;
-}
-
-
-#elif defined(_WIN32) && defined(_MSC_VER)
-#include <intrin.h>
-typedef unsigned __int64 tick_t;
-#define PRItick "llu"
-
-static inline tick_t
-tick(void)
-{
-    return __rdtsc();
-}
-
-#else /* use clock */
-typedef clock_t tick_t;
-#define PRItick "llu"
-
-static inline tick_t
-tick(void)
-{
-    return clock();
-}
-#endif /* TSC */
-#else /* USE_TICK_T */
-#define MEASURE_LINE(expr) expr
-#endif /* USE_TICK_T */
-
 #define asan_unpoisoning_object(obj) \
     for (void *poisoned = asan_unpoison_object_temporary(obj), \
               *unpoisoning = &poisoned; /* flag to loop just once */ \
@@ -687,18 +554,6 @@ tick(void)
 #define FL_TEST2(x,f)  FL_CHECK2("FL_TEST2",  x, FL_TEST_RAW((x),(f)) != 0)
 #define FL_SET2(x,f)   FL_CHECK2("FL_SET2",   x, RBASIC(x)->flags |= (f))
 #define FL_UNSET2(x,f) FL_CHECK2("FL_UNSET2", x, RBASIC(x)->flags &= ~(f))
-
-#define RVALUE_MARK_BITMAP(obj)           MARKED_IN_BITMAP(GET_HEAP_MARK_BITS(obj), (obj))
-#define RVALUE_PIN_BITMAP(obj)            MARKED_IN_BITMAP(GET_HEAP_PINNED_BITS(obj), (obj))
-#define RVALUE_PAGE_MARKED(page, obj)     MARKED_IN_BITMAP((page)->mark_bits, (obj))
-
-#define RVALUE_WB_UNPROTECTED_BITMAP(obj) MARKED_IN_BITMAP(GET_HEAP_WB_UNPROTECTED_BITS(obj), (obj))
-#define RVALUE_UNCOLLECTIBLE_BITMAP(obj)  MARKED_IN_BITMAP(GET_HEAP_UNCOLLECTIBLE_BITS(obj), (obj))
-#define RVALUE_MARKING_BITMAP(obj)        MARKED_IN_BITMAP(GET_HEAP_MARKING_BITS(obj), (obj))
-
-#define RVALUE_PAGE_WB_UNPROTECTED(page, obj) MARKED_IN_BITMAP((page)->wb_unprotected_bits, (obj))
-#define RVALUE_PAGE_UNCOLLECTIBLE(page, obj)  MARKED_IN_BITMAP((page)->uncollectible_bits, (obj))
-#define RVALUE_PAGE_MARKING(page, obj)        MARKED_IN_BITMAP((page)->marking_bits, (obj))
 
 bool
 rb_gc_impl_gc_enabled_p(void *objspace_ptr)
