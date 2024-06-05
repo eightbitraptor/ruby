@@ -1935,10 +1935,6 @@ rb_gc_impl_latest_gc_info(void *objspace_ptr, VALUE key)
 
 
 enum gc_stat_sym {
-    gc_stat_sym_count,
-    gc_stat_sym_time,
-    gc_stat_sym_marking_time,
-    gc_stat_sym_sweeping_time,
     gc_stat_sym_heap_allocated_pages,
     gc_stat_sym_heap_sorted_length,
     gc_stat_sym_heap_allocatable_pages,
@@ -1950,19 +1946,6 @@ enum gc_stat_sym {
     gc_stat_sym_total_allocated_pages,
     gc_stat_sym_total_allocated_objects,
     gc_stat_sym_malloc_increase_bytes,
-    gc_stat_sym_malloc_increase_bytes_limit,
-    gc_stat_sym_minor_gc_count,
-    gc_stat_sym_major_gc_count,
-    gc_stat_sym_compact_count,
-    gc_stat_sym_read_barrier_faults,
-    gc_stat_sym_total_moved_objects,
-    gc_stat_sym_remembered_wb_unprotected_objects,
-    gc_stat_sym_remembered_wb_unprotected_objects_limit,
-#if RGENGC_ESTIMATE_OLDMALLOC
-    gc_stat_sym_oldmalloc_increase_bytes,
-    gc_stat_sym_oldmalloc_increase_bytes_limit,
-#endif
-    gc_stat_sym_weak_references_count,
     gc_stat_sym_last
 };
 
@@ -1973,10 +1956,6 @@ setup_gc_stat_symbols(void)
 {
     if (gc_stat_symbols[0] == 0) {
 #define S(s) gc_stat_symbols[gc_stat_sym_##s] = ID2SYM(rb_intern_const(#s))
-        S(count);
-        S(time);
-        S(marking_time),
-        S(sweeping_time),
         S(heap_allocated_pages);
         S(heap_sorted_length);
         S(heap_allocatable_pages);
@@ -1988,19 +1967,6 @@ setup_gc_stat_symbols(void)
         S(total_allocated_pages);
         S(total_allocated_objects);
         S(malloc_increase_bytes);
-        S(malloc_increase_bytes_limit);
-        S(minor_gc_count);
-        S(major_gc_count);
-        S(compact_count);
-        S(read_barrier_faults);
-        S(total_moved_objects);
-        S(remembered_wb_unprotected_objects);
-        S(remembered_wb_unprotected_objects_limit);
-#if RGENGC_ESTIMATE_OLDMALLOC
-        S(oldmalloc_increase_bytes);
-        S(oldmalloc_increase_bytes_limit);
-#endif
-        S(weak_references_count);
 #undef S
     }
 }
