@@ -171,17 +171,6 @@ static ruby_gc_params_t gc_params = {
 #ifndef CALC_EXACT_MALLOC_SIZE
 # define CALC_EXACT_MALLOC_SIZE USE_GC_MALLOC_OBJ_INFO_DETAILS
 #endif
-#if defined(HAVE_MALLOC_USABLE_SIZE) || CALC_EXACT_MALLOC_SIZE > 0
-# ifndef MALLOC_ALLOCATED_SIZE
-#  define MALLOC_ALLOCATED_SIZE 0
-# endif
-#else
-# define MALLOC_ALLOCATED_SIZE 0
-#endif
-#ifndef MALLOC_ALLOCATED_SIZE_CHECK
-# define MALLOC_ALLOCATED_SIZE_CHECK 0
-#endif
-
 typedef struct gc_profile_record {
     unsigned int flags;
 
@@ -192,10 +181,6 @@ typedef struct gc_profile_record {
     size_t heap_use_size;
     size_t heap_total_size;
     size_t moved_objects;
-
-#if MALLOC_ALLOCATED_SIZE
-    size_t allocated_size;
-#endif
 
 } gc_profile_record;
 
@@ -246,10 +231,6 @@ typedef struct rb_objspace {
     struct {
         size_t limit;
         size_t increase;
-#if MALLOC_ALLOCATED_SIZE
-        size_t allocated_size;
-        size_t allocations;
-#endif
     } malloc_params;
 
     struct {
@@ -2778,42 +2759,6 @@ objspace_malloc_increase_body(rb_objspace_t *objspace, void *mem, size_t new_siz
         atomic_sub_nounderflow(&malloc_increase, old_size - new_size);
     }
 
-#if MALLOC_ALLOCATED_SIZE
-    if (new_size >= old_size) {
-        RUBY_ATOMIC_SIZE_ADD(objspace->malloc_params.allocated_size, new_size - old_size);
-    }
-    else {
-        size_t dec_size = old_size - new_size;
-        size_t allocated_size = objspace->malloc_params.allocated_size;
-
-#if MALLOC_ALLOCATED_SIZE_CHECK
-        if (allocated_size < dec_size) {
-            rb_bug("objspace_malloc_increase: underflow malloc_params.allocated_size.");
-        }
-#endif
-        atomic_sub_nounderflow(&objspace->malloc_params.allocated_size, dec_size);
-    }
-
-    switch (type) {
-      case MEMOP_TYPE_MALLOC:
-        RUBY_ATOMIC_SIZE_INC(objspace->malloc_params.allocations);
-        break;
-      case MEMOP_TYPE_FREE:
-        {
-            size_t allocations = objspace->malloc_params.allocations;
-            if (allocations > 0) {
-                atomic_sub_nounderflow(&objspace->malloc_params.allocations, 1);
-            }
-#if MALLOC_ALLOCATED_SIZE_CHECK
-            else {
-                GC_ASSERT(objspace->malloc_params.allocations > 0);
-            }
-#endif
-        }
-        break;
-      case MEMOP_TYPE_REALLOC: /* ignore */ break;
-    }
-#endif
     return true;
 }
 
@@ -3111,44 +3056,10 @@ gc_profile_dump_major_reason(unsigned int flags, char *buff)
 }
 #endif
 
-#define gc_set_auto_compact rb_f_notimplement
-
 void
 rb_gc_impl_objspace_free(void *objspace_ptr)
 {
 }
-
-#if MALLOC_ALLOCATED_SIZE
-/*
- *  call-seq:
- *     GC.malloc_allocated_size -> Integer
- *
- *  Returns the size of memory allocated by malloc().
- *
- *  Only available if ruby was built with +CALC_EXACT_MALLOC_SIZE+.
- */
-
-static VALUE
-gc_malloc_allocated_size(VALUE self)
-{
-    return UINT2NUM(rb_objspace.malloc_params.allocated_size);
-}
-
-/*
- *  call-seq:
- *     GC.malloc_allocations -> Integer
- *
- *  Returns the number of malloc() allocations.
- *
- *  Only available if ruby was built with +CALC_EXACT_MALLOC_SIZE+.
- */
-
-static VALUE
-gc_malloc_allocations(VALUE self)
-{
-    return UINT2NUM(rb_objspace.malloc_params.allocations);
-}
-#endif
 
 void
 rb_gc_impl_objspace_mark(void *objspace_ptr)
@@ -3229,11 +3140,6 @@ rb_gc_impl_init(void)
     /* internal methods */
     rb_define_singleton_method(rb_mGC, "verify_internal_consistency", rb_f_notimplement, 0);
 
-#if MALLOC_ALLOCATED_SIZE
-    rb_define_singleton_method(rb_mGC, "malloc_allocated_size", gc_malloc_allocated_size, 0);
-    rb_define_singleton_method(rb_mGC, "malloc_allocations", gc_malloc_allocations, 0);
-#endif
-
     VALUE rb_mProfiler = rb_define_module_under(rb_mGC, "Profiler");
     rb_define_singleton_method(rb_mProfiler, "enabled?", rb_f_notimplement, 0);
     rb_define_singleton_method(rb_mProfiler, "enable", rb_f_notimplement, 0);
@@ -3251,8 +3157,6 @@ rb_gc_impl_init(void)
 #define OPT(o) if (o) rb_ary_push(opts, rb_interned_str(#o, sizeof(#o) - 1))
         OPT(GC_PROFILE_MORE_DETAIL);
         OPT(CALC_EXACT_MALLOC_SIZE);
-        OPT(MALLOC_ALLOCATED_SIZE);
-        OPT(MALLOC_ALLOCATED_SIZE_CHECK);
         OPT(GC_PROFILE_DETAIL_MEMORY);
 #undef OPT
         OBJ_FREEZE(opts);
