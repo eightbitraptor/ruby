@@ -1666,52 +1666,9 @@ objspace_free_slots(rb_objspace_t *objspace)
 enum {HEAP_PAGE_LOCK = PROT_NONE, HEAP_PAGE_UNLOCK = PROT_READ | PROT_WRITE};
 #define protect_page_body(body, protect) !mprotect((body), HEAP_PAGE_SIZE, (protect))
 
-static void
-heap_page_freelist_append(struct heap_page *page, struct free_slot *freelist)
-{
-    if (freelist) {
-        asan_unlock_freelist(page);
-        if (page->freelist) {
-            struct free_slot *p = page->freelist;
-            asan_unpoison_object((VALUE)p, false);
-            while (p->next) {
-                struct free_slot *prev = p;
-                p = p->next;
-                asan_poison_object((VALUE)prev);
-                asan_unpoison_object((VALUE)p, false);
-            }
-            p->next = freelist;
-            asan_poison_object((VALUE)p);
-        }
-        else {
-            page->freelist = freelist;
-        }
-        asan_lock_freelist(page);
-    }
-}
-
 #if defined(__GNUC__) && __GNUC__ == 4 && __GNUC_MINOR__ == 4
 __attribute__((noinline))
 #endif
-
-static void
-gc_ractor_newobj_cache_clear(void *c, void *data)
-{
-    rb_ractor_newobj_cache_t *newobj_cache = c;
-
-    for (size_t size_pool_idx = 0; size_pool_idx < SIZE_POOL_COUNT; size_pool_idx++) {
-        rb_ractor_newobj_size_pool_cache_t *cache = &newobj_cache->size_pool_caches[size_pool_idx];
-
-        struct heap_page *page = cache->using_page;
-        struct free_slot *freelist = cache->freelist;
-        RUBY_DEBUG_LOG("ractor using_page:%p freelist:%p", (void *)page, (void *)freelist);
-
-        heap_page_freelist_append(page, freelist);
-
-        cache->using_page = NULL;
-        cache->freelist = NULL;
-    }
-}
 
 VALUE
 rb_gc_impl_location(void *objspace_ptr, VALUE value)
@@ -1795,22 +1752,12 @@ rb_gc_impl_obj_flags(void *objspace_ptr, VALUE obj, ID* flags, size_t max)
 void *
 rb_gc_impl_ractor_cache_alloc(void *objspace_ptr)
 {
-    rb_objspace_t *objspace = objspace_ptr;
-
-    objspace->live_ractor_cache_count++;
-
-    return calloc1(sizeof(rb_ractor_newobj_cache_t));
+    return NULL;
 }
 
 void
 rb_gc_impl_ractor_cache_free(void *objspace_ptr, void *cache)
 {
-    rb_objspace_t *objspace = objspace_ptr;
-
-    objspace->live_ractor_cache_count--;
-
-    gc_ractor_newobj_cache_clear(cache, NULL);
-    free(cache);
 }
 
 int ruby_thread_has_gvl_p(void);
