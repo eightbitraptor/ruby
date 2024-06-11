@@ -429,8 +429,15 @@ struct RZombie {
 
 NO_SANITIZE("memory", static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr));
 
+#ifdef RUBY_DEBUG
+# ifndef RNOGC_DEBUG
+#  define RNOGC_DEBUG 0
+# endif
+#endif
+
 # define gc_report(objspace, ...) \
-    if (!RUBY_DEBUG) {} else gc_report_body(objspace, __VA_ARGS__)
+    if (!(RUBY_DEBUG && RNOGC_DEBUG)) {} else gc_report_body(objspace, __VA_ARGS__)
+
 PRINTF_ARGS(static void gc_report_body(rb_objspace_t *objspace, const char *fmt, ...), 2, 3);
 
 static void gc_finalize_deferred(void *dmy);
@@ -977,7 +984,6 @@ heap_increment(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *he
 static void
 heap_prepare(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap)
 {
-    GC_ASSERT(heap->free_pages == NULL);
     size_pool_allocatable_pages_expand(objspace, size_pool,
                                        size_pool->empty_slots,
                                        heap->total_slots,
@@ -996,11 +1002,6 @@ newobj_init(VALUE klass, VALUE flags, int wb_protected, rb_objspace_t *objspace,
 #endif
     RBASIC(obj)->flags = flags;
     *((VALUE *)&RBASIC(obj)->klass) = klass;
-
-#if RACTOR_CHECK_MODE
-    void rb_ractor_setup_belonging(VALUE obj);
-    rb_ractor_setup_belonging(obj);
-#endif
 
     gc_report(objspace, "newobj: %s\n", rb_obj_info(obj));
 
