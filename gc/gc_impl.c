@@ -908,7 +908,6 @@ heap_page_create(rb_objspace_t *objspace, rb_size_pool_t *size_pool)
 static void
 heap_add_page(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap, struct heap_page *page)
 {
-    GC_ASSERT(!(heap == SIZE_POOL_EDEN_HEAP(size_pool) && heap->sweeping_page));
     ccan_list_add_tail(&heap->pages, &page->page_node);
     heap->total_pages++;
     heap->total_slots += page->total_slots;
@@ -2523,6 +2522,11 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
     }
 
     heap_pages_expand_sorted(objspace);
+
+    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
+        rb_size_pool_t *size_pool = &size_pools[i];
+        heap_prepare(objspace, size_pool, SIZE_POOL_EDEN_HEAP(size_pool));
+    }
 
     finalizer_table = st_init_numtable();
 }
