@@ -1034,66 +1034,6 @@ rb_gc_size_allocatable_p(size_t size)
 }
 
 static inline VALUE
-ractor_cache_allocate_slot(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache,
-                           size_t size_pool_idx)
-{
-    rb_ractor_newobj_size_pool_cache_t *size_pool_cache = &cache->size_pool_caches[size_pool_idx];
-    struct free_slot *p = size_pool_cache->freelist;
-
-    if (p) {
-        VALUE obj = (VALUE)p;
-        MAYBE_UNUSED(const size_t) stride = size_pool_slot_size(size_pool_idx);
-        size_pool_cache->freelist = p->next;
-        asan_unpoison_memory_region(p, stride, true);
-        return obj;
-    }
-    else {
-        return Qfalse;
-    }
-}
-
-static struct heap_page *
-heap_next_free_page(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap)
-{
-    struct heap_page *page;
-
-    if (heap->free_pages == NULL) {
-        heap_prepare(objspace, size_pool, heap);
-    }
-
-    page = heap->free_pages;
-    heap->free_pages = page->free_next;
-
-    GC_ASSERT(page->free_slots != 0);
-
-    asan_unlock_freelist(page);
-
-    return page;
-}
-
-static inline void
-ractor_cache_set_page(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t size_pool_idx,
-                      struct heap_page *page)
-{
-    gc_report(objspace, "ractor_set_cache: Using page %p\n", (void *)GET_PAGE_BODY(page->start));
-
-    rb_ractor_newobj_size_pool_cache_t *size_pool_cache = &cache->size_pool_caches[size_pool_idx];
-
-    GC_ASSERT(size_pool_cache->freelist == NULL);
-    GC_ASSERT(page->free_slots != 0);
-    GC_ASSERT(page->freelist != NULL);
-
-    size_pool_cache->using_page = page;
-    size_pool_cache->freelist = page->freelist;
-    page->free_slots = 0;
-    page->freelist = NULL;
-
-    asan_unpoison_object((VALUE)size_pool_cache->freelist, false);
-    GC_ASSERT(RB_TYPE_P((VALUE)size_pool_cache->freelist, T_NONE));
-    asan_poison_object((VALUE)size_pool_cache->freelist);
-}
-
-static inline VALUE
 newobj_fill(VALUE obj, VALUE v1, VALUE v2, VALUE v3)
 {
     VALUE *p = (VALUE *)obj;
@@ -1143,38 +1083,34 @@ rb_gc_size_pool_sizes(void)
 }
 
 static VALUE
-newobj_alloc(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size_t size_pool_idx)
+newobj_alloc(rb_objspace_t *objspace, size_t size_pool_idx)
 {
     rb_size_pool_t *size_pool = &size_pools[size_pool_idx];
     rb_heap_t *heap = SIZE_POOL_EDEN_HEAP(size_pool);
 
-    VALUE obj = ractor_cache_allocate_slot(objspace, cache, size_pool_idx);
+    unsigned int lev = rb_gc_cr_lock();
+    struct heap_page *page = heap->free_pages;
 
-    if (RB_UNLIKELY(obj == Qfalse)) {
-        unsigned int lev;
-        lev = rb_gc_cr_lock();
-        if (obj == Qfalse) {
-            // Get next free page (possibly running GC)
-            struct heap_page *page = heap_next_free_page(objspace, size_pool, heap);
-            ractor_cache_set_page(objspace, cache, size_pool_idx, page);
-
-            // Retry allocation after moving to new page
-            obj = ractor_cache_allocate_slot(objspace, cache, size_pool_idx);
-
-            GC_ASSERT(obj != Qfalse);
-        }
-        rb_gc_cr_unlock(lev);
+    while (page && page->free_slots == 0) {
+        page = page->free_next;
     }
+    if (!page) {
+        heap_prepare(objspace, size_pool, heap);
+        page = heap->free_pages;
+    }
+    
+    struct free_slot *obj = page->freelist;
+    page->freelist = obj->next;
+    page->free_slots--;
+    rb_gc_cr_unlock(lev);
 
     size_pool->total_allocated_objects++;
-
-    return obj;
+    return (VALUE)obj;
 }
 
 VALUE
 rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, bool wb_protected, size_t alloc_size)
 {
-    VALUE obj;
     rb_objspace_t *objspace = objspace_ptr;
 
     RB_DEBUG_COUNTER_INC(obj_newobj);
@@ -1182,11 +1118,8 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
 
     size_t size_pool_idx = size_pool_idx_for_size(alloc_size);
 
-    rb_ractor_newobj_cache_t *cache = (rb_ractor_newobj_cache_t *)cache_ptr;
-
-    obj = newobj_alloc(objspace, cache, size_pool_idx);
+    VALUE obj = newobj_alloc(objspace, size_pool_idx);
     newobj_init(klass, flags, wb_protected, objspace, obj);
-
     return newobj_fill(obj, v1, v2, v3);
 }
 
