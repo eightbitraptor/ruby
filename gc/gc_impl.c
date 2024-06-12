@@ -73,54 +73,11 @@ bool rb_gc_shutdown_call_finalizer_p(VALUE obj);
 # define RUBY_DEBUG_LOG(...)
 #endif
 
-#ifndef GC_HEAP_FREE_SLOTS
-#define GC_HEAP_FREE_SLOTS  4096
-#endif
-#ifndef GC_HEAP_GROWTH_FACTOR
-#define GC_HEAP_GROWTH_FACTOR 1.8
-#endif
-#ifndef GC_HEAP_GROWTH_MAX_SLOTS
-#define GC_HEAP_GROWTH_MAX_SLOTS 0 /* 0 is disable */
-#endif
-#ifndef GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO
-# define GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO 0.01
-#endif
-
-#ifndef GC_HEAP_FREE_SLOTS_MIN_RATIO
-#define GC_HEAP_FREE_SLOTS_MIN_RATIO  0.20
-#endif
-#ifndef GC_HEAP_FREE_SLOTS_GOAL_RATIO
-#define GC_HEAP_FREE_SLOTS_GOAL_RATIO 0.40
-#endif
-#ifndef GC_HEAP_FREE_SLOTS_MAX_RATIO
-#define GC_HEAP_FREE_SLOTS_MAX_RATIO  0.65
-#endif
-
 #define GC_ASSERT RUBY_ASSERT
 
 #ifndef OBJ_SIZE_MULTIPLES
 # define OBJ_SIZE_MULTIPLES 5
 #endif
-
-typedef struct {
-    size_t heap_free_slots;
-    double growth_factor;
-    size_t growth_max_slots;
-
-    double heap_free_slots_min_ratio;
-    double heap_free_slots_goal_ratio;
-    double heap_free_slots_max_ratio;
-} ruby_gc_params_t;
-
-static ruby_gc_params_t gc_params = {
-    GC_HEAP_FREE_SLOTS,
-    GC_HEAP_GROWTH_FACTOR,
-    GC_HEAP_GROWTH_MAX_SLOTS,
-
-    GC_HEAP_FREE_SLOTS_MIN_RATIO,
-    GC_HEAP_FREE_SLOTS_GOAL_RATIO,
-    GC_HEAP_FREE_SLOTS_MAX_RATIO,
-};
 
 struct heap_page_header {
     struct heap_page *page;
@@ -1838,161 +1795,9 @@ rb_gc_impl_stress_set(void *objspace_ptr, VALUE flag)
 {
 }
 
-static int
-get_envparam_size(const char *name, size_t *default_value, size_t lower_bound)
-{
-    const char *ptr = getenv(name);
-    ssize_t val;
-
-    if (ptr != NULL && *ptr) {
-        size_t unit = 0;
-        char *end;
-#if SIZEOF_SIZE_T == SIZEOF_LONG_LONG
-        val = strtoll(ptr, &end, 0);
-#else
-        val = strtol(ptr, &end, 0);
-#endif
-        switch (*end) {
-          case 'k': case 'K':
-            unit = 1024;
-            ++end;
-            break;
-          case 'm': case 'M':
-            unit = 1024*1024;
-            ++end;
-            break;
-          case 'g': case 'G':
-            unit = 1024*1024*1024;
-            ++end;
-            break;
-        }
-        while (*end && isspace((unsigned char)*end)) end++;
-        if (*end) {
-            if (RTEST(ruby_verbose)) fprintf(stderr, "invalid string for %s: %s\n", name, ptr);
-            return 0;
-        }
-        if (unit > 0) {
-            if (val < -(ssize_t)(SIZE_MAX / 2 / unit) || (ssize_t)(SIZE_MAX / 2 / unit) < val) {
-                if (RTEST(ruby_verbose)) fprintf(stderr, "%s=%s is ignored because it overflows\n", name, ptr);
-                return 0;
-            }
-            val *= unit;
-        }
-        if (val > 0 && (size_t)val > lower_bound) {
-            if (RTEST(ruby_verbose)) {
-                fprintf(stderr, "%s=%"PRIdSIZE" (default value: %"PRIuSIZE")\n", name, val, *default_value);
-            }
-            *default_value = (size_t)val;
-            return 1;
-        }
-        else {
-            if (RTEST(ruby_verbose)) {
-                fprintf(stderr, "%s=%"PRIdSIZE" (default value: %"PRIuSIZE") is ignored because it must be greater than %"PRIuSIZE".\n",
-                        name, val, *default_value, lower_bound);
-            }
-            return 0;
-        }
-    }
-    return 0;
-}
-
-static int
-get_envparam_double(const char *name, double *default_value, double lower_bound, double upper_bound, int accept_zero)
-{
-    const char *ptr = getenv(name);
-    double val;
-
-    if (ptr != NULL && *ptr) {
-        char *end;
-        val = strtod(ptr, &end);
-        if (!*ptr || *end) {
-            if (RTEST(ruby_verbose)) fprintf(stderr, "invalid string for %s: %s\n", name, ptr);
-            return 0;
-        }
-
-        if (accept_zero && val == 0.0) {
-            goto accept;
-        }
-        else if (val <= lower_bound) {
-            if (RTEST(ruby_verbose)) {
-                fprintf(stderr, "%s=%f (default value: %f) is ignored because it must be greater than %f.\n",
-                        name, val, *default_value, lower_bound);
-            }
-        }
-        else if (upper_bound != 0.0 && /* ignore upper_bound if it is 0.0 */
-                 val > upper_bound) {
-            if (RTEST(ruby_verbose)) {
-                fprintf(stderr, "%s=%f (default value: %f) is ignored because it must be lower than %f.\n",
-                        name, val, *default_value, upper_bound);
-            }
-        }
-        else {
-            goto accept;
-        }
-    }
-    return 0;
-
-  accept:
-    if (RTEST(ruby_verbose)) fprintf(stderr, "%s=%f (default value: %f)\n", name, val, *default_value);
-    *default_value = val;
-    return 1;
-}
-
-static void
-gc_set_initial_pages(rb_objspace_t *objspace)
-{
-    heap_pages_expand_sorted(objspace);
-}
-
-/*
- * GC tuning environment variables
- *
- * * RUBY_GC_HEAP_FREE_SLOTS
- *   - Prepare at least this amount of slots after GC.
- *   - Allocate slots if there are not enough slots.
- * * RUBY_GC_HEAP_GROWTH_FACTOR (new from 2.1)
- *   - Allocate slots by this factor.
- *   - (next slots number) = (current slots number) * (this factor)
- * * RUBY_GC_HEAP_GROWTH_MAX_SLOTS (new from 2.1)
- *   - Allocation rate is limited to this number of slots.
- * * RUBY_GC_HEAP_FREE_SLOTS_MIN_RATIO (new from 2.4)
- *   - Allocate additional pages when the number of free slots is
- *     lower than the value (total_slots * (this ratio)).
- * * RUBY_GC_HEAP_FREE_SLOTS_GOAL_RATIO (new from 2.4)
- *   - Allocate slots to satisfy this formula:
- *       free_slots = total_slots * goal_ratio
- *   - In other words, prepare (total_slots * goal_ratio) free slots.
- *   - if this value is 0.0, then use RUBY_GC_HEAP_GROWTH_FACTOR directly.
- * * RUBY_GC_HEAP_FREE_SLOTS_MAX_RATIO (new from 2.4)
- *   - Allow to free pages when the number of free slots is
- *     greater than the value (total_slots * (this ratio)).
- *
- *  * obsolete
- *    * RUBY_FREE_MIN       -> RUBY_GC_HEAP_FREE_SLOTS (from 2.1)
- *    * RUBY_HEAP_MIN_SLOTS -> RUBY_GC_HEAP_INIT_SLOTS (from 2.1)
- *
- */
-
 void
 rb_gc_impl_set_params(void *objspace_ptr)
 {
-    rb_objspace_t *objspace = objspace_ptr;
-    /* RUBY_GC_HEAP_FREE_SLOTS */
-    if (get_envparam_size("RUBY_GC_HEAP_FREE_SLOTS", &gc_params.heap_free_slots, 0)) {
-        /* ok */
-    }
-
-    gc_set_initial_pages(objspace);
-
-    get_envparam_double("RUBY_GC_HEAP_GROWTH_FACTOR", &gc_params.growth_factor, 1.0, 0.0, FALSE);
-    get_envparam_size  ("RUBY_GC_HEAP_GROWTH_MAX_SLOTS", &gc_params.growth_max_slots, 0);
-    get_envparam_double("RUBY_GC_HEAP_FREE_SLOTS_MIN_RATIO", &gc_params.heap_free_slots_min_ratio,
-                        0.0, 1.0, FALSE);
-    get_envparam_double("RUBY_GC_HEAP_FREE_SLOTS_MAX_RATIO", &gc_params.heap_free_slots_max_ratio,
-                        gc_params.heap_free_slots_min_ratio, 1.0, FALSE);
-    get_envparam_double("RUBY_GC_HEAP_FREE_SLOTS_GOAL_RATIO", &gc_params.heap_free_slots_goal_ratio,
-                        gc_params.heap_free_slots_min_ratio, gc_params.heap_free_slots_max_ratio, TRUE);
-    get_envparam_double("RUBY_GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO", 0, 0.0, 0.0, TRUE);
 }
 
 static inline size_t
