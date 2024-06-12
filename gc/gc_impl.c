@@ -64,22 +64,15 @@ bool rb_gc_obj_free(void *objspace, VALUE obj);
 const char *rb_obj_info(VALUE obj);
 bool rb_gc_shutdown_call_finalizer_p(VALUE obj);
 
-#ifndef VM_CHECK_MODE
-# define VM_CHECK_MODE RUBY_DEBUG
-#endif
-
 // From ractor_core.h
 #ifndef RACTOR_CHECK_MODE
-# define RACTOR_CHECK_MODE (VM_CHECK_MODE || RUBY_DEBUG) && (SIZEOF_UINT64_T == SIZEOF_VALUE)
+# define RACTOR_CHECK_MODE (RUBY_DEBUG) && (SIZEOF_UINT64_T == SIZEOF_VALUE)
 #endif
 
 #ifndef RUBY_DEBUG_LOG
 # define RUBY_DEBUG_LOG(...)
 #endif
 
-#ifndef GC_HEAP_INIT_SLOTS
-#define GC_HEAP_INIT_SLOTS 10000
-#endif
 #ifndef GC_HEAP_FREE_SLOTS
 #define GC_HEAP_FREE_SLOTS  4096
 #endif
@@ -105,21 +98,11 @@ bool rb_gc_shutdown_call_finalizer_p(VALUE obj);
 
 #define GC_ASSERT RUBY_ASSERT
 
-#ifndef SIZE_POOL_COUNT
-# define SIZE_POOL_COUNT 5
+#ifndef OBJ_SIZE_MULTIPLES
+# define OBJ_SIZE_MULTIPLES 5
 #endif
 
-typedef struct ractor_newobj_size_pool_cache {
-    struct free_slot *freelist;
-    struct heap_page *using_page;
-} rb_ractor_newobj_size_pool_cache_t;
-
-typedef struct ractor_newobj_cache {
-    rb_ractor_newobj_size_pool_cache_t size_pool_caches[SIZE_POOL_COUNT];
-} rb_ractor_newobj_cache_t;
-
 typedef struct {
-    size_t size_pool_init_slots[SIZE_POOL_COUNT];
     size_t heap_free_slots;
     double growth_factor;
     size_t growth_max_slots;
@@ -130,7 +113,6 @@ typedef struct {
 } ruby_gc_params_t;
 
 static ruby_gc_params_t gc_params = {
-    { 0 },
     GC_HEAP_FREE_SLOTS,
     GC_HEAP_GROWTH_FACTOR,
     GC_HEAP_GROWTH_MAX_SLOTS,
@@ -148,29 +130,6 @@ struct heap_page_body {
     struct heap_page_header header;
 };
 
-#define SIZE_POOL_EDEN_HEAP(size_pool) (&(size_pool)->eden_heap)
-
-typedef struct rb_heap_struct {
-    struct heap_page *free_pages;
-    struct ccan_list_head pages;
-    size_t total_pages;      /* total page count in a heap */
-    size_t total_slots;      /* total slot count (about total_pages * HEAP_PAGE_OBJ_LIMIT) */
-} rb_heap_t;
-
-typedef struct rb_size_pool_struct {
-    short slot_size;
-
-    size_t allocatable_pages;
-
-    /* Basic statistics */
-    size_t total_allocated_pages;
-    size_t total_allocated_objects;
-
-    size_t empty_slots;
-
-    rb_heap_t eden_heap;
-} rb_size_pool_t;
-
 typedef struct rb_objspace {
     struct {
         size_t limit;
@@ -184,7 +143,19 @@ typedef struct rb_objspace {
     rb_event_flag_t hook_events;
     unsigned long long next_object_id;
 
-    rb_size_pool_t size_pools[SIZE_POOL_COUNT];
+    struct heap_page *free_page_cache[OBJ_SIZE_MULTIPLES];
+
+    struct {
+        size_t allocatable_pages;
+        size_t total_allocated_pages;
+        size_t total_allocated_objects;
+        size_t empty_slots;
+
+        struct heap_page *free_pages;
+        struct ccan_list_head pages;
+        size_t total_pages;
+        size_t total_slots;
+    } heap;
 
     struct {
         rb_atomic_t finalizing;
@@ -309,7 +280,7 @@ struct free_slot {
     struct free_slot *next;
 };
 
-struct heap_page {
+typedef struct heap_page {
     short slot_size;
     short total_slots;
     short free_slots;
@@ -321,13 +292,11 @@ struct heap_page {
         unsigned int has_uncollectible_wb_unprotected_objects : 1;
     } flags;
 
-    rb_size_pool_t *size_pool;
-
     struct heap_page *free_next;
     uintptr_t start;
     struct free_slot *freelist;
     struct ccan_list_node page_node;
-};
+} rb_heap_page_t;
 
 /*
  * When asan is enabled, this will prohibit writing to the freelist until it is unlocked
@@ -363,50 +332,31 @@ asan_unlock_freelist(struct heap_page *page)
 #define heap_pages_freeable_pages	objspace->heap_pages.freeable_pages
 #define heap_pages_final_slots		objspace->heap_pages.final_slots
 #define heap_pages_deferred_final	objspace->heap_pages.deferred_final
-#define size_pools              objspace->size_pools
 #define finalizing		objspace->atomic_flags.finalizing
 #define finalizer_table 	objspace->finalizer_table
 
 static inline size_t
 heap_eden_total_pages(rb_objspace_t *objspace)
 {
-    size_t count = 0;
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        count += SIZE_POOL_EDEN_HEAP(&size_pools[i])->total_pages;
-    }
-    return count;
+    return objspace->heap.total_pages;
 }
 
 static inline size_t
 heap_allocatable_pages(rb_objspace_t *objspace)
 {
-    size_t count = 0;
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        count += size_pools[i].allocatable_pages;
-    }
-    return count;
+    return objspace->heap.allocatable_pages;
 }
 
 static inline size_t
 total_allocated_pages(rb_objspace_t *objspace)
 {
-    size_t count = 0;
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        count += size_pool->total_allocated_pages;
-    }
-    return count;
+    return objspace->heap.total_allocated_pages;
 }
 
 static inline size_t
 total_allocated_objects(rb_objspace_t *objspace)
 {
-    size_t count = 0;
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        count += size_pool->total_allocated_objects;
-    }
-    return count;
+    return objspace->heap.total_allocated_objects;
 }
 
 #if SIZEOF_LONG == SIZEOF_VOIDP
@@ -504,25 +454,6 @@ VALUE
 rb_gc_impl_get_measure_total_time(void *objspace_ptr)
 {
     return Qfalse;
-}
-
-static size_t
-slots_to_pages_for_size_pool(rb_objspace_t *objspace, rb_size_pool_t *size_pool, size_t slots)
-{
-    size_t multiple = size_pool->slot_size / BASE_SLOT_SIZE;
-    /* Due to alignment, heap pages may have one less slot. We should
-     * ensure there is enough pages to guarantee that we will have at
-     * least the required number of slots after allocating all the pages. */
-    size_t slots_per_page = (HEAP_PAGE_OBJ_LIMIT / multiple) - 1;
-    return CEILDIV(slots, slots_per_page);
-}
-
-static size_t
-minimum_pages_for_size_pool(rb_objspace_t *objspace, rb_size_pool_t *size_pool)
-{
-    size_t size_pool_idx = size_pool - size_pools;
-    size_t init_slots = gc_params.size_pool_init_slots[size_pool_idx];
-    return slots_to_pages_for_size_pool(objspace, size_pool, init_slots);
 }
 
 void
@@ -632,25 +563,15 @@ heap_pages_expand_sorted_to(rb_objspace_t *objspace, size_t next_length)
 static void
 heap_pages_expand_sorted(rb_objspace_t *objspace)
 {
-    size_t next_length = heap_allocatable_pages(objspace);
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        next_length += SIZE_POOL_EDEN_HEAP(size_pool)->total_pages;
-    }
+    size_t next_length = objspace->heap.allocatable_pages + 
+        objspace->heap.total_pages;
 
     if (next_length > heap_pages_sorted_length) {
         heap_pages_expand_sorted_to(objspace, next_length);
     }
 
-    GC_ASSERT(heap_allocatable_pages(objspace) + heap_eden_total_pages(objspace) <= heap_pages_sorted_length);
-    GC_ASSERT(heap_allocated_pages <= heap_pages_sorted_length);
-}
-
-static void
-size_pool_allocatable_pages_set(rb_objspace_t *objspace, rb_size_pool_t *size_pool, size_t s)
-{
-    size_pool->allocatable_pages = s;
-    heap_pages_expand_sorted(objspace);
+    GC_ASSERT(objspace->heap.allocatable_pages + objspace->heap.total_pages <= heap_pages_sorted_length);
+    GC_ASSERT(objspace->heap_pages.allocated_pages <= heap_pages_sorted_length);
 }
 
 static inline void
@@ -670,29 +591,15 @@ heap_page_add_freeobj(rb_objspace_t *objspace, struct heap_page *page, VALUE obj
     gc_report(objspace, "heap_page_add_freeobj: add %p to freelist\n", (void *)obj);
 }
 
-static size_t
-heap_extend_pages(rb_objspace_t *objspace, rb_size_pool_t *size_pool, size_t free_slots, size_t total_slots, size_t used);
-
-static void
-size_pool_allocatable_pages_expand(rb_objspace_t *objspace, rb_size_pool_t *size_pool,
-                                   size_t swept_slots, size_t total_slots, size_t total_pages)
-{
-    size_t extend_page_count = heap_extend_pages(objspace, size_pool, swept_slots, total_slots, total_pages);
-
-    if (extend_page_count > size_pool->allocatable_pages) {
-        size_pool_allocatable_pages_set(objspace, size_pool, extend_page_count);
-    }
-}
-
 static inline void
-heap_add_freepage(rb_heap_t *heap, struct heap_page *page)
+heap_add_freepage(rb_objspace_t *objspace, struct heap_page *page)
 {
     asan_unlock_freelist(page);
     GC_ASSERT(page->free_slots != 0);
     GC_ASSERT(page->freelist != NULL);
 
-    page->free_next = heap->free_pages;
-    heap->free_pages = page;
+    page->free_next = objspace->heap.free_pages;
+    objspace->heap.free_pages = page;
 
     RUBY_DEBUG_LOG("page:%p freelist:%p", (void *)page, (void *)page->freelist);
 
@@ -805,12 +712,12 @@ heap_page_body_allocate(void)
 }
 
 static struct heap_page *
-heap_page_allocate(rb_objspace_t *objspace, rb_size_pool_t *size_pool)
+heap_page_allocate(rb_objspace_t *objspace, size_t slot_size)
 {
     uintptr_t start, end, p;
     struct heap_page *page;
     uintptr_t hi, lo, mid;
-    size_t stride = size_pool->slot_size;
+    size_t stride = slot_size;
     unsigned int limit = (unsigned int)((HEAP_PAGE_SIZE - sizeof(struct heap_page_header)))/(int)stride;
 
     /* assign heap_page body (contains heap_page_header and RVALUEs) */
@@ -875,10 +782,10 @@ heap_page_allocate(rb_objspace_t *objspace, rb_size_pool_t *size_pool)
 
     heap_allocated_pages++;
 
-    GC_ASSERT(heap_eden_total_pages(objspace) + heap_allocatable_pages(objspace) <= heap_pages_sorted_length);
+    GC_ASSERT(objspace->heap.total_pages + objspace->heap.allocatable_pages <= heap_pages_sorted_length);
     GC_ASSERT(heap_allocated_pages <= heap_pages_sorted_length);
 
-    size_pool->total_allocated_pages++;
+    objspace->heap.total_allocated_pages++;
 
     if (heap_allocated_pages > heap_pages_sorted_length) {
         rb_bug("heap_page_allocate: allocated(%"PRIdSIZE") > sorted(%"PRIdSIZE")",
@@ -890,8 +797,7 @@ heap_page_allocate(rb_objspace_t *objspace, rb_size_pool_t *size_pool)
 
     page->start = start;
     page->total_slots = limit;
-    page->slot_size = size_pool->slot_size;
-    page->size_pool = size_pool;
+    page->slot_size = slot_size;
     page_body->header.page = page;
 
     // TODO: Do we need this?
@@ -906,39 +812,46 @@ heap_page_allocate(rb_objspace_t *objspace, rb_size_pool_t *size_pool)
 }
 
 static struct heap_page *
-heap_page_create(rb_objspace_t *objspace, rb_size_pool_t *size_pool)
+heap_page_create(rb_objspace_t *objspace, size_t slot_size)
 {
-    size_pool->allocatable_pages--;
-    return heap_page_allocate(objspace, size_pool);
+    objspace->heap.allocatable_pages--;
+    return heap_page_allocate(objspace, slot_size);
 }
 
 static void
-heap_add_page(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap, struct heap_page *page)
+heap_add_page(rb_objspace_t *objspace, struct heap_page *page)
 {
-    ccan_list_add_tail(&heap->pages, &page->page_node);
-    heap->total_pages++;
-    heap->total_slots += page->total_slots;
+    ccan_list_add_tail(&objspace->heap.pages, &page->page_node);
+    objspace->heap.total_pages++;
+    objspace->heap.total_slots += page->total_slots;
 }
 
-static void
-heap_assign_page(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap)
+static rb_heap_page_t *
+heap_assign_page(rb_objspace_t *objspace, size_t slot_size)
 {
-    struct heap_page *page = heap_page_create(objspace, size_pool);
-    heap_add_page(objspace, size_pool, heap, page);
-    heap_add_freepage(heap, page);
+    struct heap_page *page = heap_page_create(objspace, slot_size);
+    heap_add_page(objspace, page);
+    heap_add_freepage(objspace, page);
+
+    return page;
 }
 
 static size_t
-heap_extend_pages(rb_objspace_t *objspace, rb_size_pool_t *size_pool, size_t free_slots, size_t total_slots, size_t used)
+heap_extend_pages(rb_objspace_t *objspace)
 {
+
+    size_t free_slots = objspace->heap.empty_slots;
+    size_t total_slots = objspace->heap.total_slots;
+    size_t used_pages = objspace->heap.total_pages;
+
     double goal_ratio = gc_params.heap_free_slots_goal_ratio;
     size_t next_used;
 
     if (goal_ratio == 0.0) {
-        next_used = (size_t)(used * gc_params.growth_factor);
+        next_used = (size_t)(used_pages * gc_params.growth_factor);
     }
     else if (total_slots == 0) {
-        next_used = minimum_pages_for_size_pool(objspace, size_pool);
+        next_used = OBJ_SIZE_MULTIPLES * 10;
     }
     else {
         /* Find `f' where free_slots = f * total_slots * goal_ratio
@@ -949,66 +862,58 @@ heap_extend_pages(rb_objspace_t *objspace, rb_size_pool_t *size_pool, size_t fre
         if (f > gc_params.growth_factor) f = gc_params.growth_factor;
         if (f < 1.0) f = 1.1;
 
-        next_used = (size_t)(f * used);
+        next_used = (size_t)(f * used_pages);
     }
 
     if (gc_params.growth_max_slots > 0) {
-        size_t max_used = (size_t)(used + gc_params.growth_max_slots/HEAP_PAGE_OBJ_LIMIT);
+        size_t max_used = (size_t)(used_pages + gc_params.growth_max_slots/HEAP_PAGE_OBJ_LIMIT);
         if (next_used > max_used) next_used = max_used;
     }
 
-    size_t extend_page_count = next_used - used;
+    size_t extend_page_count = next_used - used_pages;
     /* Extend by at least 1 page. */
     if (extend_page_count == 0) extend_page_count = 1;
 
     return extend_page_count;
 }
 
-static int
-heap_increment(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap)
+static rb_heap_page_t *
+heap_increment(rb_objspace_t *objspace, size_t slot_size)
 {
-    if (size_pool->allocatable_pages > 0) {
+    rb_heap_page_t *page = NULL;
+    if (objspace->heap.allocatable_pages > 0) {
         gc_report(objspace, "heap_increment: heap_pages_sorted_length: %"PRIdSIZE", "
                   "heap_pages_inc: %"PRIdSIZE", heap->total_pages: %"PRIdSIZE"\n",
-                  heap_pages_sorted_length, size_pool->allocatable_pages, heap->total_pages);
+                  heap_pages_sorted_length, objspace->heap.allocatable_pages, objspace->heap.total_pages);
 
-        GC_ASSERT(heap_allocatable_pages(objspace) + heap_eden_total_pages(objspace) <= heap_pages_sorted_length);
+        GC_ASSERT(objspace->heap.allocatable_pages + objspace->heap.total_pages <= heap_pages_sorted_length);
         GC_ASSERT(heap_allocated_pages <= heap_pages_sorted_length);
 
-        heap_assign_page(objspace, size_pool, heap);
-        return TRUE;
+        page = heap_assign_page(objspace, slot_size);
     }
-    return FALSE;
+    return page;
 }
 
-static void
-heap_prepare(rb_objspace_t *objspace, rb_size_pool_t *size_pool, rb_heap_t *heap)
+static rb_heap_page_t *
+heap_prepare(rb_objspace_t *objspace, size_t slot_size)
 {
-    size_pool_allocatable_pages_expand(objspace, size_pool,
-                                       size_pool->empty_slots,
-                                       heap->total_slots,
-                                       heap->total_pages);
-    GC_ASSERT(size_pool->allocatable_pages > 0);
-    heap_increment(objspace, size_pool, heap);
-    GC_ASSERT(heap->free_pages != NULL);
+    rb_heap_page_t *page = NULL;
+    size_t extend_page_count = heap_extend_pages(objspace);
+
+    if (extend_page_count > objspace->heap.allocatable_pages) {
+        objspace->heap.allocatable_pages = extend_page_count;
+        heap_pages_expand_sorted(objspace);
+    }
+    GC_ASSERT(objspace->heap.allocatable_pages > 0);
+    page = heap_increment(objspace, slot_size);
+    GC_ASSERT(objspace->heap.free_pages != NULL);
+
+    return page;
 }
 
-static inline VALUE
-newobj_init(VALUE klass, VALUE flags, int wb_protected, rb_objspace_t *objspace, VALUE obj)
-{
-#if !__has_feature(memory_sanitizer)
-    GC_ASSERT(BUILTIN_TYPE(obj) == T_NONE);
-    GC_ASSERT((flags & FL_WB_PROTECTED) == 0);
-#endif
-    RBASIC(obj)->flags = flags;
-    *((VALUE *)&RBASIC(obj)->klass) = klass;
-
-    gc_report(objspace, "newobj: %s\n", rb_obj_info(obj));
-
-    RUBY_DEBUG_LOG("obj:%p (%s)", (void *)obj, rb_obj_info(obj));
-    return obj;
-}
-
+/*
+ * TODO: Rename this
+ */
 size_t
 rb_gc_impl_obj_slot_size(VALUE obj)
 {
@@ -1016,21 +921,22 @@ rb_gc_impl_obj_slot_size(VALUE obj)
 }
 
 static inline size_t
-size_pool_slot_size(unsigned char pool_id)
+valid_object_sizes_ordered_idx(unsigned char pool_id)
 {
-    GC_ASSERT(pool_id < SIZE_POOL_COUNT);
-
+    GC_ASSERT(pool_id < OBJ_SIZE_MULTIPLES);
     size_t slot_size = (1 << pool_id) * BASE_SLOT_SIZE;
-
     slot_size -= RVALUE_OVERHEAD;
-
     return slot_size;
 }
 
+/*
+ * TODO: This is exposed in a bunch of places whilst not being part of the
+ * Interface
+ */
 bool
 rb_gc_size_allocatable_p(size_t size)
 {
-    return size <= size_pool_slot_size(SIZE_POOL_COUNT - 1);
+    return size <= valid_object_sizes_ordered_idx(OBJ_SIZE_MULTIPLES - 1);
 }
 
 static inline VALUE
@@ -1044,67 +950,71 @@ newobj_fill(VALUE obj, VALUE v1, VALUE v2, VALUE v3)
 }
 
 static inline size_t
-size_pool_idx_for_size(size_t size)
+page_slot_size_idx_for_size(size_t size)
 {
     size += RVALUE_OVERHEAD;
-
     size_t slot_count = CEILDIV(size, BASE_SLOT_SIZE);
+    size_t ordered_object_size_idx = 64 - nlz_int64(slot_count - 1);
 
-    /* size_pool_idx is ceil(log2(slot_count)) */
-    size_t size_pool_idx = 64 - nlz_int64(slot_count - 1);
-
-    if (size_pool_idx >= SIZE_POOL_COUNT) {
-        rb_bug("size_pool_idx_for_size: allocation size too large "
-               "(size=%"PRIuSIZE"u, size_pool_idx=%"PRIuSIZE"u)", size, size_pool_idx);
+    if (ordered_object_size_idx >= OBJ_SIZE_MULTIPLES) {
+        rb_bug("page_slot_size_idx_for_size: allocation size too large "
+               "(size=%"PRIuSIZE"u, ordered_object_size_idx=%"PRIuSIZE"u)",
+               size, ordered_object_size_idx);
     }
 
-    return size_pool_idx;
+    return ordered_object_size_idx;
 }
 
+/* TODO: This function bakes internal implementation detail into the Interface.
+ * This needs to be removed.
+ */
 size_t
 rb_gc_impl_size_pool_id_for_size(void *objspace_ptr, size_t size)
 {
-    return size_pool_idx_for_size(size);
+    return page_slot_size_idx_for_size(size);
 }
 
 
-static size_t size_pool_sizes[SIZE_POOL_COUNT + 1] = { 0 };
+static size_t valid_object_sizes[OBJ_SIZE_MULTIPLES + 1] = { 0 };
 
+/* TODO: This function is exposed in shapes.h - this needs to be moved, so not
+ * to expose internal GC concerns (ie. size pools). This is currently breaking
+ * encapsulation, and this NoGC implementation doesn't have size pools so it's
+ * odd that this has to be here.
+ */
 size_t *
 rb_gc_size_pool_sizes(void)
 {
-    if (size_pool_sizes[0] == 0) {
-        for (unsigned char i = 0; i < SIZE_POOL_COUNT; i++) {
-            size_pool_sizes[i] = size_pool_slot_size(i);
+    if (valid_object_sizes[0] == 0) {
+        for (unsigned char i = 0; i < OBJ_SIZE_MULTIPLES; i++) {
+            valid_object_sizes[i] = valid_object_sizes_ordered_idx(i);
         }
     }
 
-    return size_pool_sizes;
+    return valid_object_sizes;
 }
 
 static VALUE
-newobj_alloc(rb_objspace_t *objspace, size_t size_pool_idx)
+newobj_alloc(rb_objspace_t *objspace, size_t cache_idx, size_t slot_size)
 {
-    rb_size_pool_t *size_pool = &size_pools[size_pool_idx];
-    rb_heap_t *heap = SIZE_POOL_EDEN_HEAP(size_pool);
-
     unsigned int lev = rb_gc_cr_lock();
-    struct heap_page *page = heap->free_pages;
 
-    while (page && page->free_slots == 0) {
-        page = page->free_next;
+    GC_ASSERT(objspace->free_page_cache[cache_idx]);
+    struct heap_page *page = objspace->free_page_cache[cache_idx];
+
+    if (page->free_slots == 0) {
+        page = heap_prepare(objspace, slot_size);
+        objspace->free_page_cache[cache_idx] = page;
     }
-    if (!page) {
-        heap_prepare(objspace, size_pool, heap);
-        page = heap->free_pages;
-    }
-    
+
     struct free_slot *obj = page->freelist;
+    GC_ASSERT(RB_TYPE_P((VALUE)obj, T_NONE));
+
     page->freelist = obj->next;
     page->free_slots--;
     rb_gc_cr_unlock(lev);
 
-    size_pool->total_allocated_objects++;
+    objspace->heap.total_allocated_objects++;
     return (VALUE)obj;
 }
 
@@ -1112,14 +1022,23 @@ VALUE
 rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, bool wb_protected, size_t alloc_size)
 {
     rb_objspace_t *objspace = objspace_ptr;
+    
+    // TODO: rb_gc_size_pool_sizes should be renamed, or removed
+    size_t *public_slot_sizes = rb_gc_size_pool_sizes();
 
     RB_DEBUG_COUNTER_INC(obj_newobj);
     (void)RB_DEBUG_COUNTER_INC_IF(obj_newobj_wb_unprotected, !wb_protected);
 
-    size_t size_pool_idx = size_pool_idx_for_size(alloc_size);
+    size_t cache_slot_idx = page_slot_size_idx_for_size(alloc_size);
+    VALUE obj = newobj_alloc(objspace, cache_slot_idx, public_slot_sizes[cache_slot_idx] + RVALUE_OVERHEAD);
 
-    VALUE obj = newobj_alloc(objspace, size_pool_idx);
-    newobj_init(klass, flags, wb_protected, objspace, obj);
+    RBASIC(obj)->flags = flags;
+    *((VALUE *)&RBASIC(obj)->klass) = klass;
+
+    gc_report(objspace, "newobj: %s\n", rb_obj_info(obj));
+
+    RUBY_DEBUG_LOG("obj:%p (%s)", (void *)obj, rb_obj_info(obj));
+
     return newobj_fill(obj, v1, v2, v3);
 }
 
@@ -1227,20 +1146,15 @@ struct each_obj_data {
     each_page_callback *each_page_callback;
     void *data;
 
-    struct heap_page **pages[SIZE_POOL_COUNT];
-    size_t pages_counts[SIZE_POOL_COUNT];
+    struct heap_page **pages;
+    size_t pages_count;
 };
 
 static VALUE
 objspace_each_objects_ensure(VALUE arg)
 {
     struct each_obj_data *data = (struct each_obj_data *)arg;
-
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        struct heap_page **pages = data->pages[i];
-        free(pages);
-    }
-
+    free(data->pages);
     return Qnil;
 }
 
@@ -1250,59 +1164,47 @@ objspace_each_objects_try(VALUE arg)
     struct each_obj_data *data = (struct each_obj_data *)arg;
     rb_objspace_t *objspace = data->objspace;
 
-    /* Copy pages from all size_pools to their respective buffers. */
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        size_t size = SIZE_POOL_EDEN_HEAP(size_pool)->total_pages * sizeof(struct heap_page *);
+    size_t size = objspace->heap.total_pages * sizeof(rb_heap_page_t *);
+    rb_heap_page_t **pages = malloc(size);
+    if (!pages) rb_memerror();
 
-        struct heap_page **pages = malloc(size);
-        if (!pages) rb_memerror();
-
-        /* Set up pages buffer by iterating over all pages in the current eden
-         * heap. This will be a snapshot of the state of the heap before we
-         * call the callback over each page that exists in this buffer. Thus it
-         * is safe for the callback to allocate objects without possibly entering
-         * an infinite loop. */
-        struct heap_page *page = 0;
-        size_t pages_count = 0;
-        ccan_list_for_each(&SIZE_POOL_EDEN_HEAP(size_pool)->pages, page, page_node) {
-            pages[pages_count] = page;
-            pages_count++;
-        }
-        data->pages[i] = pages;
-        data->pages_counts[i] = pages_count;
-        GC_ASSERT(pages_count == SIZE_POOL_EDEN_HEAP(size_pool)->total_pages);
+    rb_heap_page_t *page = NULL;
+    size_t pages_count = 0;
+    ccan_list_for_each(&objspace->heap.pages, page, page_node) {
+        pages[pages_count] = page;
+        pages_count++;
     }
 
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        size_t pages_count = data->pages_counts[i];
-        struct heap_page **pages = data->pages[i];
+    data->pages = pages;
+    data->pages_count = pages_count;
 
-        struct heap_page *page = ccan_list_top(&SIZE_POOL_EDEN_HEAP(size_pool)->pages, struct heap_page, page_node);
-        for (size_t i = 0; i < pages_count; i++) {
-            /* If we have reached the end of the linked list then there are no
-             * more pages, so break. */
-            if (page == NULL) break;
+    GC_ASSERT(pages_count == data->pages_count &&
+              pages_count == objspace->heap.total_pages);
 
-            /* If this page does not match the one in the buffer, then move to
-             * the next page in the buffer. */
-            if (pages[i] != page) continue;
+    page = ccan_list_top(&objspace->heap.pages, struct heap_page, page_node);
 
-            uintptr_t pstart = (uintptr_t)page->start;
-            uintptr_t pend = pstart + (page->total_slots * size_pool->slot_size);
+    for (size_t i = 0; i < pages_count; i++) {
+        /* If we have reached the end of the linked list then there are no
+         * more pages, so break. */
+        if (page == NULL) break;
 
-            if (data->each_obj_callback &&
-                (*data->each_obj_callback)((void *)pstart, (void *)pend, size_pool->slot_size, data->data)) {
-                break;
-            }
-            if (data->each_page_callback &&
-                (*data->each_page_callback)(page, data->data)) {
-                break;
-            }
+        /* If this page does not match the one in the buffer, then move to
+         * the next page in the buffer. */
+        if (data->pages[i] != page) continue;
 
-            page = ccan_list_next(&SIZE_POOL_EDEN_HEAP(size_pool)->pages, page, page_node);
+        uintptr_t pstart = (uintptr_t)page->start;
+        uintptr_t pend = pstart + (page->total_slots * page->slot_size);
+
+        if (data->each_obj_callback &&
+                (*data->each_obj_callback)((void *)pstart, (void *)pend, page->slot_size, data->data)) {
+            break;
         }
+        if (data->each_page_callback &&
+                (*data->each_page_callback)(page, data->data)) {
+            break;
+        }
+
+        page = ccan_list_next(&objspace->heap.pages, page, page_node);
     }
 
     return Qnil;
@@ -1313,7 +1215,7 @@ objspace_each_exec(bool protected, struct each_obj_data *each_obj_data)
 {
     each_obj_data->reenable_incremental = FALSE;
     memset(&each_obj_data->pages, 0, sizeof(each_obj_data->pages));
-    memset(&each_obj_data->pages_counts, 0, sizeof(each_obj_data->pages_counts));
+    memset(&each_obj_data->pages_count, 0, sizeof(each_obj_data->pages_count));
     rb_ensure(objspace_each_objects_try, (VALUE)each_obj_data,
               objspace_each_objects_ensure, (VALUE)each_obj_data);
 }
@@ -1634,21 +1536,10 @@ rb_gc_impl_each_object(void *objspace_ptr, void (*func)(VALUE obj, void *data), 
     }
 }
 
-/*
-  ------------------------ Garbage Collection ------------------------
-*/
-
-/* Sweeping */
-
 static size_t
 objspace_available_slots(rb_objspace_t *objspace)
 {
-    size_t total_slots = 0;
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        total_slots += SIZE_POOL_EDEN_HEAP(size_pool)->total_slots;
-    }
-    return total_slots;
+    return objspace->heap.total_slots;
 }
 
 static size_t
@@ -1782,12 +1673,6 @@ rb_gc_impl_object_moved_p(void *objspace_ptr, VALUE obj)
 }
 
 
-struct desired_compaction_pages_i_data {
-    rb_objspace_t *objspace;
-    size_t required_slots[SIZE_POOL_COUNT];
-};
-
-
 bool
 rb_gc_impl_during_gc_p(void *objspace_ptr)
 {
@@ -1913,7 +1798,7 @@ static VALUE gc_stat_heap_symbols[gc_stat_heap_sym_last];
 int
 rb_gc_impl_heap_count(void *objspace_ptr)
 {
-    return SIZE_POOL_COUNT;
+    return OBJ_SIZE_MULTIPLES;
 }
 
 static void
@@ -1932,7 +1817,7 @@ setup_gc_stat_heap_symbols(void)
 }
 
 size_t
-rb_gc_impl_stat_heap(void *objspace_ptr, int size_pool_idx, VALUE hash_or_sym)
+rb_gc_impl_stat_heap(void *objspace_ptr, int _, VALUE hash_or_sym)
 {
     rb_objspace_t *objspace = objspace_ptr;
     VALUE hash = Qnil, key = Qnil;
@@ -1949,24 +1834,18 @@ rb_gc_impl_stat_heap(void *objspace_ptr, int size_pool_idx, VALUE hash_or_sym)
         rb_raise(rb_eTypeError, "non-hash or symbol argument");
     }
 
-    if (size_pool_idx < 0 || size_pool_idx >= SIZE_POOL_COUNT) {
-        rb_raise(rb_eArgError, "size pool index out of range");
-    }
-
-    rb_size_pool_t *size_pool = &size_pools[size_pool_idx];
-
 #define SET(name, attr) \
     if (key == gc_stat_heap_symbols[gc_stat_heap_sym_##name]) \
         return attr; \
     else if (hash != Qnil) \
         rb_hash_aset(hash, gc_stat_heap_symbols[gc_stat_heap_sym_##name], SIZET2NUM(attr));
 
-    SET(slot_size, size_pool->slot_size);
-    SET(heap_allocatable_pages, size_pool->allocatable_pages);
-    SET(heap_eden_pages, SIZE_POOL_EDEN_HEAP(size_pool)->total_pages);
-    SET(heap_eden_slots, SIZE_POOL_EDEN_HEAP(size_pool)->total_slots);
-    SET(total_allocated_pages, size_pool->total_allocated_pages);
-    SET(total_allocated_objects, size_pool->total_allocated_objects);
+    SET(slot_size, 0);
+    SET(heap_allocatable_pages, objspace->heap.allocatable_pages);
+    SET(heap_eden_pages, objspace->heap.total_pages);
+    SET(heap_eden_slots, objspace->heap.total_slots);
+    SET(total_allocated_pages, objspace->heap.total_allocated_pages);
+    SET(total_allocated_objects, objspace->heap.total_allocated_objects);
 #undef SET
 
     if (!NIL_P(key)) { /* matched key should return above */
@@ -2090,26 +1969,6 @@ get_envparam_double(const char *name, double *default_value, double lower_bound,
 static void
 gc_set_initial_pages(rb_objspace_t *objspace)
 {
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        char env_key[sizeof("RUBY_GC_HEAP_" "_INIT_SLOTS") + DECIMAL_SIZE_OF_BITS(sizeof(int) * CHAR_BIT)];
-        snprintf(env_key, sizeof(env_key), "RUBY_GC_HEAP_%d_INIT_SLOTS", i);
-
-        size_t size_pool_init_slots = gc_params.size_pool_init_slots[i];
-        if (get_envparam_size(env_key, &size_pool_init_slots, 0)) {
-            gc_params.size_pool_init_slots[i] = size_pool_init_slots;
-        }
-
-        if (size_pool_init_slots > size_pool->eden_heap.total_slots) {
-            size_t slots = size_pool_init_slots - size_pool->eden_heap.total_slots;
-            size_pool->allocatable_pages = slots_to_pages_for_size_pool(objspace, size_pool, slots);
-        }
-        else {
-            /* We already have more slots than size_pool_init_slots allows, so
-             * prevent creating more pages. */
-            size_pool->allocatable_pages = 0;
-        }
-    }
     heap_pages_expand_sorted(objspace);
 }
 
@@ -2487,13 +2346,17 @@ void *
 rb_gc_impl_objspace_alloc(void)
 {
     rb_objspace_t *objspace = calloc1(sizeof(rb_objspace_t));
-
     return objspace;
 }
 
 void
 rb_gc_impl_objspace_init(void *objspace_ptr)
 {
+#if defined(INIT_HEAP_PAGE_ALLOC_USE_MMAP)
+    /* Need to determine if we can use mmap at runtime. */
+    heap_page_alloc_use_mmap = INIT_HEAP_PAGE_ALLOC_USE_MMAP;
+#endif
+
     rb_objspace_t *objspace = objspace_ptr;
 
     objspace->finalize_deferred_pjob = rb_postponed_job_preregister(0, gc_finalize_deferred, objspace);
@@ -2501,32 +2364,19 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
         rb_bug("Could not preregister postponed job for GC");
     }
 
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        size_pool->slot_size = (1 << i) * BASE_SLOT_SIZE;
-        ccan_list_head_init(&SIZE_POOL_EDEN_HEAP(size_pool)->pages);
-    }
+    ccan_list_head_init(&objspace->heap.pages);
 
-#if defined(INIT_HEAP_PAGE_ALLOC_USE_MMAP)
-    /* Need to determine if we can use mmap at runtime. */
-    heap_page_alloc_use_mmap = INIT_HEAP_PAGE_ALLOC_USE_MMAP;
-#endif
     objspace->next_object_id = OBJ_ID_INITIAL;
     objspace->id_to_obj_tbl = st_init_table(&object_id_hash_type);
     objspace->obj_to_id_tbl = st_init_numtable();
-    /* Set size pools allocatable pages. */
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        /* Set the default value of size_pool_init_slots. */
-        gc_params.size_pool_init_slots[i] = GC_HEAP_INIT_SLOTS;
-        size_pool->allocatable_pages = minimum_pages_for_size_pool(objspace, size_pool);
-    }
+
+    objspace->heap.allocatable_pages = OBJ_SIZE_MULTIPLES * 10;
 
     heap_pages_expand_sorted(objspace);
 
-    for (int i = 0; i < SIZE_POOL_COUNT; i++) {
-        rb_size_pool_t *size_pool = &size_pools[i];
-        heap_prepare(objspace, size_pool, SIZE_POOL_EDEN_HEAP(size_pool));
+    for (int i = 0; i < OBJ_SIZE_MULTIPLES; i++) {
+        rb_heap_page_t *page = heap_prepare(objspace, (1 << i) * BASE_SLOT_SIZE);
+        objspace->free_page_cache[i] = page;
     }
 
     finalizer_table = st_init_numtable();
@@ -2541,8 +2391,9 @@ rb_gc_impl_init(void)
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_OBJ_LIMIT")), SIZET2NUM(HEAP_PAGE_OBJ_LIMIT));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_BITMAP_SIZE")), SIZET2NUM(0));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_SIZE")), SIZET2NUM(HEAP_PAGE_SIZE));
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("SIZE_POOL_COUNT")), LONG2FIX(SIZE_POOL_COUNT));
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVARGC_MAX_ALLOCATE_SIZE")), LONG2FIX(size_pool_slot_size(SIZE_POOL_COUNT - 1)));
+    rb_hash_aset(gc_constants, ID2SYM(rb_intern("OBJ_SIZE_MULTIPLES")), LONG2FIX(OBJ_SIZE_MULTIPLES));
+    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVARGC_MAX_ALLOCATE_SIZE")), 
+            LONG2FIX(valid_object_sizes_ordered_idx(OBJ_SIZE_MULTIPLES - 1)));
     if (RB_BUG_INSTEAD_OF_RB_MEMERROR+0) {
         rb_hash_aset(gc_constants, ID2SYM(rb_intern("RB_BUG_INSTEAD_OF_RB_MEMERROR")), Qtrue);
     }
