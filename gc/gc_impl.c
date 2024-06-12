@@ -836,47 +836,6 @@ heap_assign_page(rb_objspace_t *objspace, size_t slot_size)
     return page;
 }
 
-static size_t
-heap_extend_pages(rb_objspace_t *objspace)
-{
-
-    size_t free_slots = objspace->heap.empty_slots;
-    size_t total_slots = objspace->heap.total_slots;
-    size_t used_pages = objspace->heap.total_pages;
-
-    double goal_ratio = gc_params.heap_free_slots_goal_ratio;
-    size_t next_used;
-
-    if (goal_ratio == 0.0) {
-        next_used = (size_t)(used_pages * gc_params.growth_factor);
-    }
-    else if (total_slots == 0) {
-        next_used = OBJ_SIZE_MULTIPLES * 10;
-    }
-    else {
-        /* Find `f' where free_slots = f * total_slots * goal_ratio
-         * => f = (total_slots - free_slots) / ((1 - goal_ratio) * total_slots)
-         */
-        double f = (double)(total_slots - free_slots) / ((1 - goal_ratio) * total_slots);
-
-        if (f > gc_params.growth_factor) f = gc_params.growth_factor;
-        if (f < 1.0) f = 1.1;
-
-        next_used = (size_t)(f * used_pages);
-    }
-
-    if (gc_params.growth_max_slots > 0) {
-        size_t max_used = (size_t)(used_pages + gc_params.growth_max_slots/HEAP_PAGE_OBJ_LIMIT);
-        if (next_used > max_used) next_used = max_used;
-    }
-
-    size_t extend_page_count = next_used - used_pages;
-    /* Extend by at least 1 page. */
-    if (extend_page_count == 0) extend_page_count = 1;
-
-    return extend_page_count;
-}
-
 static rb_heap_page_t *
 heap_increment(rb_objspace_t *objspace, size_t slot_size)
 {
@@ -894,12 +853,25 @@ heap_increment(rb_objspace_t *objspace, size_t slot_size)
     return page;
 }
 
+static inline size_t
+goal_allocatable_pages_count(rb_objspace_t *objspace)
+{
+    size_t allocated_pages = objspace->heap.total_allocated_pages;
+    size_t allocatable_pages = objspace->heap.allocatable_pages;
+
+    // if more than 75% of allocatable pages are used, double the allocatable
+    // amount
+    if (allocated_pages / allocatable_pages >= 0.75) {
+        allocatable_pages = allocatable_pages * 2;
+    }
+    return allocatable_pages;
+}
+
 static rb_heap_page_t *
 heap_prepare(rb_objspace_t *objspace, size_t slot_size)
 {
     rb_heap_page_t *page = NULL;
-    size_t extend_page_count = heap_extend_pages(objspace);
-
+    size_t extend_page_count = goal_allocatable_pages_count(objspace);
     if (extend_page_count > objspace->heap.allocatable_pages) {
         objspace->heap.allocatable_pages = extend_page_count;
         heap_pages_expand_sorted(objspace);
