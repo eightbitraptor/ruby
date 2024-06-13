@@ -371,6 +371,7 @@ void rb_gc_impl_stress_set(void *objspace_ptr, VALUE flag);
 VALUE rb_gc_impl_stress_get(void *objspace_ptr);
 // Object allocation
 VALUE rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, bool wb_protected, size_t alloc_size);
+bool rb_gc_impl_size_allocatable_p(size_t size);
 size_t rb_gc_impl_obj_slot_size(VALUE obj);
 size_t rb_gc_impl_size_pool_id_for_size(void *objspace_ptr, size_t size);
 // Malloc
@@ -716,6 +717,7 @@ ruby_external_gc_init(void)
     load_external_gc_func(new_obj);
     load_external_gc_func(obj_slot_size);
     load_external_gc_func(size_pool_id_for_size);
+    load_external_gc_func(size_allocatable_p);
     // Malloc
     load_external_gc_func(malloc);
     load_external_gc_func(calloc);
@@ -792,6 +794,7 @@ ruby_external_gc_init(void)
 # define rb_gc_impl_new_obj rb_gc_functions->new_obj
 # define rb_gc_impl_obj_slot_size rb_gc_functions->obj_slot_size
 # define rb_gc_impl_size_pool_id_for_size rb_gc_functions->size_pool_id_for_size
+# define rb_gc_impl_size_allocatable_p rb_gc_functions->size_allocatable_p
 // Malloc
 # define rb_gc_impl_malloc rb_gc_functions->malloc
 # define rb_gc_impl_calloc rb_gc_functions->calloc
@@ -865,6 +868,12 @@ size_t
 rb_gc_obj_slot_size(VALUE obj)
 {
     return rb_gc_impl_obj_slot_size(obj);
+}
+
+bool
+rb_gc_size_allocatable_p(size_t size)
+{
+    return rb_gc_impl_size_allocatable_p(size);
 }
 
 static inline VALUE

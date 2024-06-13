@@ -133,6 +133,7 @@ typedef struct gc_function_map {
     VALUE (*new_obj)(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, bool wb_protected, size_t alloc_size);
     size_t (*obj_slot_size)(VALUE obj);
     size_t (*size_pool_id_for_size)(void *objspace_ptr, size_t size);
+    bool (*size_allocatable_p)(size_t size);
     // Malloc
     void *(*malloc)(void *objspace_ptr, size_t size);
     void *(*calloc)(void *objspace_ptr, size_t size);

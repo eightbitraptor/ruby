@@ -2421,7 +2421,7 @@ size_pool_slot_size(unsigned char pool_id)
 }
 
 bool
-rb_gc_size_allocatable_p(size_t size)
+rb_gc_impl_size_allocatable_p(size_t size)
 {
     return size <= size_pool_slot_size(SIZE_POOL_COUNT - 1);
 }
@@ -5702,7 +5702,7 @@ gc_compact_destination_pool(rb_objspace_t *objspace, rb_size_pool_t *src_pool, V
     }
 
     size_t idx = 0;
-    if (rb_gc_size_allocatable_p(obj_size)) {
+    if (rb_gc_impl_size_allocatable_p(obj_size)) {
         idx = size_pool_idx_for_size(obj_size);
     }
 
