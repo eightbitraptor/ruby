@@ -1,26 +1,11 @@
-#include "ruby/internal/config.h"
-
-#include <signal.h>
-
 #include <sys/mman.h>
 #include <unistd.h>
-
-#if !defined(PAGE_SIZE) && defined(HAVE_SYS_USER_H)
-/* LIST_HEAD conflicts with sys/queue.h on macOS */
-# include <sys/user.h>
-#endif
 
 #include "ruby/ruby.h"
 #include "ruby/atomic.h"
 #include "ruby/debug.h"
-#include "ruby/thread.h"
-#include "ruby/util.h"
-#include "ruby/vm.h"
-#include "ruby/internal/encoding/string.h"
 #include "ccan/list/list.h"
 #include "darray.h"
-#include "probes.h"
-
 #include "debug_counter.h"
 #include "internal/sanitizers.h"
 
@@ -36,21 +21,6 @@
 # endif
 #endif
 
-#ifdef HAVE_MALLOC_TRIM
-# include <malloc.h>
-
-# ifdef __EMSCRIPTEN__
-/* malloc_trim is defined in emscripten/emmalloc.h on emscripten. */
-#  include <emscripten/emmalloc.h>
-# endif
-#endif
-
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-# include <mach/task.h>
-# include <mach/mach_init.h>
-# include <mach/mach_port.h>
-#endif
-
 /* Headers from gc.c */
 unsigned int rb_gc_vm_lock(void);
 void rb_gc_vm_unlock(unsigned int lev);
@@ -63,11 +33,6 @@ void rb_gc_unset_pending_interrupt(void);
 bool rb_gc_obj_free(void *objspace, VALUE obj);
 const char *rb_obj_info(VALUE obj);
 bool rb_gc_shutdown_call_finalizer_p(VALUE obj);
-
-// From ractor_core.h
-#ifndef RACTOR_CHECK_MODE
-# define RACTOR_CHECK_MODE (RUBY_DEBUG) && (SIZEOF_UINT64_T == SIZEOF_VALUE)
-#endif
 
 #ifndef RUBY_DEBUG_LOG
 # define RUBY_DEBUG_LOG(...)
@@ -144,11 +109,8 @@ typedef struct rb_objspace {
 #define HEAP_PAGE_ALIGN_LOG 16
 #endif
 
-#if RACTOR_CHECK_MODE || GC_DEBUG
+#if GC_DEBUG
 struct rvalue_overhead {
-# if RACTOR_CHECK_MODE
-    uint32_t _ractor_belonging_id;
-# endif
 # if GC_DEBUG
     const char *file;
     int line;
@@ -185,10 +147,6 @@ enum {
 };
 #define HEAP_PAGE_ALIGN (1 << HEAP_PAGE_ALIGN_LOG)
 #define HEAP_PAGE_SIZE HEAP_PAGE_ALIGN
-
-#if !defined(INCREMENTAL_MARK_STEP_ALLOCATIONS)
-# define INCREMENTAL_MARK_STEP_ALLOCATIONS 500
-#endif
 
 #undef INIT_HEAP_PAGE_ALLOC_USE_MMAP
 /* Must define either HEAP_PAGE_ALLOC_USE_MMAP or
@@ -280,13 +238,11 @@ asan_unlock_freelist(struct heap_page *page)
 #define NUM_IN_PAGE(p)   (((uintptr_t)(p) & HEAP_PAGE_ALIGN_MASK) / BASE_SLOT_SIZE)
 
 #define malloc_increase 	objspace->malloc_params.increase
-#define malloc_allocated_size 	objspace->malloc_params.allocated_size
 #define heap_pages_sorted       objspace->heap_pages.sorted
 #define heap_allocated_pages    objspace->heap_pages.allocated_pages
 #define heap_pages_sorted_length objspace->heap_pages.sorted_length
 #define heap_pages_lomem	objspace->heap_pages.range[0]
 #define heap_pages_himem	objspace->heap_pages.range[1]
-#define heap_pages_freeable_pages	objspace->heap_pages.freeable_pages
 #define heap_pages_final_slots		objspace->heap_pages.final_slots
 #define heap_pages_deferred_final	objspace->heap_pages.deferred_final
 #define finalizing		objspace->atomic_flags.finalizing
@@ -757,7 +713,6 @@ heap_page_allocate(rb_objspace_t *objspace, size_t slot_size)
     page->slot_size = slot_size;
     page_body->header.page = page;
 
-    // TODO: Do we need this?
     for (p = start; p != end; p += stride) {
         gc_report(objspace, "assign_heap_page: %p is added to freelist\n", (void *)p);
         heap_page_add_freeobj(objspace, page, (VALUE)p);
@@ -2129,6 +2084,7 @@ rb_gc_impl_objspace_alloc(void)
 void
 rb_gc_impl_objspace_init(void *objspace_ptr)
 {
+
 #if defined(INIT_HEAP_PAGE_ALLOC_USE_MMAP)
     /* Need to determine if we can use mmap at runtime. */
     heap_page_alloc_use_mmap = INIT_HEAP_PAGE_ALLOC_USE_MMAP;
