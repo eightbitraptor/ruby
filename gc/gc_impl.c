@@ -1,7 +1,6 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "ruby/ruby.h"
 #include "ruby/atomic.h"
 #include "ruby/debug.h"
 #include "ccan/list/list.h"
@@ -175,12 +174,6 @@ typedef struct heap_page {
     short total_slots;
     short free_slots;
     short final_slots;
-    short pinned_slots;
-    struct {
-        unsigned int before_sweep : 1;
-        unsigned int has_remembered_objects : 1;
-        unsigned int has_uncollectible_wb_unprotected_objects : 1;
-    } flags;
 
     struct heap_page *free_next;
     uintptr_t start;
@@ -653,7 +646,7 @@ valid_object_sizes_ordered_idx(unsigned char pool_id)
  * Interface
  */
 bool
-rb_gc_size_allocatable_p(size_t size)
+rb_gc_impl_size_allocatable_p(size_t size)
 {
     return size <= valid_object_sizes_ordered_idx(OBJ_SIZE_MULTIPLES - 1);
 }
