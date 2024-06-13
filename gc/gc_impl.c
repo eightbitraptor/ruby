@@ -44,26 +44,6 @@ VALUE        rb_gc_impl_object_id(void *objspace_ptr, VALUE obj);
 #define HEAP_PAGE_ALIGN_LOG 16
 #endif
 
-#if GC_DEBUG
-struct rvalue_overhead {
-# if GC_DEBUG
-    const char *file;
-    int line;
-# endif
-};
-
-// Make sure that RVALUE_OVERHEAD aligns to sizeof(VALUE)
-# define RVALUE_OVERHEAD (sizeof(struct { \
-    union { \
-        struct rvalue_overhead overhead; \
-        VALUE value; \
-    }; \
-}))
-# define GET_RVALUE_OVERHEAD(obj) ((struct rvalue_overhead *)((uintptr_t)obj + rb_gc_obj_slot_size(obj)))
-#else
-# define RVALUE_OVERHEAD 0
-#endif
-
 
 #ifndef MAX
 # define MAX(a, b) (((a) > (b)) ? (a) : (b))
@@ -125,7 +105,7 @@ static bool heap_page_alloc_use_mmap;
 # define OBJ_SIZE_MULTIPLES 5
 #endif
 
-#define BASE_SLOT_SIZE (sizeof(struct RBasic) + sizeof(VALUE[RBIMPL_RVALUE_EMBED_LEN_MAX]) + RVALUE_OVERHEAD)
+#define BASE_SLOT_SIZE (sizeof(struct RBasic) + sizeof(VALUE[RBIMPL_RVALUE_EMBED_LEN_MAX]))
 
 struct heap_page_header {
     struct heap_page *page;
@@ -672,16 +652,11 @@ heap_prepare(rb_objspace_t *objspace, size_t slot_size)
     return page;
 }
 
-/*
- * TODO: Rename this
- */
 static inline size_t
 valid_object_sizes_ordered_idx(unsigned char pool_id)
 {
     GC_ASSERT(pool_id < OBJ_SIZE_MULTIPLES);
-    size_t slot_size = (1 << pool_id) * BASE_SLOT_SIZE;
-    slot_size -= RVALUE_OVERHEAD;
-    return slot_size;
+    return (1 << pool_id) * BASE_SLOT_SIZE;
 }
 
 /*
@@ -707,7 +682,6 @@ newobj_fill(VALUE obj, VALUE v1, VALUE v2, VALUE v3)
 static inline size_t
 page_slot_size_idx_for_size(size_t size)
 {
-    size += RVALUE_OVERHEAD;
     size_t slot_count = CEILDIV(size, BASE_SLOT_SIZE);
     size_t ordered_object_size_idx = 64 - nlz_int64(slot_count - 1);
 
@@ -1303,7 +1277,7 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
     (void)RB_DEBUG_COUNTER_INC_IF(obj_newobj_wb_unprotected, !wb_protected);
 
     size_t cache_slot_idx = page_slot_size_idx_for_size(alloc_size);
-    VALUE obj = newobj_alloc(objspace, cache_slot_idx, public_slot_sizes[cache_slot_idx] + RVALUE_OVERHEAD);
+    VALUE obj = newobj_alloc(objspace, cache_slot_idx, public_slot_sizes[cache_slot_idx]);
 
     RBASIC(obj)->flags = flags;
     *((VALUE *)&RBASIC(obj)->klass) = klass;
@@ -1895,7 +1869,7 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
 size_t
 rb_gc_impl_obj_slot_size(VALUE obj)
 {
-    return GET_HEAP_PAGE(obj)->slot_size - RVALUE_OVERHEAD;
+    return GET_HEAP_PAGE(obj)->slot_size;
 }
 
 /*
@@ -1905,8 +1879,7 @@ void
 rb_gc_impl_init(void)
 {
     VALUE gc_constants = rb_hash_new();
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("BASE_SLOT_SIZE")), SIZET2NUM(BASE_SLOT_SIZE - RVALUE_OVERHEAD));
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_OVERHEAD")), SIZET2NUM(RVALUE_OVERHEAD));
+    rb_hash_aset(gc_constants, ID2SYM(rb_intern("BASE_SLOT_SIZE")), SIZET2NUM(BASE_SLOT_SIZE));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_OBJ_LIMIT")), SIZET2NUM(HEAP_PAGE_OBJ_LIMIT));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_BITMAP_SIZE")), SIZET2NUM(0));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_SIZE")), SIZET2NUM(HEAP_PAGE_SIZE));
