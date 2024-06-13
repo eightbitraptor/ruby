@@ -44,7 +44,6 @@ VALUE        rb_gc_impl_object_id(void *objspace_ptr, VALUE obj);
 #define HEAP_PAGE_ALIGN_LOG 16
 #endif
 
-
 #ifndef MAX
 # define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #endif
@@ -95,7 +94,6 @@ static const bool HEAP_PAGE_ALLOC_USE_MMAP = false;
 
 static bool heap_page_alloc_use_mmap;
 #endif
-
 
 /*
  * ===== HEAP & ALLOCATION STRUCTURES
@@ -230,9 +228,6 @@ enum {
 #else
 # error not supported
 #endif
-
-
-NO_SANITIZE("memory", static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr));
 
 #ifdef RUBY_DEBUG
 # ifndef RNOGC_DEBUG
@@ -775,36 +770,7 @@ heap_page_for_ptr(rb_objspace_t *objspace, uintptr_t ptr)
     }
 }
 
-PUREFUNC(static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr);)
-static inline bool
-is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr)
-{
-    register uintptr_t p = (uintptr_t)ptr;
-    register struct heap_page *page;
-
-    RB_DEBUG_COUNTER_INC(gc_isptr_trial);
-
-    if (p < heap_pages_lomem || p > heap_pages_himem) return FALSE;
-    RB_DEBUG_COUNTER_INC(gc_isptr_range);
-
-    if (p % BASE_SLOT_SIZE != 0) return FALSE;
-    RB_DEBUG_COUNTER_INC(gc_isptr_align);
-
-    page = heap_page_for_ptr(objspace, (uintptr_t)ptr);
-    if (page) {
-        RB_DEBUG_COUNTER_INC(gc_isptr_maybe);
-        if (p < page->start) return FALSE;
-        if (p >= page->start + (page->total_slots * page->slot_size)) return FALSE;
-        if ((NUM_IN_PAGE(p) * BASE_SLOT_SIZE) % page->slot_size != 0) return FALSE;
-
-        return TRUE;
-    }
-    return FALSE;
-}
-
-
 #define ZOMBIE_OBJ_KEPT_FLAGS (FL_SEEN_OBJ_ID | FL_FINALIZE)
-
 
 typedef int each_obj_callback(void *, void *, size_t, void *);
 typedef int each_page_callback(struct heap_page *, void *);
@@ -1232,7 +1198,28 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
 bool
 rb_gc_impl_pointer_to_heap_p(void *objspace_ptr, const void *ptr)
 {
-    return is_pointer_to_heap(objspace_ptr, ptr);
+    rb_objspace_t *objspace = objspace_ptr;
+    register uintptr_t p = (uintptr_t)ptr;
+    register struct heap_page *page;
+
+    RB_DEBUG_COUNTER_INC(gc_isptr_trial);
+
+    if (p < heap_pages_lomem || p > heap_pages_himem) return FALSE;
+    RB_DEBUG_COUNTER_INC(gc_isptr_range);
+
+    if (p % BASE_SLOT_SIZE != 0) return FALSE;
+    RB_DEBUG_COUNTER_INC(gc_isptr_align);
+
+    page = heap_page_for_ptr(objspace, (uintptr_t)ptr);
+    if (page) {
+        RB_DEBUG_COUNTER_INC(gc_isptr_maybe);
+        if (p < page->start) return FALSE;
+        if (p >= page->start + (page->total_slots * page->slot_size)) return FALSE;
+        if ((NUM_IN_PAGE(p) * BASE_SLOT_SIZE) % page->slot_size != 0) return FALSE;
+
+        return TRUE;
+    }
+    return FALSE;
 }
 
 void
