@@ -263,12 +263,6 @@ asan_unlock_freelist(struct heap_page *page)
          unpoisoning; \
          unpoisoning = asan_poison_object_restore(obj, poisoned))
 
-#define FL_TEST2(x,f)  FL_CHECK2("FL_TEST2",  x, FL_TEST_RAW((x),(f)) != 0)
-#define FL_SET2(x,f)   FL_CHECK2("FL_SET2",   x, RBASIC(x)->flags |= (f))
-#define FL_UNSET2(x,f) FL_CHECK2("FL_UNSET2", x, RBASIC(x)->flags &= ~(f))
-
-
-
 static inline void *
 calloc1(size_t n)
 {
