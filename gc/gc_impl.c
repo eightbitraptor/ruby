@@ -1024,14 +1024,6 @@ gc_report_body(rb_objspace_t *objspace, const char *fmt, ...)
     fputs(buf, out);
 }
 
-
-static VALUE
-gc_info_decode(rb_objspace_t *objspace, const VALUE hash_or_key, const unsigned int orig_flags)
-{
-    return Qnil;
-}
-
-
 enum gc_stat_sym {
     gc_stat_sym_heap_allocated_pages,
     gc_stat_sym_heap_sorted_length,
@@ -1112,18 +1104,6 @@ atomic_sub_nounderflow(size_t *var, size_t sub)
     }
 }
 
-static inline bool
-objspace_malloc_increase_report(rb_objspace_t *objspace, void *mem, size_t new_size, size_t old_size, enum memop_type type)
-{
-    if (0) fprintf(stderr, "increase - ptr: %p, type: %s, new_size: %"PRIdSIZE", old_size: %"PRIdSIZE"\n",
-                   mem,
-                   type == MEMOP_TYPE_MALLOC  ? "malloc" :
-                   type == MEMOP_TYPE_FREE    ? "free  " :
-                   type == MEMOP_TYPE_REALLOC ? "realloc": "error",
-                   new_size, old_size);
-    return false;
-}
-
 static bool
 objspace_malloc_increase_body(rb_objspace_t *objspace, void *mem, size_t new_size, size_t old_size, enum memop_type type)
 {
@@ -1138,55 +1118,15 @@ objspace_malloc_increase_body(rb_objspace_t *objspace, void *mem, size_t new_siz
 }
 
 #define objspace_malloc_increase(...) \
-    for (bool malloc_increase_done = objspace_malloc_increase_report(__VA_ARGS__); \
+    for (bool malloc_increase_done = false; \
          !malloc_increase_done; \
          malloc_increase_done = objspace_malloc_increase_body(__VA_ARGS__))
-
-struct malloc_obj_info { /* 4 words */
-    size_t size;
-#if USE_GC_MALLOC_OBJ_INFO_DETAILS
-    size_t gen;
-    const char *file;
-    size_t line;
-#endif
-};
-
-#if USE_GC_MALLOC_OBJ_INFO_DETAILS
-const char *ruby_malloc_info_file;
-int ruby_malloc_info_line;
-#endif
-
-static inline size_t
-objspace_malloc_prepare(rb_objspace_t *objspace, size_t size)
-{
-    if (size == 0) size = 1;
-
-#if CALC_EXACT_MALLOC_SIZE
-    size += sizeof(struct malloc_obj_info);
-#endif
-
-    return size;
-}
 
 static inline void *
 objspace_malloc_fixup(rb_objspace_t *objspace, void *mem, size_t size)
 {
     size = malloc_size(mem);
     objspace_malloc_increase(objspace, mem, size, 0, MEMOP_TYPE_MALLOC) {}
-
-#if CALC_EXACT_MALLOC_SIZE
-    {
-        struct malloc_obj_info *info = mem;
-        info->size = size;
-#if USE_GC_MALLOC_OBJ_INFO_DETAILS
-        info->gen = objspace->profile.count;
-        info->file = ruby_malloc_info_file;
-        info->line = info->file ? ruby_malloc_info_line : 0;
-#endif
-        mem = info + 1;
-    }
-#endif
-
     return mem;
 }
 
@@ -1515,14 +1455,6 @@ rb_gc_impl_each_object(void *objspace_ptr, void (*func)(VALUE obj, void *data), 
 }
 
 
-VALUE
-rb_gc_impl_latest_gc_info(void *objspace_ptr, VALUE key)
-{
-    rb_objspace_t *objspace = objspace_ptr;
-
-    return gc_info_decode(objspace, key, 0);
-}
-
 size_t
 rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
 {
@@ -1642,63 +1574,6 @@ rb_gc_impl_free(void *objspace_ptr, void *ptr, size_t old_size)
          */
         return;
     }
-#if CALC_EXACT_MALLOC_SIZE
-    struct malloc_obj_info *info = (struct malloc_obj_info *)ptr - 1;
-    ptr = info;
-    old_size = info->size;
-
-#if USE_GC_MALLOC_OBJ_INFO_DETAILS
-    {
-        int gen = (int)(objspace->profile.count - info->gen);
-        int gen_index = gen >= MALLOC_INFO_GEN_SIZE ? MALLOC_INFO_GEN_SIZE-1 : gen;
-        int i;
-
-        malloc_info_gen_cnt[gen_index]++;
-        malloc_info_gen_size[gen_index] += info->size;
-
-        for (i=0; i<MALLOC_INFO_SIZE_SIZE; i++) {
-            size_t s = 16 << i;
-            if (info->size <= s) {
-                malloc_info_size[i]++;
-                goto found;
-            }
-        }
-        malloc_info_size[i]++;
-      found:;
-
-        {
-            st_data_t key = (st_data_t)info->file, d;
-            size_t *data;
-
-            if (malloc_info_file_table == NULL) {
-                malloc_info_file_table = st_init_numtable_with_size(1024);
-            }
-            if (st_lookup(malloc_info_file_table, key, &d)) {
-                /* hit */
-                data = (size_t *)d;
-            }
-            else {
-                data = malloc(xmalloc2_size(2, sizeof(size_t)));
-                if (data == NULL) rb_bug("objspace_xfree: can not allocate memory");
-                data[0] = data[1] = 0;
-                st_insert(malloc_info_file_table, key, (st_data_t)data);
-            }
-            data[0] ++;
-            data[1] += info->size;
-        };
-        if (0 && gen >= 2) {         /* verbose output */
-            if (info->file) {
-                fprintf(stderr, "free - size:%"PRIdSIZE", gen:%d, pos: %s:%"PRIdSIZE"\n",
-                        info->size, gen, info->file, info->line);
-            }
-            else {
-                fprintf(stderr, "free - size:%"PRIdSIZE", gen:%d\n",
-                        info->size, gen);
-            }
-        }
-    }
-#endif
-#endif
     old_size = malloc_size(ptr);
 
     objspace_malloc_increase(objspace, ptr, 0, old_size, MEMOP_TYPE_FREE) {
@@ -1712,10 +1587,9 @@ void *
 rb_gc_impl_malloc(void *objspace_ptr, size_t size)
 {
     rb_objspace_t *objspace = objspace_ptr;
-    void *mem;
 
-    size = objspace_malloc_prepare(objspace, size);
-    mem = malloc(size);
+    if (size == 0) size = 1;
+    void *mem = malloc(size);
     RB_DEBUG_COUNTER_INC(heap_xmalloc);
     return objspace_malloc_fixup(objspace, mem, size);
 }
@@ -1724,10 +1598,9 @@ void *
 rb_gc_impl_calloc(void *objspace_ptr, size_t size)
 {
     rb_objspace_t *objspace = objspace_ptr;
-    void *mem;
 
-    size = objspace_malloc_prepare(objspace, size);
-    mem = calloc1(size);
+    if (size == 0) size = 1;
+    void *mem = calloc1(size);
     return objspace_malloc_fixup(objspace, mem, size);
 }
 
@@ -1782,26 +1655,9 @@ rb_gc_impl_realloc(void *objspace_ptr, void *ptr, size_t new_size, size_t old_si
         }
     }
 
-#if CALC_EXACT_MALLOC_SIZE
-    {
-        struct malloc_obj_info *info = (struct malloc_obj_info *)ptr - 1;
-        new_size += sizeof(struct malloc_obj_info);
-        ptr = info;
-        old_size = info->size;
-    }
-#endif
-
     old_size = malloc_size(ptr);
     mem = RB_GNUC_EXTENSION_BLOCK(realloc(ptr, new_size));
     new_size = malloc_size(mem);
-
-#if CALC_EXACT_MALLOC_SIZE
-    {
-        struct malloc_obj_info *info = mem;
-        info->size = new_size;
-        mem = info + 1;
-    }
-#endif
 
     objspace_malloc_increase(objspace, mem, new_size, old_size, MEMOP_TYPE_REALLOC);
 
@@ -1924,13 +1780,15 @@ size_t rb_gc_impl_gc_count(void *objspace)                                { retu
 void * rb_gc_impl_ractor_cache_alloc(void *objspace)                      { return NULL; }
 VALUE rb_gc_impl_stress_get(void *objspace)                               { return Qfalse; }
 VALUE rb_gc_impl_get_profile_total_time(void *objspace)                   { return Qnil; }
-VALUE rb_gc_impl_set_measure_total_time(void *objspace, VALUE f)          { return f; }
 VALUE rb_gc_impl_get_measure_total_time(void *objspace)                   { return Qfalse; }
 VALUE rb_gc_impl_location(void *objspace_ptr, VALUE value)                { return value; }
+VALUE rb_gc_impl_latest_gc_info(void *objspace_ptr, VALUE key)            { return Qnil; }
+VALUE rb_gc_impl_set_measure_total_time(void *objspace, VALUE f)          { return f; }
 bool rb_gc_impl_object_moved_p(void *objspace, VALUE obj)                 { return FALSE; }
 bool rb_gc_impl_during_gc_p(void *objspace)                               { return FALSE; }
 bool rb_gc_impl_gc_enabled_p(void *objspace)                              { return FALSE; }
 bool rb_gc_impl_garbage_object_p(void *objspace, VALUE ptr)               { return false; }
+
 
 /*
  * ===== UNUSED PUBLIC API FUNCTIONS
