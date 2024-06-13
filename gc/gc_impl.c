@@ -27,15 +27,10 @@ bool         rb_gc_shutdown_call_finalizer_p(VALUE obj);
 VALUE        rb_gc_impl_object_id(void *objspace_ptr, VALUE obj);
 
 #ifdef HAVE_MALLOC_USABLE_SIZE
-# ifdef RUBY_ALTERNATIVE_MALLOC_HEADER
-/* Alternative malloc header is included in ruby/missing.h */
-# elif defined(HAVE_MALLOC_H)
-#  include <malloc.h>
-# elif defined(HAVE_MALLOC_NP_H)
-#  include <malloc_np.h>
-# elif defined(HAVE_MALLOC_MALLOC_H)
-#  include <malloc/malloc.h>
-# endif
+# include <malloc.h>
+# define malloc_size(ptr) malloc_usable_size(ptr)
+#else
+# include <malloc/malloc.h>
 #endif
 
 #ifndef RUBY_DEBUG_LOG
@@ -1125,18 +1120,6 @@ enum gc_stat_heap_sym {
 
 static VALUE gc_stat_heap_symbols[gc_stat_heap_sym_last];
 
-static inline size_t
-objspace_malloc_size(rb_objspace_t *objspace, void *ptr, size_t hint)
-{
-    fprintf(stderr, "wtf: %i\n", HAVE_MALLOC_USABLE_SIZE);
-
-#ifdef HAVE_MALLOC_USABLE_SIZE
-    return malloc_usable_size(ptr);
-#else
-    return hint;
-#endif
-}
-
 enum memop_type {
     MEMOP_TYPE_MALLOC  = 0,
     MEMOP_TYPE_FREE,
@@ -1214,7 +1197,7 @@ objspace_malloc_prepare(rb_objspace_t *objspace, size_t size)
 static inline void *
 objspace_malloc_fixup(rb_objspace_t *objspace, void *mem, size_t size)
 {
-    size = objspace_malloc_size(objspace, mem, size);
+    size = malloc_size(mem);
     objspace_malloc_increase(objspace, mem, size, 0, MEMOP_TYPE_MALLOC) {}
 
 #if CALC_EXACT_MALLOC_SIZE
@@ -1742,7 +1725,7 @@ rb_gc_impl_free(void *objspace_ptr, void *ptr, size_t old_size)
     }
 #endif
 #endif
-    old_size = objspace_malloc_size(objspace, ptr, old_size);
+    old_size = malloc_size(ptr);
 
     objspace_malloc_increase(objspace, ptr, 0, old_size, MEMOP_TYPE_FREE) {
         free(ptr);
@@ -1834,9 +1817,9 @@ rb_gc_impl_realloc(void *objspace_ptr, void *ptr, size_t new_size, size_t old_si
     }
 #endif
 
-    old_size = objspace_malloc_size(objspace, ptr, old_size);
+    old_size = malloc_size(ptr);
     mem = RB_GNUC_EXTENSION_BLOCK(realloc(ptr, new_size));
-    new_size = objspace_malloc_size(objspace, mem, new_size);
+    new_size = malloc_size(mem);
 
 #if CALC_EXACT_MALLOC_SIZE
     {
