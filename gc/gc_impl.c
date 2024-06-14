@@ -5,12 +5,10 @@
 #include "ruby/debug.h"
 #include "ccan/list/list.h"
 #include "darray.h"
-#include "debug_counter.h"
 #include "internal/sanitizers.h"
 
-/*
- * ===== FORWARD DECLARATIONS FROM gc.c
- */
+/*===== FORWARD DECLARATIONS FROM gc.c */
+
 unsigned int rb_gc_vm_lock(void);
 void         rb_gc_vm_unlock(unsigned int lev);
 unsigned int rb_gc_cr_lock(void);
@@ -94,10 +92,8 @@ static const bool HEAP_PAGE_ALLOC_USE_MMAP = false;
 static bool heap_page_alloc_use_mmap;
 #endif
 
-/*
- * ===== HEAP & ALLOCATION STRUCTURES
- *
- */
+/* ===== HEAP & ALLOCATION STRUCTURES */
+
 #ifndef OBJ_SIZE_MULTIPLES
 # define OBJ_SIZE_MULTIPLES 5
 #endif
@@ -315,7 +311,7 @@ heap_pages_expand_sorted_to(rb_objspace_t *objspace, size_t next_length)
 static void
 heap_pages_expand_sorted(rb_objspace_t *objspace)
 {
-    size_t next_length = objspace->heap.allocatable_pages + 
+    size_t next_length = objspace->heap.allocatable_pages +
         objspace->heap.total_pages;
 
     if (next_length > heap_pages_sorted_length) {
@@ -1094,10 +1090,7 @@ objspace_malloc_fixup(rb_objspace_t *objspace, void *mem, size_t size)
 #define GC_MEMERROR(...) \
     ((RB_BUG_INSTEAD_OF_RB_MEMERROR+0) ? rb_bug("" __VA_ARGS__) : rb_memerror())
 
-
-/*
- * ===== PUBLIC API FUNCTIONS
- */
+/* ===== PUBLIC API FUNCTIONS */
 
 void rb_gc_impl_set_event_hook(void *objspace_ptr, const rb_event_flag_t event)
 {
@@ -1162,12 +1155,9 @@ VALUE
 rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, bool wb_protected, size_t alloc_size)
 {
     rb_objspace_t *objspace = objspace_ptr;
-    
+
     // TODO: rb_gc_size_pool_sizes should be renamed, or removed
     size_t *public_slot_sizes = rb_gc_size_pool_sizes();
-
-    RB_DEBUG_COUNTER_INC(obj_newobj);
-    (void)RB_DEBUG_COUNTER_INC_IF(obj_newobj_wb_unprotected, !wb_protected);
 
     size_t cache_slot_idx = page_slot_size_idx_for_size(alloc_size);
     VALUE obj = newobj_alloc(objspace, cache_slot_idx, public_slot_sizes[cache_slot_idx]);
@@ -1189,17 +1179,10 @@ rb_gc_impl_pointer_to_heap_p(void *objspace_ptr, const void *ptr)
     register uintptr_t p = (uintptr_t)ptr;
     register struct heap_page *page;
 
-    RB_DEBUG_COUNTER_INC(gc_isptr_trial);
-
     if (p < heap_pages_lomem || p > heap_pages_himem) return FALSE;
-    RB_DEBUG_COUNTER_INC(gc_isptr_range);
-
     if (p % BASE_SLOT_SIZE != 0) return FALSE;
-    RB_DEBUG_COUNTER_INC(gc_isptr_align);
-
     page = heap_page_for_ptr(objspace, (uintptr_t)ptr);
     if (page) {
-        RB_DEBUG_COUNTER_INC(gc_isptr_maybe);
         if (p < page->start) return FALSE;
         if (p >= page->start + (page->total_slots * page->slot_size)) return FALSE;
         if ((NUM_IN_PAGE(p) * BASE_SLOT_SIZE) % page->slot_size != 0) return FALSE;
@@ -1553,7 +1536,6 @@ rb_gc_impl_free(void *objspace_ptr, void *ptr, size_t old_size)
     objspace_malloc_increase(objspace, ptr, 0, old_size, MEMOP_TYPE_FREE) {
         free(ptr);
         ptr = NULL;
-        RB_DEBUG_COUNTER_INC(heap_xfree);
     }
 }
 
@@ -1564,7 +1546,6 @@ rb_gc_impl_malloc(void *objspace_ptr, size_t size)
 
     if (size == 0) size = 1;
     void *mem = malloc(size);
-    RB_DEBUG_COUNTER_INC(heap_xmalloc);
     return objspace_malloc_fixup(objspace, mem, size);
 }
 
@@ -1586,45 +1567,12 @@ rb_gc_impl_realloc(void *objspace_ptr, void *ptr, size_t new_size, size_t old_si
 
     if (!ptr) return rb_gc_impl_malloc(objspace, new_size);
 
-    /*
-     * The behavior of realloc(ptr, 0) is implementation defined.
-     * Therefore we don't use realloc(ptr, 0) for portability reason.
-     * see http://www.open-std.org/jtc1/sc22/wg14/www/docs/dr_400.htm
-     */
     if (new_size == 0) {
         if ((mem = rb_gc_impl_malloc(objspace, 0)) != NULL) {
-            /*
-             * - OpenBSD's malloc(3) man page says that when 0 is passed, it
-             *   returns a non-NULL pointer to an access-protected memory page.
-             *   The returned pointer cannot be read / written at all, but
-             *   still be a valid argument of free().
-             *
-             *   https://man.openbsd.org/malloc.3
-             *
-             * - Linux's malloc(3) man page says that it _might_ perhaps return
-             *   a non-NULL pointer when its argument is 0.  That return value
-             *   is safe (and is expected) to be passed to free().
-             *
-             *   https://man7.org/linux/man-pages/man3/malloc.3.html
-             *
-             * - As I read the implementation jemalloc's malloc() returns fully
-             *   normal 16 bytes memory region when its argument is 0.
-             *
-             * - As I read the implementation musl libc's malloc() returns
-             *   fully normal 32 bytes memory region when its argument is 0.
-             *
-             * - Other malloc implementations can also return non-NULL.
-             */
             rb_gc_impl_free(objspace, ptr, old_size);
             return mem;
         }
         else {
-            /*
-             * It is dangerous to return NULL here, because that could lead to
-             * RCE.  Fallback to 1 byte instead of zero.
-             *
-             * https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2019-11932
-             */
             new_size = 1;
         }
     }
@@ -1635,7 +1583,6 @@ rb_gc_impl_realloc(void *objspace_ptr, void *ptr, size_t new_size, size_t old_si
 
     objspace_malloc_increase(objspace, mem, new_size, old_size, MEMOP_TYPE_REALLOC);
 
-    RB_DEBUG_COUNTER_INC(heap_xrealloc);
     return mem;
 }
 
@@ -1652,9 +1599,6 @@ rb_gc_impl_adjust_memory_usage(void *objspace_ptr, ssize_t diff)
     }
 }
 
-/*
- * PUBLIC: ALLOC AND INIT OBJSPACE & HEAP
- */
 void *
 rb_gc_impl_objspace_alloc(void)
 {
@@ -1685,7 +1629,6 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
     objspace->obj_to_id_tbl = st_init_numtable();
 
     objspace->heap.allocatable_pages = OBJ_SIZE_MULTIPLES * 10;
-
     heap_pages_expand_sorted(objspace);
 
     for (int i = 0; i < OBJ_SIZE_MULTIPLES; i++) {
@@ -1702,9 +1645,7 @@ rb_gc_impl_obj_slot_size(VALUE obj)
     return GET_HEAP_PAGE(obj)->slot_size;
 }
 
-/*
- * ===== PUBLIC: GC INITIALIZER
- */
+/* ===== PUBLIC: GC INITIALIZER */
 void
 rb_gc_impl_init(void)
 {
@@ -1714,7 +1655,7 @@ rb_gc_impl_init(void)
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_BITMAP_SIZE")), SIZET2NUM(0));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_PAGE_SIZE")), SIZET2NUM(HEAP_PAGE_SIZE));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("OBJ_SIZE_MULTIPLES")), LONG2FIX(OBJ_SIZE_MULTIPLES));
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVARGC_MAX_ALLOCATE_SIZE")), 
+    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVARGC_MAX_ALLOCATE_SIZE")),
             LONG2FIX(valid_object_sizes_ordered_idx(OBJ_SIZE_MULTIPLES - 1)));
     if (RB_BUG_INSTEAD_OF_RB_MEMERROR+0) {
         rb_hash_aset(gc_constants, ID2SYM(rb_intern("RB_BUG_INSTEAD_OF_RB_MEMERROR")), Qtrue);
@@ -1722,12 +1663,6 @@ rb_gc_impl_init(void)
     OBJ_FREEZE(gc_constants);
     /* Internal constants in the garbage collector. */
     rb_define_const(rb_mGC, "INTERNAL_CONSTANTS", gc_constants);
-
-    rb_define_singleton_method(rb_mGC, "compact", rb_f_notimplement, 0);
-    rb_define_singleton_method(rb_mGC, "auto_compact", rb_f_notimplement, 0);
-    rb_define_singleton_method(rb_mGC, "auto_compact=", rb_f_notimplement, 1);
-    rb_define_singleton_method(rb_mGC, "latest_compact_info", rb_f_notimplement, 0);
-    rb_define_singleton_method(rb_mGC, "verify_compaction_references", rb_f_notimplement, -1);
 
     /* internal methods */
     rb_define_singleton_method(rb_mGC, "verify_internal_consistency", rb_f_notimplement, 0);
@@ -1763,10 +1698,7 @@ bool rb_gc_impl_during_gc_p(void *objspace)                               { retu
 bool rb_gc_impl_gc_enabled_p(void *objspace)                              { return FALSE; }
 bool rb_gc_impl_garbage_object_p(void *objspace, VALUE ptr)               { return false; }
 
-
-/*
- * ===== UNUSED PUBLIC API FUNCTIONS
- */
+/* ===== UNUSED PUBLIC API FUNCTIONS */
 
 void rb_gc_impl_stress_set(void *objspace_ptr, VALUE flag)                { /* nop */ }
 void rb_gc_impl_set_params(void *objspace_ptr)                            { /* nop */ }
@@ -1788,4 +1720,3 @@ void rb_gc_impl_prepare_heap(void *objspace_ptr)                          { /* n
 void rb_gc_impl_start(void *objspace_ptr, bool f, bool m, bool s, bool c) { /* nop */ }
 void rb_gc_impl_objspace_free(void *objspace_ptr)                         { /* nop */ }
 void rb_gc_impl_objspace_mark(void *objspace_ptr)                         { /* nop */ }
-
