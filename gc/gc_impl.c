@@ -237,9 +237,6 @@ asan_lock_freelist(struct heap_page *page)
     asan_poison_memory_region(&page->freelist, sizeof(struct free_list *));
 }
 
-/*
- * When asan is enabled, this will enable the ability to write to the freelist
- */
 static void
 asan_unlock_freelist(struct heap_page *page)
 {
@@ -276,7 +273,6 @@ object_id_hash(st_data_t n)
 }
 
 #define OBJ_ID_INCREMENT (BASE_SLOT_SIZE)
-#define OBJ_ID_INITIAL (OBJ_ID_INCREMENT)
 
 static const struct st_hash_type object_id_hash_type = {
     object_id_cmp,
@@ -326,15 +322,14 @@ static inline void
 heap_page_add_freeobj(rb_objspace_t *objspace, struct heap_page *page, VALUE obj)
 {
     asan_unpoison_object(obj, false);
-
     asan_unlock_freelist(page);
 
     struct free_slot *slot = (struct free_slot *)obj;
     slot->flags = 0;
     slot->next = page->freelist;
     page->freelist = slot;
-    asan_lock_freelist(page);
 
+    asan_lock_freelist(page);
     asan_poison_object(obj);
     gc_report(objspace, "heap_page_add_freeobj: add %p to freelist\n", (void *)obj);
 }
@@ -527,7 +522,6 @@ heap_page_allocate(rb_objspace_t *objspace, size_t slot_size)
     }
 
     heap_pages_sorted[hi] = page;
-
     heap_allocated_pages++;
 
     GC_ASSERT(objspace->heap.total_pages + objspace->heap.allocatable_pages <= heap_pages_sorted_length);
@@ -606,8 +600,6 @@ goal_allocatable_pages_count(rb_objspace_t *objspace)
     size_t allocated_pages = objspace->heap.total_allocated_pages;
     size_t allocatable_pages = objspace->heap.allocatable_pages;
 
-    // if more than 75% of allocatable pages are used, double the allocatable
-    // amount
     if (allocated_pages / allocatable_pages >= 0.75) {
         allocatable_pages = allocatable_pages * 2;
     }
@@ -637,10 +629,6 @@ valid_object_sizes_ordered_idx(unsigned char pool_id)
     return (1 << pool_id) * BASE_SLOT_SIZE;
 }
 
-/*
- * TODO: This is exposed in a bunch of places whilst not being part of the
- * Interface
- */
 bool
 rb_gc_impl_size_allocatable_p(size_t size)
 {
@@ -1023,7 +1011,6 @@ objspace_free_slots(rb_objspace_t *objspace)
 }
 
 enum gc_stat_heap_sym {
-    gc_stat_heap_sym_slot_size,
     gc_stat_heap_sym_heap_allocatable_pages,
     gc_stat_heap_sym_heap_eden_pages,
     gc_stat_heap_sym_heap_eden_slots,
@@ -1411,7 +1398,6 @@ rb_gc_impl_each_object(void *objspace_ptr, void (*func)(VALUE obj, void *data), 
     }
 }
 
-
 size_t
 rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
 {
@@ -1457,11 +1443,10 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     return 0;
 }
 
-
 int
 rb_gc_impl_heap_count(void *objspace_ptr)
 {
-    return OBJ_SIZE_MULTIPLES;
+    return 1;
 }
 
 static void
@@ -1469,7 +1454,6 @@ setup_gc_stat_heap_symbols(void)
 {
     if (gc_stat_heap_symbols[0] == 0) {
 #define S(s) gc_stat_heap_symbols[gc_stat_heap_sym_##s] = ID2SYM(rb_intern_const(#s))
-        S(slot_size);
         S(heap_allocatable_pages);
         S(heap_eden_pages);
         S(heap_eden_slots);
@@ -1503,7 +1487,6 @@ rb_gc_impl_stat_heap(void *objspace_ptr, int _, VALUE hash_or_sym)
     else if (hash != Qnil) \
         rb_hash_aset(hash, gc_stat_heap_symbols[gc_stat_heap_sym_##name], SIZET2NUM(attr));
 
-    SET(slot_size, 0);
     SET(heap_allocatable_pages, objspace->heap.allocatable_pages);
     SET(heap_eden_pages, objspace->heap.total_pages);
     SET(heap_eden_slots, objspace->heap.total_slots);
@@ -1624,7 +1607,7 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
 
     ccan_list_head_init(&objspace->heap.pages);
 
-    objspace->next_object_id = OBJ_ID_INITIAL;
+    objspace->next_object_id = OBJ_ID_INCREMENT;
     objspace->id_to_obj_tbl = st_init_table(&object_id_hash_type);
     objspace->obj_to_id_tbl = st_init_numtable();
 
