@@ -56,19 +56,19 @@ struct BumpPointer {
 // Command line arguments
 ////////////////////////////////////////////////////////////////////////////////
 
-const char *mmtk_pre_arg_plan = NULL;
-const char *mmtk_post_arg_plan = NULL;
-const char *mmtk_chosen_plan = NULL;
-bool mmtk_plan_is_immix = false;
-bool mmtk_plan_uses_bump_pointer = false;
-bool mmtk_plan_implicitly_pinning = false;
+const char *rb_mmtk_pre_arg_plan = NULL;
+const char *rb_mmtk_post_arg_plan = NULL;
+const char *rb_mmtk_chosen_plan = NULL;
+bool rb_mmtk_plan_is_immix = false;
+bool rb_mmtk_plan_uses_bump_pointer = false;
+bool rb_mmtk_plan_implicitly_pinning = false;
 bool rb_mmtk_use_barrier = false;
 
-size_t mmtk_pre_max_heap_size = 0;
-size_t mmtk_post_max_heap_size = 0;
+size_t rb_mmtk_pre_max_heap_size = 0;
+size_t rb_mmtk_post_max_heap_size = 0;
 
-bool mmtk_max_heap_parse_error = false;
-size_t mmtk_max_heap_size = 0;
+bool rb_mmtk_max_heap_parse_error = false;
+size_t rb_mmtk_max_heap_size = 0;
 
 // Use up to 80% of memory for the heap
 static const int rb_mmtk_heap_limit_percentage = 80;
@@ -86,7 +86,7 @@ MMTk_RubyUpcalls ruby_upcalls;
 static uintptr_t mmtk_vo_bit_log_region_size;
 static uintptr_t mmtk_vo_bit_base_addr;
 
-bool obj_free_on_exit_started = false;
+bool rb_mmtk_obj_free_on_exit_started = false;
 
 
 // DEBUG: Vanilla GC timing
@@ -99,12 +99,12 @@ static struct gc_timing {
     uint64_t last_num_of_gc;
     uint64_t last_vanilla_mark;
     uint64_t last_vanilla_sweep;
-} g_vanilla_timing;
+} rb_mmtk_vanilla_timing;
 
 // xmalloc accounting
-struct rb_mmtk_xmalloc_accounting {
+struct rb_mmtk_xmalloc_accounting{
     size_t malloc_total;
-} g_xmalloc_accounting;
+} rb_mmtk_xmalloc_accounting_t;
 
 struct RubyMMTKGlobal {
     pthread_mutex_t mutex;
@@ -268,25 +268,25 @@ set_default_options(MMTk_Builder *mmtk_builder)
 static void
 apply_cmdline_options(MMTk_Builder *mmtk_builder)
 {
-    if (mmtk_chosen_plan != NULL) {
-        mmtk_builder_set_plan(mmtk_builder, mmtk_chosen_plan);
+    if (rb_mmtk_chosen_plan != NULL) {
+        mmtk_builder_set_plan(mmtk_builder, rb_mmtk_chosen_plan);
     }
 
-    if (mmtk_max_heap_size > 0) {
-        mmtk_builder_set_fixed_heap_size(mmtk_builder, mmtk_max_heap_size);
+    if (rb_mmtk_max_heap_size > 0) {
+        mmtk_builder_set_fixed_heap_size(mmtk_builder, rb_mmtk_max_heap_size);
     }
 }
 
 static void
 set_variables_from_options(MMTk_Builder *mmtk_builder)
 {
-    mmtk_plan_is_immix = mmtk_builder_is_immix(mmtk_builder) || mmtk_builder_is_sticky_immix(mmtk_builder);
-    RUBY_DEBUG_LOG("mmtk_plan_is_immix = %d\n", mmtk_plan_is_immix);
+    rb_mmtk_plan_is_immix = mmtk_builder_is_immix(mmtk_builder) || mmtk_builder_is_sticky_immix(mmtk_builder);
+    RUBY_DEBUG_LOG("mmtk_plan_is_immix = %d\n", rb_mmtk_plan_is_immix);
 
-    mmtk_plan_uses_bump_pointer = mmtk_plan_is_immix;
-    RUBY_DEBUG_LOG("mmtk_plan_uses_bump_pointer = %d\n", mmtk_plan_uses_bump_pointer);
+    rb_mmtk_plan_uses_bump_pointer = rb_mmtk_plan_is_immix;
+    RUBY_DEBUG_LOG("mmtk_plan_uses_bump_pointer = %d\n", rb_mmtk_plan_uses_bump_pointer);
 
-    mmtk_plan_implicitly_pinning = mmtk_builder_is_mark_sweep(mmtk_builder);
+    rb_mmtk_plan_implicitly_pinning = mmtk_builder_is_mark_sweep(mmtk_builder);
     RUBY_DEBUG_LOG("mmtk_plan_implicitly_pinning = %d\n", mmtk_plan_implicitly_pinning);
 
     // We sometimes for disabling or enabling barriers to measure the impact of barriers.
@@ -422,7 +422,7 @@ rb_mmtk_immix_alloc_fast_bump_pointer(size_t size)
 static void*
 rb_mmtk_alloc(size_t size, MMTk_AllocationSemantics semantics)
 {
-    if (semantics == MMTK_ALLOCATION_SEMANTICS_DEFAULT && mmtk_plan_uses_bump_pointer) {
+    if (semantics == MMTK_ALLOCATION_SEMANTICS_DEFAULT && rb_mmtk_plan_uses_bump_pointer) {
         // Try the fast path.
         void *fast_result = rb_mmtk_immix_alloc_fast_bump_pointer(size);
         if (fast_result != NULL) {
@@ -464,7 +464,7 @@ rb_mmtk_post_alloc_fast_immix(VALUE obj)
 static void
 rb_mmtk_post_alloc(VALUE obj, size_t mmtk_alloc_size, MMTk_AllocationSemantics semantics)
 {
-    if (RB_MMTK_USE_POST_ALLOC_FAST_PATH && semantics == MMTK_ALLOCATION_SEMANTICS_DEFAULT && mmtk_plan_is_immix) {
+    if (RB_MMTK_USE_POST_ALLOC_FAST_PATH && semantics == MMTK_ALLOCATION_SEMANTICS_DEFAULT && rb_mmtk_plan_is_immix) {
         rb_mmtk_post_alloc_fast_immix(obj);
     } else {
         // Call post_alloc.  This will initialize GC-specific metadata.
@@ -850,12 +850,12 @@ rb_mmtk_call_obj_free_on_exit(void)
 
 bool
 rb_gc_obj_free_on_exit_started(void) {
-    return obj_free_on_exit_started;
+    return rb_mmtk_obj_free_on_exit_started;
 }
 
 void
 rb_gc_set_obj_free_on_exit_started(void) {
-    obj_free_on_exit_started = true;
+    rb_mmtk_obj_free_on_exit_started = true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1147,7 +1147,7 @@ rb_mmtk_objbuf_to_elems(rb_mmtk_objbuf_t* objbuf)
 void
 rb_mmtk_pin_object(VALUE obj)
 {
-    if (!mmtk_plan_implicitly_pinning) {
+    if (!rb_mmtk_plan_implicitly_pinning) {
         mmtk_pin_object((MMTk_ObjectReference)obj);
     }
 }
@@ -1156,7 +1156,7 @@ rb_mmtk_pin_object(VALUE obj)
 void
 rb_mmtk_assert_is_pinned(VALUE obj)
 {
-    if (!mmtk_plan_implicitly_pinning) {
+    if (!rb_mmtk_plan_implicitly_pinning) {
         RUBY_ASSERT(mmtk_is_pinned((MMTk_ObjectReference)obj));
     }
 }
@@ -1239,10 +1239,10 @@ rb_mmtk_harness_begin(VALUE _)
     if (rb_mmtk_enabled_p()) {
         mmtk_harness_begin((MMTk_VMMutatorThread)GET_THREAD());
     } else {
-        g_vanilla_timing.last_num_of_gc = rb_gc_count();
-        rb_mmtk_get_vanilla_times(&g_vanilla_timing.last_vanilla_mark, &g_vanilla_timing.last_vanilla_sweep);
-        g_vanilla_timing.enabled = true;
-        clock_gettime(CLOCK_MONOTONIC, &g_vanilla_timing.last_enabled);
+        rb_mmtk_vanilla_timing.last_num_of_gc = rb_gc_count();
+        rb_mmtk_get_vanilla_times(&rb_mmtk_vanilla_timing.last_vanilla_mark, &rb_mmtk_vanilla_timing.last_vanilla_sweep);
+        rb_mmtk_vanilla_timing.enabled = true;
+        clock_gettime(CLOCK_MONOTONIC, &rb_mmtk_vanilla_timing.last_enabled);
     }
 
     return Qnil;
@@ -1269,23 +1269,23 @@ rb_mmtk_harness_end(VALUE _)
     if (rb_mmtk_enabled_p()) {
         mmtk_harness_end((MMTk_VMMutatorThread)GET_THREAD());
     } else {
-        g_vanilla_timing.enabled = false;
+        rb_mmtk_vanilla_timing.enabled = false;
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
-        uint64_t total_time_ns = elapsed_ns(&now, &g_vanilla_timing.last_enabled);
-        uint64_t gc_time_ns = g_vanilla_timing.gc_time_ns;
+        uint64_t total_time_ns = elapsed_ns(&now, &rb_mmtk_vanilla_timing.last_enabled);
+        uint64_t gc_time_ns = rb_mmtk_vanilla_timing.gc_time_ns;
         uint64_t stw_time_ns = total_time_ns - gc_time_ns;
 
         double total_time_ms = total_time_ns / 1000000.0;
         double gc_time_ms = gc_time_ns / 1000000.0;
         double stw_time_ms = stw_time_ns / 1000000.0;
 
-        size_t num_of_gc = rb_gc_count() - g_vanilla_timing.last_num_of_gc;
+        size_t num_of_gc = rb_gc_count() - rb_mmtk_vanilla_timing.last_num_of_gc;
 
         uint64_t cur_vanilla_mark, cur_vanilla_sweep;
         rb_mmtk_get_vanilla_times(&cur_vanilla_mark, &cur_vanilla_sweep);
-        uint64_t vanilla_mark = cur_vanilla_mark - g_vanilla_timing.last_vanilla_mark;
-        uint64_t vanilla_sweep = cur_vanilla_sweep - g_vanilla_timing.last_vanilla_sweep;
+        uint64_t vanilla_mark = cur_vanilla_mark - rb_mmtk_vanilla_timing.last_vanilla_mark;
+        uint64_t vanilla_sweep = cur_vanilla_sweep - rb_mmtk_vanilla_timing.last_vanilla_sweep;
         uint64_t vanilla_time = vanilla_mark + vanilla_sweep;
 
         double vanilla_time_ms = vanilla_time / 1000000.0;
@@ -1346,11 +1346,11 @@ rb_mmtk_panic_if_multiple_ractor(const char *msg)
 void
 rb_mmtk_gc_probe(bool enter)
 {
-    if (!g_vanilla_timing.enabled) {
+    if (!rb_mmtk_vanilla_timing.enabled) {
         return;
     }
 
-    if (g_vanilla_timing.in_alloc_slow_path) {
+    if (rb_mmtk_vanilla_timing.in_alloc_slow_path) {
         return;
     }
 
@@ -1359,12 +1359,12 @@ rb_mmtk_gc_probe(bool enter)
         // But that uses `current_process_time` which uses `CLOCK_PROCESS_CPUTIME_ID`
         // while MMTk uses Rust's `std::time::Instant` which uses `CLOCK_MONOTONIC`.
         // To be fair, we reimplmenet the probing and use `CLOCK_MONOTONIC` instead.
-        clock_gettime(CLOCK_MONOTONIC, &g_vanilla_timing.last_gc_start);
+        clock_gettime(CLOCK_MONOTONIC, &rb_mmtk_vanilla_timing.last_gc_start);
     } else {
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
-        uint64_t elapsed = elapsed_ns(&now, &g_vanilla_timing.last_gc_start);
-        g_vanilla_timing.gc_time_ns += elapsed;
+        uint64_t elapsed = elapsed_ns(&now, &rb_mmtk_vanilla_timing.last_gc_start);
+        rb_mmtk_vanilla_timing.gc_time_ns += elapsed;
     }
 }
 
@@ -1372,7 +1372,7 @@ rb_mmtk_gc_probe(bool enter)
 void
 rb_mmtk_gc_probe_slowpath(bool enter)
 {
-    g_vanilla_timing.in_alloc_slow_path = enter;
+    rb_mmtk_vanilla_timing.in_alloc_slow_path = enter;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1397,17 +1397,17 @@ void
 rb_mmtk_xmalloc_increase_body(size_t new_size, size_t old_size)
 {
     if (new_size > old_size) {
-        ATOMIC_SIZE_ADD(g_xmalloc_accounting.malloc_total, new_size - old_size);
+        ATOMIC_SIZE_ADD(rb_mmtk_xmalloc_accounting_t.malloc_total, new_size - old_size);
     }
     else {
-        atomic_sub_nounderflow(&g_xmalloc_accounting.malloc_total, old_size - new_size);
+        atomic_sub_nounderflow(&rb_mmtk_xmalloc_accounting_t.malloc_total, old_size - new_size);
     }
 }
 
 static size_t
 rb_mmtk_vm_live_bytes(void)
 {
-    return g_xmalloc_accounting.malloc_total;
+    return rb_mmtk_xmalloc_accounting_t.malloc_total;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1698,8 +1698,8 @@ void rb_mmtk_pre_process_opts(int argc, char **argv) {
         }
         else if (strncmp(argv[n], "--mmtk-plan", strlen("--mmtk-plan")) == 0) {
             mmtk_enable = true;
-            mmtk_pre_arg_plan = argv[n] + strlen("--mmtk-plan=");
-            if (argv[n][strlen("--mmtk-plan")] != '=' || strlen(mmtk_pre_arg_plan) == 0) {
+            rb_mmtk_pre_arg_plan = argv[n] + strlen("--mmtk-plan=");
+            if (argv[n][strlen("--mmtk-plan")] != '=' || strlen(rb_mmtk_pre_arg_plan) == 0) {
                 fputs("[FATAL] --mmtk-plan needs an argument\n", stderr);
                 exit(EXIT_FAILURE);
             }
@@ -1711,8 +1711,8 @@ void rb_mmtk_pre_process_opts(int argc, char **argv) {
                 fputs("[FATAL] --mmtk-max-heap needs an argument\n", stderr);
                 exit(EXIT_FAILURE);
             }
-            mmtk_pre_max_heap_size = rb_mmtk_parse_heap_limit(mmtk_max_heap_size_arg, &mmtk_max_heap_parse_error);
-            mmtk_max_heap_size = mmtk_pre_max_heap_size;
+            rb_mmtk_pre_max_heap_size = rb_mmtk_parse_heap_limit(mmtk_max_heap_size_arg, &rb_mmtk_max_heap_parse_error);
+            rb_mmtk_max_heap_size = rb_mmtk_pre_max_heap_size;
         }
     }
 
@@ -1742,11 +1742,11 @@ void rb_mmtk_pre_process_opts(int argc, char **argv) {
                             fputs("[FATAL] --mmtk-plan needs an argument\n", stderr);
                             exit(EXIT_FAILURE);
                         }
-                        mmtk_pre_arg_plan = strndup(env_args + strlen("--mmtk-plan="), length - strlen("--mmtk-plan="));
-                        if (mmtk_pre_arg_plan == NULL) {
+                        rb_mmtk_pre_arg_plan = strndup(env_args + strlen("--mmtk-plan="), length - strlen("--mmtk-plan="));
+                        if (rb_mmtk_pre_arg_plan == NULL) {
                             rb_bug("could not allocate space for argument");
                         }
-                        if (strlen(mmtk_pre_arg_plan) == 0) {
+                        if (strlen(rb_mmtk_pre_arg_plan) == 0) {
                             fputs("[FATAL] --mmtk-plan needs an argument\n", stderr);
                             exit(EXIT_FAILURE);
                         }
@@ -1763,8 +1763,8 @@ void rb_mmtk_pre_process_opts(int argc, char **argv) {
                             fputs("[FATAL] --mmtk-max-heap needs an argument\n", stderr);
                             exit(EXIT_FAILURE);
                         }
-                        mmtk_pre_max_heap_size = rb_mmtk_parse_heap_limit(mmtk_max_heap_size_arg, &mmtk_max_heap_parse_error);
-                        mmtk_max_heap_size = mmtk_pre_max_heap_size;
+                        rb_mmtk_pre_max_heap_size = rb_mmtk_parse_heap_limit(mmtk_max_heap_size_arg, &rb_mmtk_max_heap_parse_error);
+                        rb_mmtk_max_heap_size = rb_mmtk_pre_max_heap_size;
                     }
 
                     env_args += length;
@@ -1773,8 +1773,8 @@ void rb_mmtk_pre_process_opts(int argc, char **argv) {
         }
     }
 
-    if (mmtk_pre_arg_plan) {
-        mmtk_chosen_plan = mmtk_pre_arg_plan;
+    if (rb_mmtk_pre_arg_plan) {
+        rb_mmtk_chosen_plan = rb_mmtk_pre_arg_plan;
     }
 }
 
@@ -1787,10 +1787,10 @@ void rb_mmtk_post_process_opts(const char *s) {
         return;
     }
     if (opt_match_arg(s, l, "plan")) {
-        mmtk_post_arg_plan = s + 1;
+        rb_mmtk_post_arg_plan = s + 1;
     }
     else if (opt_match_arg(s, l, "max-heap")) {
-        mmtk_post_max_heap_size = rb_mmtk_parse_heap_limit((char *) (s + 1), &mmtk_max_heap_parse_error);
+        rb_mmtk_post_max_heap_size = rb_mmtk_parse_heap_limit((char *) (s + 1), &rb_mmtk_max_heap_parse_error);
     }
     else {
         rb_raise(rb_eRuntimeError,
@@ -1803,15 +1803,15 @@ void rb_mmtk_post_process_opts_finish(bool feature_enable) {
         rb_raise(rb_eRuntimeError, "--mmtk values disagree");
     }
 
-    if (strcmp(mmtk_pre_arg_plan ? mmtk_pre_arg_plan : "", mmtk_post_arg_plan ? mmtk_post_arg_plan : "") != 0) {
+    if (strcmp(rb_mmtk_pre_arg_plan ? rb_mmtk_pre_arg_plan : "", rb_mmtk_post_arg_plan ? rb_mmtk_post_arg_plan : "") != 0) {
         rb_raise(rb_eRuntimeError, "--mmtk-plan values disagree");
     }
 
-    if (mmtk_pre_max_heap_size != 0 && mmtk_post_max_heap_size != 0 && mmtk_pre_max_heap_size != mmtk_post_max_heap_size) {
+    if (rb_mmtk_pre_max_heap_size != 0 && rb_mmtk_post_max_heap_size != 0 && rb_mmtk_pre_max_heap_size != rb_mmtk_post_max_heap_size) {
         rb_raise(rb_eRuntimeError, "--mmtk-max-heap values disagree");
     }
 
-    if (mmtk_max_heap_parse_error) {
+    if (rb_mmtk_max_heap_parse_error) {
         rb_raise(rb_eRuntimeError,
                 "--mmtk-max-heap Invalid. Valid values positive integers, with optional KiB, MiB, GiB, TiB suffixes.");
     }
