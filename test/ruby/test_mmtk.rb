@@ -17,7 +17,7 @@ class TestMMTk < Test::Unit::TestCase
   ENABLE_OPTIONS = [
     ['--mmtk'],
     ["--mmtk-plan=#{GC::MMTk.plan_name}"],
-    ['--mmtk-max-heap=1024000'],
+    ['--mmtk-max-heap=20480000'],
     ['--enable-mmtk'],
     ['--enable=mmtk'],
 
