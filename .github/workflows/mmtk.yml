@@ -76,7 +76,7 @@ jobs:
         run: >-
           git clone https://github.com/mmtk/mmtk-ruby && 
           cd mmtk-ruby/mmtk &&
-          cargo build
+          cargo build --release
 
       - name: Run configure
         env:
