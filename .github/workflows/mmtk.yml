@@ -73,7 +73,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Clone and build MMTK
-
         run: >-
           git clone https://github.com/mmtk/mmtk-ruby && 
           cd mmtk-ruby/mmtk &&
@@ -86,6 +85,7 @@ jobs:
         run: >-
           $SETARCH ../src/configure -C --disable-install-doc ${configure:-cppflags=-DRUBY_DEBUG}
           ${arch:+--target=$arch-$OSTYPE --host=$arch-$OSTYPE}
+          --with-mmtk-ruby=./mmtk-ruby
 
       - run: $SETARCH make prepare-gems
         if: ${{ matrix.test_task == 'test-bundled-gems' }}
@@ -99,17 +99,7 @@ jobs:
           echo "TESTS=${TESTS}" >> $GITHUB_ENV
         if: ${{ matrix.test_task == 'check' && matrix.skipped_tests }}
 
-      - name: Set up Launchable
-        uses: ./.github/actions/launchable/setup
-        with:
-          os: ${{ matrix.os || 'ubuntu-22.04' }}
-          test-opts: ${{ matrix.configure }}
-          launchable-token: ${{ secrets.LAUNCHABLE_TOKEN }}
-          builddir: build
-          srcdir: src
-        continue-on-error: true
-
-      - name: make ${{ matrix.test_task }}
+      - name: make ${{ matrix.test_task }} --mmtk
         run: >-
           $SETARCH make -s ${{ matrix.test_task }}
           ${TESTS:+TESTS="$TESTS"}
@@ -128,12 +118,6 @@ jobs:
           RUBY_TESTOPTS: '-v --tty=no'
         if: ${{ matrix.test_task == 'check' && matrix.skipped_tests }}
         continue-on-error: ${{ matrix.continue-on-skipped_tests || false }}
-
-      - uses: ./.github/actions/slack
-        with:
-          label: ${{ matrix.test_task }} ${{ matrix.configure }}${{ matrix.arch }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SIMPLER_ALERTS_URL }} # ruby-lang slack: ruby/simpler-alerts-bot
-        if: ${{ failure() }}
 
   result:
     if: ${{ always() }}
