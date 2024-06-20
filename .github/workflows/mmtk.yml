@@ -75,8 +75,8 @@ jobs:
       - name: Clone and build MMTK
 
         run: >-
-          git clone https://github.com/mmtk/mmtk-ruby
-          cd mmtk-ruby/mmtk
+          git clone https://github.com/mmtk/mmtk-ruby && 
+          cd mmtk-ruby/mmtk &&
           cargo build
 
       - name: Run configure
