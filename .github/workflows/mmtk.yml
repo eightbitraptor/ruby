@@ -92,13 +92,6 @@ jobs:
 
       - run: $SETARCH make
 
-      - name: Set test options for skipped tests
-        run: |
-          set -x
-          TESTS="$(echo "${{ matrix.skipped_tests }}" | sed 's| |$$/ -n!/|g;s|^|-n!/|;s|$|$$/|')"
-          echo "TESTS=${TESTS}" >> $GITHUB_ENV
-        if: ${{ matrix.test_task == 'check' && matrix.skipped_tests }}
-
       - name: make ${{ matrix.test_task }} --mmtk
         run: >-
           $SETARCH make -s ${{ matrix.test_task }}
@@ -106,18 +99,10 @@ jobs:
           ${{ !contains(matrix.test_task, 'bundle') && 'RUBYOPT=-w' || '' }}
         timeout-minutes: 40
         env:
+          TESTS: $(cat $srcdir/mmtk_tests.txt | ruby -e 'puts ARGF.map(&:strip).reject { |line| line.start_with?("#") }.join(" ")')
           RUBY_TESTOPTS: '-q --tty=no'
           TEST_BUNDLED_GEMS_ALLOW_FAILURES: ''
           PRECHECK_BUNDLED_GEMS: 'no'
-
-      - name: make skipped tests
-        run: |
-          $SETARCH make -s test-all TESTS="${TESTS//-n!\//-n/}"
-        env:
-          GNUMAKEFLAGS: ''
-          RUBY_TESTOPTS: '-v --tty=no'
-        if: ${{ matrix.test_task == 'check' && matrix.skipped_tests }}
-        continue-on-error: ${{ matrix.continue-on-skipped_tests || false }}
 
   result:
     if: ${{ always() }}
