@@ -43,7 +43,7 @@ test/ruby/test_fnmatch.rb
 test/ruby/test_frozen_error.rb
 test/ruby/test_frozen.rb
 test/ruby/test_gc_compact.rb
-# test/ruby/test_gc.rb                      XXXX failures
+test/ruby/test_gc.rb
 test/ruby/test_hash.rb
 test/ruby/test_ifunless.rb
 test/ruby/test_inlinecache.rb
