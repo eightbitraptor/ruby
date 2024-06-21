@@ -74,8 +74,8 @@ jobs:
 
       - name: Clone and build MMTK
         run: >-
-          git clone https://github.com/mmtk/mmtk-ruby $srcdir/mmtk-ruby && 
-          cd $srcdir/mmtk-ruby/mmtk &&
+          git clone https://github.com/mmtk/mmtk-ruby && 
+          cd mmtk-ruby/mmtk &&
           cargo build --release
 
       - name: Run configure
@@ -85,7 +85,7 @@ jobs:
         run: >-
           $SETARCH ../src/configure -C --disable-install-doc ${configure:-cppflags=-DRUBY_DEBUG}
           ${arch:+--target=$arch-$OSTYPE --host=$arch-$OSTYPE}
-          --with-mmtk-ruby=$srcdir/mmtk-ruby
+          --with-mmtk-ruby=./mmtk-ruby
 
       - run: $SETARCH make prepare-gems
         if: ${{ matrix.test_task == 'test-bundled-gems' }}
