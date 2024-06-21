@@ -104,6 +104,9 @@ jobs:
           TEST_BUNDLED_GEMS_ALLOW_FAILURES: ''
           PRECHECK_BUNDLED_GEMS: 'no'
 
+      - name: Clean build directory
+        run: rm -rf $builddir/mmtk-ruby
+
   result:
     if: ${{ always() }}
     name: ${{ github.workflow }} result
