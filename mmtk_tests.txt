@@ -34,7 +34,7 @@ test/ruby/test_env.rb
 test/ruby/test_eval.rb
 test/ruby/test_exception.rb
 test/ruby/test_fiber.rb
-# test/ruby/test_file_exhaustive.rb         XXXX leaks
+test/ruby/test_file_exhaustive.rb
 test/ruby/test_file.rb
 test/ruby/test_fixnum.rb
 test/ruby/test_flip.rb
