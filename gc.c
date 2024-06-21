@@ -14586,7 +14586,11 @@ Init_GC(void)
     rb_define_singleton_method(rb_mGC, "malloc_allocations", gc_malloc_allocations, 0);
 #endif
 
+#if USE_MMTK
+    if (GC_COMPACTION_SUPPORTED && !rb_mmtk_enabled_p()) {
+#else
     if (GC_COMPACTION_SUPPORTED) {
+#endif
         rb_define_singleton_method(rb_mGC, "compact", gc_compact, 0);
         rb_define_singleton_method(rb_mGC, "auto_compact", gc_get_auto_compact, 0);
         rb_define_singleton_method(rb_mGC, "auto_compact=", gc_set_auto_compact, 1);
@@ -14627,7 +14631,13 @@ Init_GC(void)
         OPT(MALLOC_ALLOCATED_SIZE);
         OPT(MALLOC_ALLOCATED_SIZE_CHECK);
         OPT(GC_PROFILE_DETAIL_MEMORY);
+#if USE_MMTK
+        if (!rb_mmtk_enabled_p()) {
+#endif
         OPT(GC_COMPACTION_SUPPORTED);
+#if USE_MMTK
+        }
+#endif
 #undef OPT
         OBJ_FREEZE(opts);
     }
