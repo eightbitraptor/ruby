@@ -159,19 +159,6 @@ jobs:
           ${TESTS:+TESTS="$TESTS"}
           ${{ !contains(matrix.test_task, 'bundle') && 'RUBYOPT=-w' || '' }}
         timeout-minutes: ${{ matrix.timeout || 40 }}
-        if: ${{ !matrix.shared_gc}}
-        env:
-          RUBY_TESTOPTS: '-q --tty=no'
-          TEST_BUNDLED_GEMS_ALLOW_FAILURES: 'typeprof'
-          PRECHECK_BUNDLED_GEMS: 'no'
-
-      - name: make ${{ matrix.test_task }}
-        run: >-
-          $SETARCH make -s ${{ matrix.test_task }}
-          ${TESTS:+TESTS="$TESTS"}
-          ${{ !contains(matrix.test_task, 'bundle') && 'RUBYOPT=-w' || '' }}
-        timeout-minutes: ${{ matrix.timeout || 40 }}
-        if: ${{ matrix.shared_gc}}
         env:
           RUBY_TESTOPTS: '-q --tty=no'
           TEST_BUNDLED_GEMS_ALLOW_FAILURES: 'typeprof'
