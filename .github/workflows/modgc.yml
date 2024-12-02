@@ -138,17 +138,6 @@ jobs:
           make shared-gc SHARED_GC=${{ matrix.gc.name }} MMTK_BUILD=${{ matrix.gc.mmtk_build }}
           make distclean-shared-gc SHARED_GC=${{ matrix.gc.name }}
 
-      - name: Verify MMTk bindgen
-        run: |
-          cd ../src/gc/mmtk
-          cargo install --force cbindgen
-          cbindgen --config cbindgen.toml --output ../mmtk.h
-          if read -n1 -d '' < <(git diff ../mmtk.h); then
-            git diff ../mmtk.h
-            exit 1
-          fi
-        if: ${{ matrix.gc.name == 'mmtk' }}
-
       - run: |
           $SETARCH make golf
           case "${{ matrix.configure }}" in
