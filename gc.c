@@ -666,6 +666,7 @@ typedef struct gc_function_map {
     // Object ID
     VALUE (*object_id)(void *objspace_ptr, VALUE obj);
     VALUE (*object_id_to_ref)(void *objspace_ptr, VALUE object_id);
+    bool (*object_id_seen_p)(VALUE obj);
     // Forking
     void (*before_fork)(void *objspace_ptr);
     void (*after_fork)(void *objspace_ptr, rb_pid_t pid);
@@ -843,6 +844,7 @@ ruby_modular_gc_init(void)
     // Object ID
     load_modular_gc_func(object_id);
     load_modular_gc_func(object_id_to_ref);
+    load_modular_gc_func(object_id_seen_p);
     // Forking
     load_modular_gc_func(before_fork);
     load_modular_gc_func(after_fork);
@@ -926,6 +928,7 @@ ruby_modular_gc_init(void)
 // Object ID
 # define rb_gc_impl_object_id rb_gc_functions.object_id
 # define rb_gc_impl_object_id_to_ref rb_gc_functions.object_id_to_ref
+# define rb_gc_impl_object_id_seen_p rb_gc_functions.object_id_seen_p
 // Forking
 # define rb_gc_impl_before_fork rb_gc_functions.before_fork
 # define rb_gc_impl_after_fork rb_gc_functions.after_fork
@@ -1889,6 +1892,12 @@ rb_obj_id(VALUE obj)
      * (RUBY_IMMEDIATE_MASK + 1) which guarantees that it does not collide with
      * any immediates. */
     return rb_find_object_id(rb_gc_get_objspace(), obj, rb_gc_impl_object_id);
+}
+
+bool
+rb_obj_id_seen_p(VALUE obj)
+{
+    return rb_gc_impl_object_id_seen_p(obj);
 }
 
 static enum rb_id_table_iterator_result
