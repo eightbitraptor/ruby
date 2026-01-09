@@ -309,6 +309,31 @@ typedef unsigned int rb_atomic_t;
 #define RUBY_ATOMIC_SIZE_SUB(var, val) rbimpl_atomic_size_sub(&(var), (val), RBIMPL_ATOMIC_SEQ_CST)
 
 /**
+ * Identical to #RUBY_ATOMIC_OR, except it expects its arguments are `size_t`.
+ * There are cases where ::rb_atomic_t is 32bit while `size_t` is 64bit.  This
+ * should be used for size related operations to support such platforms.
+ *
+ * @param   var  A variable of `size_t`.
+ * @param   val  Value to OR.
+ * @return  void
+ * @post    `var` holds `var | val`.
+ */
+#define RUBY_ATOMIC_SIZE_OR(var, val) rbimpl_atomic_size_or(&(var), (val), RBIMPL_ATOMIC_SEQ_CST)
+
+/**
+ * Identical to #RUBY_ATOMIC_OR, except it expects its arguments are `size_t`
+ * and returns the previous value (before the OR operation).
+ * There are cases where ::rb_atomic_t is 32bit while `size_t` is 64bit.  This
+ * should be used for size related operations to support such platforms.
+ *
+ * @param   var  A variable of `size_t`.
+ * @param   val  Value to OR.
+ * @return  The previous value of `var` before the OR operation.
+ * @post    `var` holds `var | val`.
+ */
+#define RUBY_ATOMIC_SIZE_FETCH_OR(var, val) rbimpl_atomic_size_fetch_or(&(var), (val), RBIMPL_ATOMIC_SEQ_CST)
+
+/**
  * Identical  to #RUBY_ATOMIC_EXCHANGE,  except  it expects  its arguments  are
  * `void*`.   There are  cases where  ::rb_atomic_t is  32bit while  `void*` is
  * 64bit.  This should  be used for pointer related operations  to support such
@@ -798,6 +823,80 @@ rbimpl_atomic_or(volatile rb_atomic_t *ptr, rb_atomic_t val, int memory_order)
 
 #elif !defined(_WIN32) && defined(HAVE_STDATOMIC_H)
     atomic_fetch_or_explicit((_Atomic volatile rb_atomic_t *)ptr, val, memory_order);
+
+#else
+# error Unsupported platform.
+#endif
+}
+
+RBIMPL_ATTR_ARTIFICIAL()
+RBIMPL_ATTR_NOALIAS()
+RBIMPL_ATTR_NONNULL((1))
+static inline void
+rbimpl_atomic_size_or(volatile size_t *ptr, size_t val, int memory_order)
+{
+    (void)memory_order;
+#if 0
+
+#elif defined(HAVE_GCC_ATOMIC_BUILTINS)
+    __atomic_or_fetch(ptr, val, memory_order);
+
+#elif defined(HAVE_GCC_SYNC_BUILTINS)
+    __sync_or_and_fetch(ptr, val);
+
+#elif defined(_WIN64)
+    InterlockedOr64((volatile LONG64 *)ptr, (LONG64)val);
+
+#elif defined(__sun) && defined(HAVE_ATOMIC_H) && (defined(_LP64) || defined(_I32LPx))
+    atomic_or_ulong(ptr, val);
+
+#elif defined(_WIN32) || (defined(__sun) && defined(HAVE_ATOMIC_H))
+    RBIMPL_STATIC_ASSERT(size_of_size_t, sizeof *ptr == sizeof(rb_atomic_t));
+    rbimpl_atomic_or((volatile rb_atomic_t *)ptr, (rb_atomic_t)val, memory_order);
+
+#elif defined(HAVE_STDATOMIC_H)
+    atomic_fetch_or_explicit((_Atomic volatile size_t *)ptr, val, memory_order);
+
+#else
+# error Unsupported platform.
+#endif
+}
+
+RBIMPL_ATTR_ARTIFICIAL()
+RBIMPL_ATTR_NOALIAS()
+RBIMPL_ATTR_NONNULL((1))
+static inline size_t
+rbimpl_atomic_size_fetch_or(volatile size_t *ptr, size_t val, int memory_order)
+{
+    (void)memory_order;
+#if 0
+
+#elif defined(HAVE_GCC_ATOMIC_BUILTINS)
+    return __atomic_fetch_or(ptr, val, memory_order);
+
+#elif defined(HAVE_GCC_SYNC_BUILTINS)
+    return __sync_fetch_and_or(ptr, val);
+
+#elif defined(_WIN64)
+    return (size_t)InterlockedOr64((volatile LONG64 *)ptr, (LONG64)val);
+
+#elif defined(__sun) && defined(HAVE_ATOMIC_H) && (defined(_LP64) || defined(_I32LPx))
+    size_t old;
+    do {
+        old = *ptr;
+    } while (atomic_cas_ulong(ptr, old, old | val) != old);
+    return old;
+
+#elif defined(_WIN32) || (defined(__sun) && defined(HAVE_ATOMIC_H))
+    RBIMPL_STATIC_ASSERT(size_of_size_t, sizeof *ptr == sizeof(rb_atomic_t));
+    rb_atomic_t old;
+    do {
+        old = *(volatile rb_atomic_t *)ptr;
+    } while (rbimpl_atomic_cas((volatile rb_atomic_t *)ptr, old, old | (rb_atomic_t)val, memory_order, memory_order) != old);
+    return (size_t)old;
+
+#elif defined(HAVE_STDATOMIC_H)
+    return atomic_fetch_or_explicit((_Atomic volatile size_t *)ptr, val, memory_order);
 
 #else
 # error Unsupported platform.

@@ -836,6 +836,13 @@ heap_page_in_global_empty_pages_pool(rb_objspace_t *objspace, struct heap_page *
 #define MARK_IN_BITMAP(bits, p)      ((bits)[BITMAP_INDEX(p)] = (bits)[BITMAP_INDEX(p)] | BITMAP_BIT(p))
 #define CLEAR_IN_BITMAP(bits, p)     ((bits)[BITMAP_INDEX(p)] = (bits)[BITMAP_INDEX(p)] & ~BITMAP_BIT(p))
 
+/* Atomic bitmap operations for parallel marking.
+ * bits_t is uintptr_t which matches size_t on all platforms. */
+#define MARK_IN_BITMAP_ATOMIC(bits, p) \
+    RUBY_ATOMIC_SIZE_OR((bits)[BITMAP_INDEX(p)], BITMAP_BIT(p))
+#define MARK_IN_BITMAP_ATOMIC_FETCH(bits, p) \
+    RUBY_ATOMIC_SIZE_FETCH_OR((bits)[BITMAP_INDEX(p)], BITMAP_BIT(p))
+
 /* getting bitmap */
 #define GET_HEAP_MARK_BITS(x)           (&GET_HEAP_PAGE(x)->mark_bits[0])
 #define GET_HEAP_PINNED_BITS(x)         (&GET_HEAP_PAGE(x)->pinned_bits[0])
@@ -4366,6 +4373,19 @@ gc_mark_set(rb_objspace_t *objspace, VALUE obj)
     return 1;
 }
 
+/* Atomic version of gc_mark_set for parallel marking.
+ * Uses atomic fetch-and-or to safely set mark bits from multiple threads.
+ * Returns 1 if this thread was first to mark (caller should scan children),
+ * 0 if already marked by another thread (skip to avoid duplicate work). */
+static inline int
+gc_mark_set_atomic(rb_objspace_t *objspace, VALUE obj)
+{
+    bits_t *bits = GET_HEAP_MARK_BITS(obj);
+    bits_t mask = BITMAP_BIT(obj);
+    bits_t old_bits = MARK_IN_BITMAP_ATOMIC_FETCH(bits, obj);
+    return (old_bits & mask) == 0;
+}
+
 static void
 gc_aging(rb_objspace_t *objspace, VALUE obj)
 {
@@ -4440,7 +4460,7 @@ gc_mark(rb_objspace_t *objspace, VALUE obj)
     GC_ASSERT(!objspace->flags.during_reference_updating);
 
     rgengc_check_relation(objspace, obj);
-    if (!gc_mark_set(objspace, obj)) return; /* already marked */
+    if (!gc_mark_set_atomic(objspace, obj)) return; /* already marked */
 
     if (0) { // for debug GC marking miss
         RUBY_DEBUG_LOG("%p (%s) parent:%p (%s)",
