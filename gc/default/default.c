@@ -436,9 +436,12 @@ typedef struct mark_stack {
 
 /* Thread-local state for parallel marking.
  * current_worker_id: -1 when not in parallel marking, 0 or 1 for worker threads.
- * current_worker_stack: points to the worker's mark stack during parallel marking. */
+ * current_worker_stack: points to the worker's mark stack during parallel marking.
+ * current_parent_object/old_p: thread-local parent tracking to avoid races on objspace->rgengc.parent_object. */
 static RB_THREAD_LOCAL_SPECIFIER int current_worker_id = -1;
 static RB_THREAD_LOCAL_SPECIFIER mark_stack_t *current_worker_stack = NULL;
+static RB_THREAD_LOCAL_SPECIFIER VALUE current_parent_object = Qundef;
+static RB_THREAD_LOCAL_SPECIFIER bool current_parent_object_old_p = false;
 
 typedef int (*gc_compact_compare_func)(const void *l, const void *r, void *d);
 
@@ -4401,9 +4404,21 @@ split_mark_stack_chunks(mark_stack_t *src, mark_stack_t *dst)
 static void
 rgengc_check_relation(rb_objspace_t *objspace, VALUE obj)
 {
-    if (objspace->rgengc.parent_object_old_p) {
+    bool parent_old_p;
+    VALUE parent_obj;
+
+    if (current_worker_id >= 0) {
+        parent_old_p = current_parent_object_old_p;
+        parent_obj = current_parent_object;
+    }
+    else {
+        parent_old_p = objspace->rgengc.parent_object_old_p;
+        parent_obj = objspace->rgengc.parent_object;
+    }
+
+    if (parent_old_p) {
         if (RVALUE_WB_UNPROTECTED(objspace, obj) || !RVALUE_OLD_P(objspace, obj)) {
-            rgengc_remember(objspace, objspace->rgengc.parent_object);
+            rgengc_remember(objspace, parent_obj);
         }
     }
 }
@@ -4501,7 +4516,8 @@ gc_mark_check_t_none(rb_objspace_t *objspace, VALUE obj)
         rb_raw_obj_info(obj_info_buf, info_size, obj);
 
         char parent_obj_info_buf[info_size];
-        rb_raw_obj_info(parent_obj_info_buf, info_size, objspace->rgengc.parent_object);
+        VALUE parent = (current_worker_id >= 0) ? current_parent_object : objspace->rgengc.parent_object;
+        rb_raw_obj_info(parent_obj_info_buf, info_size, parent);
 
         rb_bug("try to mark T_NONE object (obj: %s, parent: %s)", obj_info_buf, parent_obj_info_buf);
     }
@@ -4618,10 +4634,16 @@ pin_value(st_data_t key, st_data_t value, st_data_t data)
 static inline void
 gc_mark_set_parent_raw(rb_objspace_t *objspace, VALUE obj, bool old_p)
 {
-    asan_unpoison_memory_region(&objspace->rgengc.parent_object, sizeof(objspace->rgengc.parent_object), false);
-    asan_unpoison_memory_region(&objspace->rgengc.parent_object_old_p, sizeof(objspace->rgengc.parent_object_old_p), false);
-    objspace->rgengc.parent_object = obj;
-    objspace->rgengc.parent_object_old_p = old_p;
+    if (current_worker_id >= 0) {
+        current_parent_object = obj;
+        current_parent_object_old_p = old_p;
+    }
+    else {
+        asan_unpoison_memory_region(&objspace->rgengc.parent_object, sizeof(objspace->rgengc.parent_object), false);
+        asan_unpoison_memory_region(&objspace->rgengc.parent_object_old_p, sizeof(objspace->rgengc.parent_object_old_p), false);
+        objspace->rgengc.parent_object = obj;
+        objspace->rgengc.parent_object_old_p = old_p;
+    }
 }
 
 static inline void
@@ -4633,8 +4655,14 @@ gc_mark_set_parent(rb_objspace_t *objspace, VALUE obj)
 static inline void
 gc_mark_set_parent_invalid(rb_objspace_t *objspace)
 {
-    asan_poison_memory_region(&objspace->rgengc.parent_object, sizeof(objspace->rgengc.parent_object));
-    asan_poison_memory_region(&objspace->rgengc.parent_object_old_p, sizeof(objspace->rgengc.parent_object_old_p));
+    if (current_worker_id >= 0) {
+        current_parent_object = Qundef;
+        current_parent_object_old_p = false;
+    }
+    else {
+        asan_poison_memory_region(&objspace->rgengc.parent_object, sizeof(objspace->rgengc.parent_object));
+        asan_poison_memory_region(&objspace->rgengc.parent_object_old_p, sizeof(objspace->rgengc.parent_object_old_p));
+    }
 }
 
 static void
@@ -6002,7 +6030,12 @@ rgengc_remembersetbits_set(rb_objspace_t *objspace, VALUE obj)
     }
     else {
         page->flags.has_remembered_objects = TRUE;
-        MARK_IN_BITMAP(bits, obj);
+        if (current_worker_id >= 0) {
+            MARK_IN_BITMAP_ATOMIC(bits, obj);
+        }
+        else {
+            MARK_IN_BITMAP(bits, obj);
+        }
         return TRUE;
     }
 }
