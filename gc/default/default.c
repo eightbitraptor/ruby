@@ -25,6 +25,7 @@
 #include "ruby/atomic.h"
 #include "ruby/debug.h"
 #include "ruby/thread.h"
+#include "ruby/thread_native.h"
 #include "ruby/util.h"
 #include "ruby/vm.h"
 #include "ruby/internal/encoding/string.h"
@@ -433,6 +434,12 @@ typedef struct mark_stack {
     size_t unused_cache_size;
 } mark_stack_t;
 
+/* Thread-local state for parallel marking.
+ * current_worker_id: -1 when not in parallel marking, 0 or 1 for worker threads.
+ * current_worker_stack: points to the worker's mark stack during parallel marking. */
+static RB_THREAD_LOCAL_SPECIFIER int current_worker_id = -1;
+static RB_THREAD_LOCAL_SPECIFIER mark_stack_t *current_worker_stack = NULL;
+
 typedef int (*gc_compact_compare_func)(const void *l, const void *r, void *d);
 
 typedef struct rb_heap_struct {
@@ -522,6 +529,14 @@ typedef struct rb_objspace {
 
     mark_stack_t mark_stack;
     size_t marked_slots;
+
+    struct {
+        mark_stack_t worker_stacks[2];
+        size_t worker_marked_slots[2];
+        rb_darray(VALUE) worker_weak_refs[2];
+        pthread_t helper_thread;
+        rb_atomic_t helper_done;
+    } parallel_mark;
 
     struct {
         rb_darray(struct heap_page *) sorted;
@@ -1401,8 +1416,8 @@ RVALUE_OLD_P(rb_objspace_t *objspace, VALUE obj)
 static inline void
 RVALUE_PAGE_OLD_UNCOLLECTIBLE_SET(rb_objspace_t *objspace, struct heap_page *page, VALUE obj)
 {
-    MARK_IN_BITMAP(&page->uncollectible_bits[0], obj);
-    objspace->rgengc.old_objects++;
+    MARK_IN_BITMAP_ATOMIC(&page->uncollectible_bits[0], obj);
+    RUBY_ATOMIC_SIZE_ADD(objspace->rgengc.old_objects, 1);
 
 #if RGENGC_PROFILE >= 2
     objspace->profile.total_promoted_count++;
@@ -4353,6 +4368,34 @@ init_mark_stack(mark_stack_t *stack)
     stack->unused_cache_size = stack->cache_size;
 }
 
+static void
+split_mark_stack_chunks(mark_stack_t *src, mark_stack_t *dst)
+{
+    int chunk_count = 0;
+    stack_chunk_t *chunk = src->chunk;
+    while (chunk != NULL) {
+        chunk_count++;
+        chunk = chunk->next;
+    }
+
+    if (chunk_count <= 1) {
+        return;
+    }
+
+    int to_move = chunk_count / 2;
+    stack_chunk_t *prev = src->chunk;
+    chunk = prev->next;
+    for (int i = 1; i < chunk_count - to_move; i++) {
+        prev = chunk;
+        chunk = chunk->next;
+    }
+
+    prev->next = NULL;
+    dst->chunk = chunk;
+    dst->index = STACK_CHUNK_SIZE;
+    dst->limit = STACK_CHUNK_SIZE;
+}
+
 /* Marking */
 
 static void
@@ -4416,7 +4459,12 @@ gc_aging(rb_objspace_t *objspace, VALUE obj)
     }
     check_rvalue_consistency(objspace, obj);
 
-    objspace->marked_slots++;
+    if (current_worker_id >= 0) {
+        objspace->parallel_mark.worker_marked_slots[current_worker_id]++;
+    }
+    else {
+        objspace->marked_slots++;
+    }
 }
 
 static void
@@ -4432,10 +4480,16 @@ gc_grey(rb_objspace_t *objspace, VALUE obj)
     }
 
     if (RB_FL_TEST_RAW(obj, RUBY_FL_WEAK_REFERENCE)) {
-        rb_darray_append_without_gc(&objspace->weak_references, obj);
+        if (current_worker_id >= 0) {
+            rb_darray_append_without_gc(&objspace->parallel_mark.worker_weak_refs[current_worker_id], obj);
+        }
+        else {
+            rb_darray_append_without_gc(&objspace->weak_references, obj);
+        }
     }
 
-    push_mark_stack(&objspace->mark_stack, obj);
+    mark_stack_t *stack = current_worker_stack ? current_worker_stack : &objspace->mark_stack;
+    push_mark_stack(stack, obj);
 }
 
 static inline void
@@ -4669,6 +4723,32 @@ static int
 gc_mark_stacked_objects_all(rb_objspace_t *objspace)
 {
     return gc_mark_stacked_objects(objspace, FALSE, 0);
+}
+
+static void
+gc_parallel_mark_drain(rb_objspace_t *objspace, int worker_id)
+{
+    mark_stack_t *stack = &objspace->parallel_mark.worker_stacks[worker_id];
+    VALUE obj;
+
+    current_worker_id = worker_id;
+    current_worker_stack = stack;
+
+    while (pop_mark_stack(stack, &obj)) {
+        gc_mark_children(objspace, obj);
+    }
+
+    current_worker_stack = NULL;
+    current_worker_id = -1;
+}
+
+static void *
+parallel_mark_helper_thread(void *arg)
+{
+    rb_objspace_t *objspace = arg;
+    gc_parallel_mark_drain(objspace, 1);
+    RUBY_ATOMIC_SET(objspace->parallel_mark.helper_done, 1);
+    return NULL;
 }
 
 #if RGENGC_CHECK_MODE >= 4
@@ -5708,7 +5788,45 @@ gc_marks_rest(rb_objspace_t *objspace)
         while (gc_mark_stacked_objects_incremental(objspace, INT_MAX) == FALSE);
     }
     else {
-        gc_mark_stacked_objects_all(objspace);
+        mark_stack_t *main_stack = &objspace->parallel_mark.worker_stacks[0];
+        mark_stack_t *helper_stack = &objspace->parallel_mark.worker_stacks[1];
+
+        *main_stack = objspace->mark_stack;
+        MEMZERO(&objspace->mark_stack, mark_stack_t, 1);
+        objspace->mark_stack.index = objspace->mark_stack.limit = STACK_CHUNK_SIZE;
+        MEMZERO(helper_stack, mark_stack_t, 1);
+        helper_stack->index = helper_stack->limit = STACK_CHUNK_SIZE;
+
+        split_mark_stack_chunks(main_stack, helper_stack);
+
+        objspace->parallel_mark.worker_marked_slots[0] = 0;
+        objspace->parallel_mark.worker_marked_slots[1] = 0;
+        rb_darray_clear(objspace->parallel_mark.worker_weak_refs[0]);
+        rb_darray_clear(objspace->parallel_mark.worker_weak_refs[1]);
+        objspace->parallel_mark.helper_done = 0;
+
+        pthread_create(&objspace->parallel_mark.helper_thread, NULL,
+                       parallel_mark_helper_thread, objspace);
+
+        gc_parallel_mark_drain(objspace, 0);
+
+        pthread_join(objspace->parallel_mark.helper_thread, NULL);
+
+        objspace->marked_slots += objspace->parallel_mark.worker_marked_slots[0]
+                                + objspace->parallel_mark.worker_marked_slots[1];
+
+        {
+            VALUE *obj_ptr;
+            rb_darray_foreach(objspace->parallel_mark.worker_weak_refs[0], j, obj_ptr) {
+                rb_darray_append_without_gc(&objspace->weak_references, *obj_ptr);
+            }
+            rb_darray_foreach(objspace->parallel_mark.worker_weak_refs[1], j, obj_ptr) {
+                rb_darray_append_without_gc(&objspace->weak_references, *obj_ptr);
+            }
+        }
+
+        GC_ASSERT(is_mark_stack_empty(main_stack));
+        GC_ASSERT(is_mark_stack_empty(helper_stack));
     }
 
     gc_marks_finish(objspace);
