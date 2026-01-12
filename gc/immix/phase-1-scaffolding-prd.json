@@ -1,0 +1,302 @@
+{
+  "phase": {
+    "number": 1,
+    "name": "Module Scaffolding & Build Integration",
+    "description": "Create the Immix GC plugin skeleton that conforms to Ruby's modular GC API and build system. This phase establishes the foundation for all subsequent work.",
+    "success_criteria": [
+      "make install-modular-gc MODULAR_GC=immix succeeds without errors",
+      "RUBY_GC_LIBRARY=immix ruby -e 'puts GC.stat' runs without crash",
+      "rb_gc_impl_active_gc_name returns 'immix'",
+      "All rb_gc_impl_* symbols are exported and callable"
+    ],
+    "dependencies": [],
+    "estimated_effort": "1-2 days"
+  },
+  "tasks": [
+    {
+      "id": "1.1",
+      "title": "Create gc/immix directory structure",
+      "description": "Create the gc/immix directory that will contain all Immix GC implementation files.",
+      "type": "setup",
+      "files_to_create": [
+        "gc/immix/"
+      ],
+      "acceptance_criteria": [
+        "Directory gc/immix exists",
+        "Directory is tracked by git"
+      ]
+    },
+    {
+      "id": "1.2",
+      "title": "Create extconf.rb build configuration",
+      "description": "Create the extconf.rb file that integrates with Ruby's modular GC build system. Must require extconf_base.rb and call create_gc_makefile with the correct library name.",
+      "type": "implementation",
+      "files_to_create": [
+        "gc/immix/extconf.rb"
+      ],
+      "reference_files": [
+        "gc/extconf_base.rb",
+        "gc/default/extconf.rb",
+        "gc/mmtk/extconf.rb"
+      ],
+      "implementation_notes": [
+        "Require '../extconf_base' to get shared build configuration",
+        "Call create_gc_makefile('immix') to generate Makefile",
+        "Add any Immix-specific CFLAGS if needed (e.g., -DIMMIX_DEBUG for debug builds)",
+        "Keep it minimal - extconf_base.rb handles most configuration"
+      ],
+      "acceptance_criteria": [
+        "File follows Ruby extconf conventions",
+        "Successfully generates Makefile when run with ruby extconf.rb",
+        "Output library is named librubygc.immix.so (or .dylib on macOS)"
+      ]
+    },
+    {
+      "id": "1.3",
+      "title": "Create immix.c with stubbed API implementations",
+      "description": "Create the main C implementation file with all rb_gc_impl_* functions stubbed out. Each function should have a minimal valid implementation that won't crash but may not be fully functional.",
+      "type": "implementation",
+      "files_to_create": [
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/gc_impl.h",
+        "gc/gc.h",
+        "gc/mmtk/mmtk.c",
+        "gc/default/default.c"
+      ],
+      "implementation_notes": [
+        "Include necessary headers: ruby/ruby.h, gc/gc.h, gc/gc_impl.h",
+        "Define a minimal struct objspace with essential fields",
+        "Implement rb_gc_impl_active_gc_name to return 'immix'",
+        "Stub all other rb_gc_impl_* functions from gc_impl.h",
+        "For allocation functions, initially delegate to system malloc",
+        "For GC control functions, implement as no-ops that return success",
+        "For stats functions, return empty/zero values",
+        "Add TODO comments indicating what each stub needs to do"
+      ],
+      "functions_to_stub": [
+        "rb_gc_impl_objspace_alloc",
+        "rb_gc_impl_objspace_init",
+        "rb_gc_impl_ractor_cache_alloc",
+        "rb_gc_impl_set_params",
+        "rb_gc_impl_init",
+        "rb_gc_impl_heap_sizes",
+        "rb_gc_impl_shutdown_free_objects",
+        "rb_gc_impl_objspace_free",
+        "rb_gc_impl_ractor_cache_free",
+        "rb_gc_impl_start",
+        "rb_gc_impl_during_gc_p",
+        "rb_gc_impl_prepare_heap",
+        "rb_gc_impl_gc_enable",
+        "rb_gc_impl_gc_disable",
+        "rb_gc_impl_gc_enabled_p",
+        "rb_gc_impl_stress_set",
+        "rb_gc_impl_stress_get",
+        "rb_gc_impl_config_get",
+        "rb_gc_impl_config_set",
+        "rb_gc_impl_new_obj",
+        "rb_gc_impl_obj_slot_size",
+        "rb_gc_impl_heap_id_for_size",
+        "rb_gc_impl_size_allocatable_p",
+        "rb_gc_impl_malloc",
+        "rb_gc_impl_calloc",
+        "rb_gc_impl_realloc",
+        "rb_gc_impl_free",
+        "rb_gc_impl_adjust_memory_usage",
+        "rb_gc_impl_mark",
+        "rb_gc_impl_mark_and_move",
+        "rb_gc_impl_mark_and_pin",
+        "rb_gc_impl_mark_maybe",
+        "rb_gc_impl_declare_weak_references",
+        "rb_gc_impl_handle_weak_references_alive_p",
+        "rb_gc_impl_register_pinning_obj",
+        "rb_gc_impl_object_moved_p",
+        "rb_gc_impl_location",
+        "rb_gc_impl_writebarrier",
+        "rb_gc_impl_writebarrier_unprotect",
+        "rb_gc_impl_writebarrier_remember",
+        "rb_gc_impl_each_objects",
+        "rb_gc_impl_each_object",
+        "rb_gc_impl_make_zombie",
+        "rb_gc_impl_define_finalizer",
+        "rb_gc_impl_undefine_finalizer",
+        "rb_gc_impl_copy_finalizer",
+        "rb_gc_impl_shutdown_call_finalizer",
+        "rb_gc_impl_before_fork",
+        "rb_gc_impl_after_fork",
+        "rb_gc_impl_set_measure_total_time",
+        "rb_gc_impl_get_measure_total_time",
+        "rb_gc_impl_get_total_time",
+        "rb_gc_impl_gc_count",
+        "rb_gc_impl_latest_gc_info",
+        "rb_gc_impl_stat",
+        "rb_gc_impl_stat_heap",
+        "rb_gc_impl_active_gc_name",
+        "rb_gc_impl_object_metadata",
+        "rb_gc_impl_pointer_to_heap_p",
+        "rb_gc_impl_garbage_object_p",
+        "rb_gc_impl_set_event_hook",
+        "rb_gc_impl_copy_attributes"
+      ],
+      "acceptance_criteria": [
+        "All functions from gc_impl.h are implemented",
+        "File compiles without errors",
+        "No undefined symbol errors at link time",
+        "rb_gc_impl_active_gc_name returns 'immix'"
+      ]
+    },
+    {
+      "id": "1.4",
+      "title": "Create immix.h header file",
+      "description": "Create a header file for Immix-specific type definitions and constants that will be shared across implementation files as the project grows.",
+      "type": "implementation",
+      "files_to_create": [
+        "gc/immix/immix.h"
+      ],
+      "implementation_notes": [
+        "Define IMMIX_BLOCK_SIZE (65536 bytes = 64KB) - corrected per Immix-Rust reference",
+        "Define IMMIX_LINE_SIZE (256 bytes) - corrected per PLDI 2008 paper",
+        "Define IMMIX_LINES_PER_BLOCK (256)",
+        "Define IMMIX_LARGE_OBJECT_THRESHOLD (BLOCK_SIZE - LINE_SIZE)",
+        "Forward declare struct immix_objspace",
+        "Add include guards",
+        "Keep minimal for now - expand as needed in later phases"
+      ],
+      "acceptance_criteria": [
+        "Header compiles without errors when included",
+        "Constants match Immix paper specifications",
+        "Include guards prevent double inclusion"
+      ]
+    },
+    {
+      "id": "1.5",
+      "title": "Update gc/README.md documentation",
+      "description": "Update the modular GC documentation to include Immix as an available implementation option.",
+      "type": "documentation",
+      "files_to_modify": [
+        "gc/README.md"
+      ],
+      "implementation_notes": [
+        "Add Immix to the list of GC implementations",
+        "Note that Immix is experimental/in-development",
+        "Document any Immix-specific environment variables",
+        "Add brief description of Immix algorithm"
+      ],
+      "acceptance_criteria": [
+        "Immix is listed as an available GC option",
+        "Build and run instructions are accurate",
+        "Documentation matches actual implementation status"
+      ]
+    },
+    {
+      "id": "1.6",
+      "title": "Verify build integration",
+      "description": "Test that the Immix module builds correctly with Ruby's build system.",
+      "type": "verification",
+      "commands_to_run": [
+        "make install-modular-gc MODULAR_GC=immix"
+      ],
+      "implementation_notes": [
+        "Ensure Ruby is configured with --with-modular-gc",
+        "Check that librubygc.immix.so is created",
+        "Verify library is installed to correct location",
+        "Check for any compiler warnings and fix them"
+      ],
+      "acceptance_criteria": [
+        "Build completes without errors",
+        "No compiler warnings (treat warnings as errors)",
+        "Shared library is created with correct name",
+        "Library exports all required symbols"
+      ]
+    },
+    {
+      "id": "1.7",
+      "title": "Verify runtime loading",
+      "description": "Test that Ruby can load and use the Immix GC module at runtime.",
+      "type": "verification",
+      "commands_to_run": [
+        "RUBY_GC_LIBRARY=immix ruby -e 'puts GC.stat'",
+        "RUBY_GC_LIBRARY=immix ruby -e 'puts GC.config'",
+        "RUBY_GC_LIBRARY=immix ruby -e 'p GC.stat[:gc_name]'"
+      ],
+      "implementation_notes": [
+        "Ruby should start without crashes",
+        "GC.stat should return a hash (even if mostly empty)",
+        "GC name should report as 'immix'",
+        "Basic Ruby operations should work"
+      ],
+      "acceptance_criteria": [
+        "Ruby starts successfully with RUBY_GC_LIBRARY=immix",
+        "No segfaults or crashes",
+        "GC.stat returns valid data",
+        "Simple Ruby programs execute correctly"
+      ]
+    },
+    {
+      "id": "1.8",
+      "title": "Add smoke test",
+      "description": "Create a minimal test that verifies the Immix GC loads and runs basic operations.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_smoke.rb"
+      ],
+      "implementation_notes": [
+        "Test that GC loads (check GC name)",
+        "Test basic object allocation",
+        "Test GC.start doesn't crash",
+        "Test GC.stat returns expected keys",
+        "Keep tests minimal - just verify scaffolding works"
+      ],
+      "acceptance_criteria": [
+        "Test file exists and is runnable",
+        "All smoke tests pass with RUBY_GC_LIBRARY=immix",
+        "Tests document what functionality is expected to work"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R1.1",
+      "description": "Missing or incorrect symbol exports cause Ruby to fail loading the module",
+      "severity": "high",
+      "likelihood": "medium",
+      "mitigations": [
+        "Compile with -Wmissing-prototypes to catch declaration mismatches",
+        "Use nm to verify all rb_gc_impl_* symbols are exported",
+        "Compare symbol list against gc_impl.h function declarations",
+        "Test loading early and often during development"
+      ]
+    },
+    {
+      "id": "R1.2",
+      "description": "extconf misconfiguration produces invalid shared library",
+      "severity": "medium",
+      "likelihood": "low",
+      "mitigations": [
+        "Reuse gc/extconf_base.rb without modification",
+        "Test build on both Linux and macOS",
+        "Verify -fPIC and BUILDING_MODULAR_GC are set",
+        "Check library with file/ldd/otool commands"
+      ]
+    },
+    {
+      "id": "R1.3",
+      "description": "Stubbed functions cause crashes when actually called",
+      "severity": "medium",
+      "likelihood": "high",
+      "mitigations": [
+        "Ensure all stubs return valid values (not random/uninitialized)",
+        "For pointer returns, return valid allocated memory or NULL as appropriate",
+        "For bool returns, return sensible defaults (e.g., gc_enabled returns true)",
+        "Add rb_bug() calls for functions that shouldn't be called yet"
+      ]
+    }
+  ],
+  "notes": [
+    "This phase focuses purely on getting the module to build and load - functionality comes later",
+    "Study gc/mmtk/mmtk.c carefully as it's the best reference for a non-default GC",
+    "The stubbed implementation should be safe but non-functional",
+    "Keep the objspace struct minimal - expand it in phase 2"
+  ]
+}

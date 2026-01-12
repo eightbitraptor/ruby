@@ -1,0 +1,510 @@
+{
+  "phase": {
+    "number": 2,
+    "name": "Objspace Structure & Allocation Metadata",
+    "description": "Define the core data structures for Immix heap management including blocks, lines, metadata arrays, allocation map, and per-ractor allocation caches. Based on Immix-Rust reference implementation.",
+    "success_criteria": [
+      "struct immix_objspace fully defined with all required fields",
+      "Block and line metadata structures are complete",
+      "Allocation map tracks object start addresses",
+      "Per-ractor caches can be allocated, used, and freed",
+      "Memory accounting accurately tracks allocated bytes",
+      "rb_gc_impl_heap_sizes returns valid size classes"
+    ],
+    "dependencies": [
+      "Phase 1 complete (module builds and loads)"
+    ],
+    "estimated_effort": "2-3 days"
+  },
+  "corrections_from_review": [
+    "Block size corrected from 32KB to 64KB per Immix-Rust reference",
+    "Line size corrected from 128B to 256B per Immix-Rust reference",
+    "Block states simplified from 3 to 2 (Usable/Full)",
+    "Line states expanded from 3 to 5 (Free/Live/FreshAlloc/ConservLive/PrevLive)",
+    "Added allocation map requirement for tracking object starts",
+    "Added size-before-object storage pattern from MMTk"
+  ],
+  "tasks": [
+    {
+      "id": "2.1",
+      "title": "Define block structure and constants",
+      "description": "Create the immix_block structure representing a 64KB memory block with its metadata. Constants from Immix-Rust: LOG_BYTES_IN_BLOCK=16, BYTES_IN_BLOCK=65536.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.h",
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Block size is 64KB (65536 bytes) - CORRECTED from original plan",
+        "Each block contains 256 lines of 256 bytes each",
+        "Block states simplified to Usable (has free lines) and Full (no free lines)",
+        "Blocks should be aligned to IMMIX_BLOCK_SIZE for efficient address calculations",
+        "Use mmap with alignment for block allocation"
+      ],
+      "data_structures": [
+        {
+          "name": "constants",
+          "fields": [
+            "IMMIX_LOG_BYTES_IN_LINE = 8",
+            "IMMIX_BYTES_IN_LINE = 256",
+            "IMMIX_LOG_BYTES_IN_BLOCK = 16",
+            "IMMIX_BYTES_IN_BLOCK = 65536",
+            "IMMIX_LINES_IN_BLOCK = 256"
+          ]
+        },
+        {
+          "name": "enum immix_block_state",
+          "fields": ["IMMIX_BLOCK_USABLE", "IMMIX_BLOCK_FULL"]
+        },
+        {
+          "name": "struct immix_block",
+          "fields": [
+            "uintptr_t start - start address of 64KB block memory",
+            "enum immix_block_state state",
+            "uint8_t line_marks[IMMIX_LINES_IN_BLOCK] - per-line mark state (256 bytes)",
+            "struct immix_block *next - for block lists"
+          ]
+        }
+      ],
+      "acceptance_criteria": [
+        "Block structure compiles without errors",
+        "Constants match Immix-Rust reference exactly",
+        "Block state enum has only Usable/Full states"
+      ]
+    },
+    {
+      "id": "2.2",
+      "title": "Define line metadata and mark states",
+      "description": "Create the per-line metadata representation with all 5 states from Immix-Rust.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.h"
+      ],
+      "implementation_notes": [
+        "Line marks are stored as bytes (not bits) for atomic access without locks",
+        "Five states required - CORRECTED from original 3 states",
+        "Line size is 256 bytes (not 128) - matches Immix-Rust",
+        "Each block has 256 lines, so line_marks array is 256 bytes per block",
+        "Total metadata overhead is ~0.4% (256 bytes per 64KB)"
+      ],
+      "data_structures": [
+        {
+          "name": "enum immix_line_mark",
+          "fields": [
+            "IMMIX_LINE_FREE = 0 - Line is available for allocation",
+            "IMMIX_LINE_LIVE = 1 - Line contains start of live object",
+            "IMMIX_LINE_FRESH_ALLOC = 2 - Line freshly allocated this cycle",
+            "IMMIX_LINE_CONSERV_LIVE = 3 - Conservatively live (follows Live line)",
+            "IMMIX_LINE_PREV_LIVE = 4 - Previous cycle liveness (for generational)"
+          ]
+        }
+      ],
+      "acceptance_criteria": [
+        "All 5 line states from Immix-Rust defined",
+        "Line marks can be read/written atomically",
+        "Metadata overhead approximately 0.4%"
+      ]
+    },
+    {
+      "id": "2.2b",
+      "title": "Implement allocation map for object tracking",
+      "description": "Create allocation map to track which addresses contain object starts. Essential for pointer validation and heap walking.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.h",
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Immix-Rust uses separate alloc_map and trace_map",
+        "alloc_map: set when object allocated, used for pointer validation",
+        "One bit per possible object slot (8-byte aligned)",
+        "For 64KB block with 8-byte slots: 8192 bits = 1KB per block",
+        "Or use byte map like line marks for simplicity"
+      ],
+      "acceptance_criteria": [
+        "Can mark address as containing object start",
+        "Can query if address is valid object",
+        "Map is cleared appropriately during sweep"
+      ]
+    },
+    {
+      "id": "2.3",
+      "title": "Define histogram structures for evacuation decisions",
+      "description": "Create histogram data structures used to track fragmentation and make evacuation decisions.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.h",
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Mark histogram: counts live bytes per fragmentation bucket",
+        "Available histogram: counts available bytes per fragmentation bucket",
+        "Buckets are based on hole count (0-255 holes possible per block)",
+        "Histograms are rebuilt after each sweep phase",
+        "Used to select evacuation candidates by ranking blocks"
+      ],
+      "data_structures": [
+        {
+          "name": "struct immix_histogram",
+          "fields": [
+            "size_t buckets[IMMIX_HISTOGRAM_BUCKETS] - byte counts per bucket",
+            "size_t total_bytes - sum of all buckets"
+          ]
+        }
+      ],
+      "acceptance_criteria": [
+        "Histogram structure can track fragmentation distribution",
+        "Bucket count is sufficient for evacuation decisions",
+        "Histogram can be efficiently updated during sweep"
+      ]
+    },
+    {
+      "id": "2.4",
+      "title": "Define per-ractor allocation cache",
+      "description": "Create the thread-local allocation cache structure used by each ractor for fast bump-pointer allocation.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.h",
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/mmtk/mmtk.c (struct MMTk_ractor_cache)",
+        "gc/default/default.c (rb_ractor_newobj_cache_t)"
+      ],
+      "implementation_notes": [
+        "Each ractor gets its own allocation cache to avoid contention",
+        "Cache contains: current block, cursor (allocation pointer), limit (end of current hole)",
+        "When cursor reaches limit, scan for next hole or request new block",
+        "Cache tracks allocated object count for incremental marking triggers",
+        "Use ccan_list_node for linking caches together for iteration during GC"
+      ],
+      "data_structures": [
+        {
+          "name": "struct immix_ractor_cache",
+          "fields": [
+            "struct ccan_list_node list_node - for cache list",
+            "struct immix_block *current_block - block being allocated from",
+            "char *cursor - next allocation address",
+            "char *limit - end of current hole",
+            "size_t allocated_count - objects allocated since last GC",
+            "size_t allocated_bytes - bytes allocated since last GC",
+            "uint8_t current_line - line index of cursor position"
+          ]
+        }
+      ],
+      "acceptance_criteria": [
+        "Cache structure supports bump-pointer allocation",
+        "Caches can be linked in a list for GC iteration",
+        "Cache allocation/deallocation doesn't leak memory"
+      ]
+    },
+    {
+      "id": "2.5",
+      "title": "Expand struct immix_objspace with all required fields",
+      "description": "Expand the objspace structure to include all global GC state: block pools, histograms, statistics, and Ruby integration fields.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/mmtk/mmtk.c (struct objspace)"
+      ],
+      "implementation_notes": [
+        "Block pools: free blocks, recyclable blocks (per size class if needed)",
+        "Histograms for evacuation decisions",
+        "Statistics: gc_count, total_time, allocated objects, etc.",
+        "Ruby integration: finalizer table, postponed job handle, VM context",
+        "Synchronization: mutex for block pool, condition variables for STW",
+        "Configuration: gc_enabled, gc_stress, measure_time flags"
+      ],
+      "data_structures": [
+        {
+          "name": "struct immix_objspace",
+          "fields": [
+            "// Block management",
+            "struct immix_block *free_blocks - list of empty blocks",
+            "struct immix_block *recyclable_blocks - list of partially used blocks",
+            "size_t total_blocks - total blocks allocated from OS",
+            "size_t free_block_count",
+            "size_t recyclable_block_count",
+            "",
+            "// Large object space",
+            "size_t los_bytes - bytes in large objects",
+            "size_t los_count - number of large objects",
+            "",
+            "// Histograms",
+            "struct immix_histogram mark_histogram",
+            "struct immix_histogram available_histogram",
+            "",
+            "// Ractor caches",
+            "struct ccan_list_head ractor_caches",
+            "unsigned long ractor_cache_count",
+            "",
+            "// GC state",
+            "bool gc_enabled",
+            "bool gc_stress",
+            "bool during_gc",
+            "size_t gc_count",
+            "",
+            "// Statistics",
+            "bool measure_gc_time",
+            "unsigned long long total_gc_time",
+            "size_t total_allocated_objects",
+            "size_t total_freed_objects",
+            "",
+            "// Evacuation state",
+            "bool evacuation_enabled",
+            "size_t evacuation_headroom",
+            "size_t evacuated_bytes",
+            "",
+            "// Finalizers",
+            "st_table *finalizer_table",
+            "struct immix_final_job *finalizer_jobs",
+            "rb_postponed_job_handle_t finalizer_postponed_job",
+            "",
+            "// Synchronization",
+            "pthread_mutex_t mutex",
+            "pthread_cond_t cond_world_stopped",
+            "pthread_cond_t cond_world_started",
+            "rb_atomic_t mutator_blocking_count",
+            "bool world_stopped",
+            "",
+            "// VM integration",
+            "struct rb_gc_vm_context vm_context"
+          ]
+        }
+      ],
+      "acceptance_criteria": [
+        "All required fields are present",
+        "Structure can be allocated and initialized",
+        "No memory leaks on objspace_free"
+      ]
+    },
+    {
+      "id": "2.6",
+      "title": "Implement rb_gc_impl_objspace_alloc and rb_gc_impl_objspace_init",
+      "description": "Replace stubbed implementations with real allocation and initialization of the Immix objspace.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "objspace_alloc: malloc the objspace struct, return pointer",
+        "objspace_init: initialize all fields to safe defaults",
+        "Initialize mutex and condition variables",
+        "Initialize ccan_list_head for ractor caches",
+        "Set gc_enabled = true, during_gc = false",
+        "Allocate initial pool of blocks (configurable size)"
+      ],
+      "acceptance_criteria": [
+        "Objspace allocates successfully",
+        "All fields initialized to valid values",
+        "Mutex and condvars are properly initialized",
+        "No crashes on repeated alloc/init cycles"
+      ]
+    },
+    {
+      "id": "2.7",
+      "title": "Implement rb_gc_impl_objspace_free",
+      "description": "Implement proper cleanup and deallocation of the objspace and all its resources.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Free all blocks (free and recyclable lists)",
+        "Destroy mutex and condition variables",
+        "Free finalizer table if present",
+        "Free any pending finalizer jobs",
+        "Free the objspace struct itself",
+        "Handle partial initialization (some fields may be NULL)"
+      ],
+      "acceptance_criteria": [
+        "No memory leaks (verify with valgrind)",
+        "No double-frees",
+        "Safe to call on partially initialized objspace"
+      ]
+    },
+    {
+      "id": "2.8",
+      "title": "Implement rb_gc_impl_ractor_cache_alloc and rb_gc_impl_ractor_cache_free",
+      "description": "Implement allocation and deallocation of per-ractor caches.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Allocate cache struct and initialize fields",
+        "Link cache into objspace's ractor_caches list",
+        "Increment ractor_cache_count",
+        "On free: unlink from list, return current block to pool, free struct",
+        "Decrement ractor_cache_count",
+        "Handle case where cache has no current block"
+      ],
+      "acceptance_criteria": [
+        "Caches can be allocated and freed without leaks",
+        "Cache list is maintained correctly",
+        "Count is accurate",
+        "Current block is returned to pool on free"
+      ]
+    },
+    {
+      "id": "2.9",
+      "title": "Implement block allocation from OS",
+      "description": "Create helper functions to allocate and free 32KB blocks from the operating system.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Use mmap on Unix, VirtualAlloc on Windows for aligned allocation",
+        "Blocks must be aligned to IMMIX_BLOCK_SIZE for efficient address-to-block lookup",
+        "Consider allocating blocks in larger chunks (e.g., 1MB) and subdividing",
+        "Track total_blocks count",
+        "Initialize block metadata when allocating"
+      ],
+      "functions_to_implement": [
+        "static struct immix_block *immix_alloc_block(struct immix_objspace *objspace)",
+        "static void immix_free_block(struct immix_objspace *objspace, struct immix_block *block)",
+        "static void immix_init_block(struct immix_block *block)"
+      ],
+      "acceptance_criteria": [
+        "Blocks are properly aligned",
+        "Block metadata is initialized",
+        "Memory is returned to OS on free (or pooled)",
+        "Works on Linux and macOS"
+      ]
+    },
+    {
+      "id": "2.10",
+      "title": "Implement block pool management",
+      "description": "Create functions to manage the free and recyclable block pools.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "get_free_block: return block from free list, or allocate new",
+        "get_recyclable_block: return block from recyclable list with best hole ratio",
+        "return_block: add block to appropriate list based on state",
+        "Prefer recyclable blocks over free blocks (as per Immix paper)",
+        "Lock mutex when modifying pools"
+      ],
+      "functions_to_implement": [
+        "static struct immix_block *immix_get_block(struct immix_objspace *objspace)",
+        "static void immix_return_block(struct immix_objspace *objspace, struct immix_block *block)"
+      ],
+      "acceptance_criteria": [
+        "Blocks can be obtained and returned",
+        "Pool counts remain accurate",
+        "Recyclable blocks are preferred when available",
+        "Thread-safe with proper locking"
+      ]
+    },
+    {
+      "id": "2.11",
+      "title": "Implement address-to-block lookup",
+      "description": "Create efficient function to find the block containing a given address.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "With aligned blocks, can compute block start by masking address",
+        "block_start = address & ~(IMMIX_BLOCK_SIZE - 1)",
+        "Need to verify address is actually in an Immix block (not LOS or stack)",
+        "Consider maintaining a block bitmap or hash table for validation"
+      ],
+      "functions_to_implement": [
+        "static struct immix_block *immix_block_for_address(struct immix_objspace *objspace, void *addr)",
+        "static size_t immix_line_for_address(void *addr)"
+      ],
+      "acceptance_criteria": [
+        "Lookup is O(1) for valid addresses",
+        "Returns NULL for addresses not in Immix heap",
+        "Line calculation is correct"
+      ]
+    },
+    {
+      "id": "2.12",
+      "title": "Implement rb_gc_impl_heap_sizes",
+      "description": "Return the valid allocation size classes for Immix.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Immix doesn't have fixed size classes like default GC",
+        "Return sizes based on line boundaries and large object threshold",
+        "Consider: 40, 80, 160, 320, 640, LARGE_OBJECT_THRESHOLD",
+        "Must match what rb_gc_impl_heap_id_for_size returns"
+      ],
+      "acceptance_criteria": [
+        "Returns valid size array",
+        "Sizes are consistent with allocation behavior",
+        "Array is properly null-terminated"
+      ]
+    },
+    {
+      "id": "2.13",
+      "title": "Update rb_gc_impl_pointer_to_heap_p",
+      "description": "Implement proper heap membership check using block structures.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Check if pointer falls within any allocated block",
+        "Also check LOS if implemented",
+        "Use block lookup helper from task 2.11",
+        "Must be fast as it's called frequently"
+      ],
+      "acceptance_criteria": [
+        "Returns true for valid heap objects",
+        "Returns false for stack/static/malloc'd memory",
+        "Performance is acceptable"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R2.1",
+      "description": "Block alignment requirements may not be met on all platforms",
+      "severity": "medium",
+      "likelihood": "low",
+      "mitigations": [
+        "Use posix_memalign or aligned_alloc where available",
+        "Fallback to mmap with MAP_ALIGNED if supported",
+        "Document platform requirements"
+      ]
+    },
+    {
+      "id": "R2.2",
+      "description": "Memory overhead from metadata may be higher than expected",
+      "severity": "low",
+      "likelihood": "low",
+      "mitigations": [
+        "Calculate overhead precisely: 256 bytes line marks + struct per 32KB",
+        "Compare to default GC overhead",
+        "Document overhead in stats output"
+      ]
+    },
+    {
+      "id": "R2.3",
+      "description": "Ractor cache list may have race conditions",
+      "severity": "high",
+      "likelihood": "medium",
+      "mitigations": [
+        "Always hold mutex when modifying list",
+        "Use memory barriers appropriately",
+        "Add assertions in debug builds"
+      ]
+    }
+  ],
+  "notes": [
+    "This phase establishes all data structures but doesn't implement full allocation yet",
+    "Focus on correctness over performance - optimization comes later",
+    "Test memory accounting by comparing allocated vs reported bytes",
+    "Block alignment is crucial for efficient address-to-block lookup"
+  ]
+}

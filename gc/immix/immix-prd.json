@@ -1,0 +1,142 @@
+{
+  "project": {
+    "name": "Immix GC for Ruby",
+    "description": "Implementation of the Immix mark-region garbage collector as a modular GC plugin for Ruby",
+    "version": "0.1.0",
+    "status": "planning",
+    "documentation": "gc/IMMIX_PLAN.md"
+  },
+  "references": {
+    "paper": {
+      "title": "Immix: A Mark-Region Garbage Collector with Space Efficiency, Fast Collection, and Mutator Performance",
+      "authors": ["Stephen M. Blackburn", "Kathryn S. McKinley"],
+      "venue": "PLDI 2008",
+      "url": "https://www.steveblackburn.org/pubs/papers/immix-pldi-2008.pdf"
+    },
+    "ruby_gc_api": {
+      "implementation_header": "gc/gc_impl.h",
+      "helper_header": "gc/gc.h",
+      "build_config": "gc/extconf_base.rb",
+      "documentation": "gc/README.md"
+    },
+    "reference_implementations": {
+      "default_gc": "gc/default/default.c",
+      "mmtk_gc": "gc/mmtk/mmtk.c"
+    }
+  },
+  "phases": [
+    {
+      "number": 1,
+      "name": "Module Scaffolding & Build Integration",
+      "prd_file": "gc/immix/phase-1-scaffolding-prd.json",
+      "status": "not_started",
+      "estimated_effort": "1-2 days",
+      "summary": "Create the Immix GC plugin skeleton with build system integration"
+    },
+    {
+      "number": 2,
+      "name": "Objspace Structure & Allocation Metadata",
+      "prd_file": "gc/immix/phase-2-objspace-metadata-prd.json",
+      "status": "not_started",
+      "estimated_effort": "2-3 days",
+      "summary": "Define core data structures: blocks, lines, histograms, ractor caches"
+    },
+    {
+      "number": 3,
+      "name": "Allocation Fast Paths & Large Object Handling",
+      "prd_file": "gc/immix/phase-3-allocation-prd.json",
+      "status": "not_started",
+      "estimated_effort": "3-4 days",
+      "summary": "Implement bump-pointer allocation with hole reuse and LOS"
+    },
+    {
+      "number": 4,
+      "name": "GC Cycle: Marking, Sweeping, Opportunistic Evacuation",
+      "prd_file": "gc/immix/phase-4-gc-cycle-prd.json",
+      "status": "not_started",
+      "estimated_effort": "4-5 days",
+      "summary": "Implement complete mark-region collection with optional defragmentation"
+    },
+    {
+      "number": 5,
+      "name": "Runtime Integration",
+      "prd_file": "gc/immix/phase-5-runtime-integration-prd.json",
+      "status": "not_started",
+      "estimated_effort": "3-4 days",
+      "summary": "Integrate weak refs, finalizers, write barriers, fork handling"
+    },
+    {
+      "number": 6,
+      "name": "Diagnostics, Configuration, and Telemetry",
+      "prd_file": "gc/immix/phase-6-diagnostics-config-prd.json",
+      "status": "not_started",
+      "estimated_effort": "2-3 days",
+      "summary": "Expose statistics, configuration, and debugging tools"
+    },
+    {
+      "number": 7,
+      "name": "Validation & Stress Testing",
+      "prd_file": "gc/immix/phase-7-validation-testing-prd.json",
+      "status": "not_started",
+      "estimated_effort": "2-3 days",
+      "summary": "Comprehensive testing, CI integration, and documentation"
+    }
+  ],
+  "total_estimated_effort": "17-24 days",
+  "global_risks": [
+    {
+      "id": "GR1",
+      "description": "Opportunistic evacuation conflicts with Ruby's existing compactor, causing crashes or double-moves",
+      "severity": "high",
+      "mitigations": [
+        "Respect rb_gc_impl_register_pinning_obj",
+        "Check FL_FINALIZE and FL_EXIVAR before moving",
+        "Allow disabling evacuation via config"
+      ]
+    },
+    {
+      "id": "GR2",
+      "description": "Concurrent metadata access (line maps, histograms) causes contention under many ractors",
+      "severity": "high",
+      "mitigations": [
+        "Use thread-local accumulation with merge phases",
+        "Store line marks as bytes for atomic access",
+        "Profile contention with debug counters"
+      ]
+    },
+    {
+      "id": "GR3",
+      "description": "Large object space accounting diverges from Ruby expectations",
+      "severity": "medium",
+      "mitigations": [
+        "Always call rb_gc_impl_adjust_memory_usage",
+        "Expose separate LOS statistics",
+        "Add regression tests for LOS behavior"
+      ]
+    },
+    {
+      "id": "GR4",
+      "description": "Statistics incompatibility breaks tooling expecting default GC output",
+      "severity": "low",
+      "mitigations": [
+        "Mirror default GC key names where applicable",
+        "Return nil for unsupported keys",
+        "Document Immix-specific keys"
+      ]
+    }
+  ],
+  "success_criteria": [
+    "Immix module builds and loads via RUBY_GC_LIBRARY=immix",
+    "All Ruby test suites pass with Immix",
+    "Performance within 2x of default GC for common operations",
+    "Memory efficiency comparable to or better than default GC",
+    "No memory leaks or corruption",
+    "Production-ready stability for opt-in use"
+  ],
+  "build_instructions": {
+    "configure": "./configure --with-modular-gc=/path/to/gc/libs",
+    "build_ruby": "make",
+    "build_immix": "make install-modular-gc MODULAR_GC=immix",
+    "run_with_immix": "RUBY_GC_LIBRARY=immix ruby script.rb"
+  }
+}

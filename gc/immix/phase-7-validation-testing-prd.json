@@ -1,0 +1,413 @@
+{
+  "phase": {
+    "number": 7,
+    "name": "Validation & Stress Testing",
+    "description": "Add comprehensive automated tests, stress tests, CI integration, and documentation to ensure Immix GC is correct, stable, and production-ready.",
+    "success_criteria": [
+      "All bootstrap tests pass with RUBY_GC_LIBRARY=immix",
+      "Stress tests complete without crashes or memory corruption",
+      "CI job provides useful pass/fail feedback",
+      "No memory leaks detected by Valgrind/ASAN",
+      "Performance is within acceptable range of default GC",
+      "Documentation enables developers to test and debug Immix"
+    ],
+    "dependencies": [
+      "Phase 6 complete (diagnostics and config working)"
+    ],
+    "estimated_effort": "2-3 days"
+  },
+  "tasks": [
+    {
+      "id": "7.1",
+      "title": "Create bootstrap test suite for Immix",
+      "description": "Create focused tests in bootstraptest/ that verify core functionality with Immix.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_bootstrap.rb"
+      ],
+      "implementation_notes": [
+        "Test basic object allocation and GC",
+        "Test various object types: String, Array, Hash, etc.",
+        "Test GC.start, GC.stat, GC.count",
+        "Test object survival across GC",
+        "Run with: RUBY_GC_LIBRARY=immix ruby test_bootstrap.rb"
+      ],
+      "tests_to_include": [
+        "Allocate and collect simple objects",
+        "Allocate large objects (LOS)",
+        "Create deep object graphs",
+        "Verify GC.count increases",
+        "Verify GC.stat returns expected keys"
+      ],
+      "acceptance_criteria": [
+        "All tests pass",
+        "Tests are reliable (no flaky failures)"
+      ]
+    },
+    {
+      "id": "7.2",
+      "title": "Create ractor tests",
+      "description": "Test Immix behavior with multiple ractors.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_ractors.rb"
+      ],
+      "implementation_notes": [
+        "Test allocation in multiple ractors",
+        "Test GC with active ractors",
+        "Test ractor creation/destruction during GC",
+        "Verify no races or deadlocks"
+      ],
+      "tests_to_include": [
+        "Allocate objects in parallel ractors",
+        "Trigger GC from different ractors",
+        "Create and destroy ractors rapidly",
+        "Pass objects between ractors"
+      ],
+      "acceptance_criteria": [
+        "Ractor tests pass consistently",
+        "No deadlocks or races"
+      ]
+    },
+    {
+      "id": "7.3",
+      "title": "Create fiber tests",
+      "description": "Test Immix behavior with fibers.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_fibers.rb"
+      ],
+      "implementation_notes": [
+        "Test allocation in fibers",
+        "Test GC with suspended fibers",
+        "Test fiber stack scanning"
+      ],
+      "acceptance_criteria": [
+        "Fiber tests pass",
+        "Objects in fibers preserved correctly"
+      ]
+    },
+    {
+      "id": "7.4",
+      "title": "Create compaction/evacuation tests",
+      "description": "Test Immix's opportunistic evacuation.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_evacuation.rb"
+      ],
+      "implementation_notes": [
+        "Create fragmented heap state",
+        "Trigger GC with evacuation enabled",
+        "Verify objects moved correctly",
+        "Verify references updated",
+        "Test pinned objects stay in place"
+      ],
+      "tests_to_include": [
+        "Allocate/free to create fragmentation",
+        "Verify fragmentation stats decrease after evacuation",
+        "Test callback objects (C extension) are pinned",
+        "Test ObjectSpace.each_object after evacuation"
+      ],
+      "acceptance_criteria": [
+        "Evacuation reduces fragmentation",
+        "No dangling pointers after evacuation"
+      ]
+    },
+    {
+      "id": "7.5",
+      "title": "Create memory pressure stress test",
+      "description": "Test Immix under memory pressure.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_stress.rb"
+      ],
+      "implementation_notes": [
+        "Allocate until memory pressure",
+        "Mix of small, medium, large objects",
+        "Run for extended duration",
+        "Verify no crashes or leaks"
+      ],
+      "tests_to_include": [
+        "Rapid allocation/deallocation cycles",
+        "Allocation storm (many objects quickly)",
+        "Long-running allocation (hours)",
+        "Mixed workload (various object sizes)"
+      ],
+      "acceptance_criteria": [
+        "Stress tests complete without crashes",
+        "Memory usage stays bounded",
+        "No memory leaks"
+      ]
+    },
+    {
+      "id": "7.6",
+      "title": "Add Valgrind/ASAN test configuration",
+      "description": "Set up memory error detection for Immix testing.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/run_with_valgrind.sh",
+        "gc/immix/test/run_with_asan.sh"
+      ],
+      "implementation_notes": [
+        "Valgrind script for memory leak detection",
+        "ASAN script for memory error detection",
+        "Suppression files for known Ruby issues",
+        "Documentation for running these tools"
+      ],
+      "acceptance_criteria": [
+        "Scripts work on Linux",
+        "No new memory errors introduced by Immix",
+        "Suppressions don't hide Immix bugs"
+      ]
+    },
+    {
+      "id": "7.7",
+      "title": "Create performance benchmark suite",
+      "description": "Benchmark Immix against default GC.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/bench_suite.rb"
+      ],
+      "implementation_notes": [
+        "Allocation throughput benchmark",
+        "GC pause time benchmark",
+        "Memory efficiency benchmark",
+        "Compare against default GC baseline",
+        "Output results in machine-readable format"
+      ],
+      "benchmarks_to_include": [
+        "Small object allocation rate",
+        "Large object allocation rate",
+        "GC pause distribution",
+        "Memory fragmentation over time",
+        "Real workload simulation"
+      ],
+      "acceptance_criteria": [
+        "Benchmarks produce consistent results",
+        "Immix within 2x of default for common operations",
+        "Results documented for comparison"
+      ]
+    },
+    {
+      "id": "7.8",
+      "title": "Add CI job for Immix",
+      "description": "Set up continuous integration testing for Immix.",
+      "type": "infrastructure",
+      "files_to_modify": [
+        ".github/workflows/gc-immix.yml (or similar)"
+      ],
+      "implementation_notes": [
+        "Build Ruby with modular GC support",
+        "Build Immix module",
+        "Run Immix test suite",
+        "Run subset of Ruby test suite with Immix",
+        "Report pass/fail and any crashes"
+      ],
+      "ci_steps": [
+        "Configure Ruby with --with-modular-gc",
+        "Build Ruby",
+        "Build Immix module",
+        "Run gc/immix/test/*.rb",
+        "Run test/runner.rb with RUBY_GC_LIBRARY=immix (subset)",
+        "Upload test results"
+      ],
+      "acceptance_criteria": [
+        "CI job runs on PRs touching gc/immix",
+        "Failures are clear and actionable",
+        "Job completes in reasonable time (<30 min)"
+      ]
+    },
+    {
+      "id": "7.9",
+      "title": "Test compatibility with Ruby gems",
+      "description": "Test Immix with common Ruby gems.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_gems.rb"
+      ],
+      "implementation_notes": [
+        "Test gems with C extensions",
+        "Test gems using finalizers",
+        "Test gems using weak references",
+        "Document any incompatibilities"
+      ],
+      "gems_to_test": [
+        "json (C extension)",
+        "msgpack (C extension)",
+        "nokogiri (C extension, finalizers)",
+        "weakref (stdlib weak refs)"
+      ],
+      "acceptance_criteria": [
+        "Common gems work correctly",
+        "Incompatibilities documented"
+      ]
+    },
+    {
+      "id": "7.10",
+      "title": "Test fork behavior",
+      "description": "Test Immix across process forks.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_fork.rb"
+      ],
+      "implementation_notes": [
+        "Fork after allocating objects",
+        "GC in parent and child",
+        "Verify no shared state corruption",
+        "Test multiple fork generations"
+      ],
+      "acceptance_criteria": [
+        "Fork tests pass on Unix",
+        "Parent and child GC independently",
+        "No crashes or corruption"
+      ]
+    },
+    {
+      "id": "7.11",
+      "title": "Create test documentation",
+      "description": "Document how to run and debug Immix tests.",
+      "type": "documentation",
+      "files_to_create": [
+        "gc/immix/test/README.md"
+      ],
+      "implementation_notes": [
+        "Prerequisites for running tests",
+        "How to run individual tests",
+        "How to run with debugging enabled",
+        "How to interpret test failures",
+        "How to add new tests"
+      ],
+      "acceptance_criteria": [
+        "New developers can run tests following docs",
+        "Debugging procedures documented"
+      ]
+    },
+    {
+      "id": "7.12",
+      "title": "Add regression test for each bug fixed",
+      "description": "Create tests that prevent reintroduction of fixed bugs.",
+      "type": "testing",
+      "implementation_notes": [
+        "When bugs are found and fixed, add regression test",
+        "Document what bug each test covers",
+        "Keep regression tests fast"
+      ],
+      "acceptance_criteria": [
+        "Process established for adding regression tests",
+        "Existing bugs have regression tests"
+      ]
+    },
+    {
+      "id": "7.13",
+      "title": "Compare GC.stat output",
+      "description": "Test that Immix GC.stat output is compatible with default GC.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_stat_compatibility.rb"
+      ],
+      "implementation_notes": [
+        "Run same workload with both GCs",
+        "Compare GC.stat output keys",
+        "Verify shared keys have similar semantics",
+        "Document Immix-specific keys"
+      ],
+      "acceptance_criteria": [
+        "Common keys present in both GCs",
+        "Values are in expected ranges",
+        "Differences documented"
+      ]
+    },
+    {
+      "id": "7.14",
+      "title": "Test error handling",
+      "description": "Test Immix behavior under error conditions.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_errors.rb"
+      ],
+      "implementation_notes": [
+        "Test out-of-memory handling",
+        "Test allocation failure recovery",
+        "Test invalid API usage",
+        "Verify graceful degradation"
+      ],
+      "acceptance_criteria": [
+        "Errors handled gracefully",
+        "No crashes on error conditions",
+        "Useful error messages"
+      ]
+    },
+    {
+      "id": "7.15",
+      "title": "Create manual testing checklist",
+      "description": "Document manual testing procedures for releases.",
+      "type": "documentation",
+      "files_to_modify": [
+        "gc/immix/test/README.md"
+      ],
+      "implementation_notes": [
+        "Checklist of manual tests before release",
+        "Include real-world application testing",
+        "Include performance verification",
+        "Include memory leak verification"
+      ],
+      "acceptance_criteria": [
+        "Checklist is comprehensive",
+        "Checklist can be completed in reasonable time"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R7.1",
+      "description": "Insufficient test coverage allows regressions to slip through",
+      "severity": "high",
+      "likelihood": "medium",
+      "mitigations": [
+        "Require tests for all new features",
+        "Run full test suite on CI",
+        "Add regression tests for each bug",
+        "Use code coverage tools"
+      ]
+    },
+    {
+      "id": "R7.2",
+      "description": "Stress tests are too slow for regular CI",
+      "severity": "medium",
+      "likelihood": "high",
+      "mitigations": [
+        "Run quick versions on every PR",
+        "Run full stress tests nightly",
+        "Parameterize test duration via env vars"
+      ]
+    },
+    {
+      "id": "R7.3",
+      "description": "Tests may be flaky due to timing or randomness",
+      "severity": "medium",
+      "likelihood": "medium",
+      "mitigations": [
+        "Run tests multiple times to check for flakiness",
+        "Use deterministic seeds where possible",
+        "Quarantine flaky tests until fixed"
+      ]
+    },
+    {
+      "id": "R7.4",
+      "description": "CI environment differs from production",
+      "severity": "low",
+      "likelihood": "medium",
+      "mitigations": [
+        "Test on multiple platforms",
+        "Document known platform differences",
+        "Encourage manual testing on target platforms"
+      ]
+    }
+  ],
+  "notes": [
+    "Testing is critical - take time to build comprehensive coverage",
+    "Balance automated and manual testing",
+    "Keep CI fast to encourage running tests",
+    "Document test failures clearly for debugging"
+  ]
+}

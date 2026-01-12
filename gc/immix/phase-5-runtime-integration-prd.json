@@ -1,0 +1,482 @@
+{
+  "phase": {
+    "number": 5,
+    "name": "Runtime Integration (Weak Refs, Finalizers, Write Barriers, Forking)",
+    "description": "Integrate Immix with Ruby's runtime features including weak references, finalizers, write barriers for remembered sets, ractor lifecycle, and fork handling.",
+    "success_criteria": [
+      "Weak references are cleared when referents die",
+      "Finalizers run correctly when objects are collected",
+      "Write barriers maintain GC invariants",
+      "Fork doesn't corrupt GC state",
+      "Ractor creation/destruction handled correctly",
+      "ObjectSpace.each_object works"
+    ],
+    "dependencies": [
+      "Phase 4 complete (GC cycle working)"
+    ],
+    "estimated_effort": "3-4 days"
+  },
+  "tasks": [
+    {
+      "id": "5.1",
+      "title": "Implement rb_gc_impl_declare_weak_references",
+      "description": "Register an object as containing weak references that need special handling.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/mmtk/mmtk.c (mmtk_declare_weak_references)"
+      ],
+      "implementation_notes": [
+        "Called during marking when object has RUBY_FL_WEAK_REFERENCE flag",
+        "Add object to weak reference tracking list",
+        "These objects need post-processing after marking completes",
+        "Their referents may not be marked yet"
+      ],
+      "acceptance_criteria": [
+        "Weak reference objects tracked",
+        "No crashes on weak ref registration"
+      ]
+    },
+    {
+      "id": "5.2",
+      "title": "Implement rb_gc_impl_handle_weak_references_alive_p",
+      "description": "Check if a weak reference's referent is still alive.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Called during weak reference processing",
+        "Check if the referent object is marked",
+        "Return true if alive, false if dead"
+      ],
+      "acceptance_criteria": [
+        "Correctly identifies live referents",
+        "Correctly identifies dead referents"
+      ]
+    },
+    {
+      "id": "5.3",
+      "title": "Implement weak reference processing",
+      "description": "After marking, process all weak references and clear dead referents.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Iterate over registered weak reference objects",
+        "Call rb_gc_handle_weak_references for each",
+        "Update references for moved objects (if evacuation)",
+        "Clear weak references to dead objects"
+      ],
+      "functions_to_implement": [
+        "static void immix_process_weak_references(struct immix_objspace *objspace)"
+      ],
+      "acceptance_criteria": [
+        "Dead referents cleared",
+        "Live referents preserved",
+        "Moved referents updated"
+      ]
+    },
+    {
+      "id": "5.4",
+      "title": "Implement finalizer table management",
+      "description": "Maintain the table mapping objects to their finalizers.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/mmtk/mmtk.c (finalizer_table handling)"
+      ],
+      "implementation_notes": [
+        "Use st_table to map object -> finalizer array",
+        "Finalizer arrays contain callable finalizer procs",
+        "Table entries must be marked during GC (keep finalizers alive)",
+        "Objects with finalizers have RUBY_FL_FINALIZE flag"
+      ],
+      "acceptance_criteria": [
+        "Finalizer table initialized",
+        "Entries properly marked during GC",
+        "No memory leaks"
+      ]
+    },
+    {
+      "id": "5.5",
+      "title": "Implement rb_gc_impl_define_finalizer",
+      "description": "Register a finalizer for an object.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Add entry to finalizer_table: object -> [finalizers]",
+        "Set RUBY_FL_FINALIZE flag on object",
+        "Return the finalizer for chaining"
+      ],
+      "acceptance_criteria": [
+        "Finalizer registered correctly",
+        "Flag set on object",
+        "Multiple finalizers per object supported"
+      ]
+    },
+    {
+      "id": "5.6",
+      "title": "Implement rb_gc_impl_undefine_finalizer",
+      "description": "Remove all finalizers from an object.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Remove entry from finalizer_table",
+        "Clear RUBY_FL_FINALIZE flag"
+      ],
+      "acceptance_criteria": [
+        "Finalizers removed",
+        "Flag cleared"
+      ]
+    },
+    {
+      "id": "5.7",
+      "title": "Implement rb_gc_impl_copy_finalizer",
+      "description": "Copy finalizers from one object to another.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Used when duplicating objects (dup/clone)",
+        "Copy finalizer array from source to destination",
+        "Set flag on destination"
+      ],
+      "acceptance_criteria": [
+        "Finalizers copied correctly",
+        "Original and copy both have finalizers"
+      ]
+    },
+    {
+      "id": "5.8",
+      "title": "Implement finalizer job scheduling",
+      "description": "Schedule finalizers to run after GC completes.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/mmtk/mmtk.c (make_final_job, finalizer_jobs)"
+      ],
+      "implementation_notes": [
+        "When finalized object dies, create finalizer job",
+        "Jobs queued to run outside GC (via rb_postponed_job_trigger)",
+        "Job contains object ID and finalizer array",
+        "Run jobs via rb_gc_run_obj_finalizer"
+      ],
+      "data_structures": [
+        {
+          "name": "struct immix_final_job",
+          "fields": [
+            "struct immix_final_job *next",
+            "enum { IMMIX_FINAL_JOB_DFREE, IMMIX_FINAL_JOB_FINALIZE } kind",
+            "union { dfree: func+data, finalize: finalizer_array }"
+          ]
+        }
+      ],
+      "acceptance_criteria": [
+        "Jobs created for dead finalized objects",
+        "Jobs run after GC",
+        "Finalizers receive correct object ID"
+      ]
+    },
+    {
+      "id": "5.9",
+      "title": "Implement rb_gc_impl_make_zombie",
+      "description": "Convert an object to a zombie for deferred dfree.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Called when T_DATA object with dfree dies",
+        "Queue dfree function to run outside GC",
+        "Object becomes zombie until dfree completes"
+      ],
+      "acceptance_criteria": [
+        "dfree jobs queued correctly",
+        "dfree runs with correct data pointer"
+      ]
+    },
+    {
+      "id": "5.10",
+      "title": "Implement rb_gc_impl_shutdown_call_finalizer",
+      "description": "Run all pending finalizers during Ruby shutdown.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Called during VM shutdown",
+        "Iterate all objects with finalizers",
+        "Run finalizers even for live objects",
+        "Clear finalizer table"
+      ],
+      "acceptance_criteria": [
+        "All finalizers run at shutdown",
+        "No crashes during shutdown"
+      ]
+    },
+    {
+      "id": "5.11",
+      "title": "Implement rb_gc_impl_writebarrier",
+      "description": "Write barrier for reference assignments.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Called when old object references young object (generational)",
+        "For Immix without generations, may be no-op or record dirty blocks",
+        "If implementing sticky-mark generational, remember the reference"
+      ],
+      "acceptance_criteria": [
+        "Barrier doesn't crash",
+        "Appropriate action taken (or no-op if non-generational)"
+      ]
+    },
+    {
+      "id": "5.12",
+      "title": "Implement rb_gc_impl_writebarrier_unprotect",
+      "description": "Mark an object as write-barrier unprotected.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Some objects can't use write barriers (e.g., T_DATA)",
+        "Mark object so GC knows to always scan its references",
+        "Used for objects modified without barrier"
+      ],
+      "acceptance_criteria": [
+        "Unprotected objects properly tracked",
+        "GC scans unprotected objects correctly"
+      ]
+    },
+    {
+      "id": "5.13",
+      "title": "Implement rb_gc_impl_writebarrier_remember",
+      "description": "Explicitly remember an object in the remembered set.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Add object to remembered set for generational GC",
+        "For non-generational Immix, may be no-op"
+      ],
+      "acceptance_criteria": [
+        "Object remembered if generational",
+        "No-op if non-generational"
+      ]
+    },
+    {
+      "id": "5.14",
+      "title": "Implement rb_gc_impl_each_objects",
+      "description": "Iterate over all objects in the heap.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Used by ObjectSpace.each_object",
+        "Iterate all blocks, scan for live objects",
+        "Callback receives object start, data pointer, size",
+        "Must handle objects of varying sizes"
+      ],
+      "acceptance_criteria": [
+        "All live objects visited",
+        "Callback receives correct parameters",
+        "No crashes on large heaps"
+      ]
+    },
+    {
+      "id": "5.15",
+      "title": "Implement rb_gc_impl_each_object",
+      "description": "Simpler iteration over all objects.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Similar to each_objects but simpler callback",
+        "Callback receives just VALUE and data pointer"
+      ],
+      "acceptance_criteria": [
+        "All live objects visited",
+        "Callback invoked correctly"
+      ]
+    },
+    {
+      "id": "5.16",
+      "title": "Implement rb_gc_impl_register_pinning_obj",
+      "description": "Mark an object as pinned (cannot be moved).",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Set pin bit in object header",
+        "Pinned objects skipped during evacuation",
+        "Used for objects with external pointers (JNI, FFI)"
+      ],
+      "acceptance_criteria": [
+        "Pin bit set correctly",
+        "Pinned objects not moved during evacuation"
+      ]
+    },
+    {
+      "id": "5.17",
+      "title": "Implement rb_gc_impl_before_fork",
+      "description": "Prepare GC state before process fork.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Called before fork() in parent",
+        "May need to run GC to clean up",
+        "Acquire locks to prevent concurrent GC during fork"
+      ],
+      "acceptance_criteria": [
+        "Fork doesn't corrupt GC state",
+        "No deadlocks during fork"
+      ]
+    },
+    {
+      "id": "5.18",
+      "title": "Implement rb_gc_impl_after_fork",
+      "description": "Reset GC state after process fork.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Called in child process after fork",
+        "Reset locks and condition variables",
+        "Clear stale ractor caches (only main ractor survives)",
+        "Reset statistics if appropriate"
+      ],
+      "acceptance_criteria": [
+        "Child process GC works correctly",
+        "No stale state from parent",
+        "Locks properly reset"
+      ]
+    },
+    {
+      "id": "5.19",
+      "title": "Implement rb_gc_impl_copy_attributes",
+      "description": "Copy GC-related attributes from one object to another.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Used when duplicating objects",
+        "Copy relevant flags (WB protection, etc.)"
+      ],
+      "acceptance_criteria": [
+        "Attributes copied correctly"
+      ]
+    },
+    {
+      "id": "5.20",
+      "title": "Add weak reference tests",
+      "description": "Test weak reference behavior with Immix.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_weak_refs.rb"
+      ],
+      "implementation_notes": [
+        "Test WeakRef clears when referent collected",
+        "Test WeakMap removes dead keys/values",
+        "Test ObjectSpace::WeakKeyMap"
+      ],
+      "acceptance_criteria": [
+        "Weak references cleared appropriately",
+        "No dangling references"
+      ]
+    },
+    {
+      "id": "5.21",
+      "title": "Add finalizer tests",
+      "description": "Test finalizer behavior with Immix.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_finalizers.rb"
+      ],
+      "implementation_notes": [
+        "Test ObjectSpace.define_finalizer",
+        "Test finalizer runs after object death",
+        "Test multiple finalizers per object",
+        "Test finalizer order"
+      ],
+      "acceptance_criteria": [
+        "Finalizers run correctly",
+        "Correct object IDs passed"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R5.1",
+      "description": "Weak references observe evacuated objects without updated forwarding pointers",
+      "severity": "high",
+      "likelihood": "medium",
+      "mitigations": [
+        "Call rb_gc_update_object_references after evacuation",
+        "Re-walk weak reference tables post-evacuation",
+        "Assert weak refs only store rb_gc_location(obj) results"
+      ]
+    },
+    {
+      "id": "R5.2",
+      "description": "Finalizers run during GC cause reentrancy bugs",
+      "severity": "high",
+      "likelihood": "low",
+      "mitigations": [
+        "Queue finalizers to run outside GC (postponed jobs)",
+        "Never call Ruby code directly during GC",
+        "Clear during_gc before running finalizers"
+      ]
+    },
+    {
+      "id": "R5.3",
+      "description": "Fork without proper lock handling causes deadlocks",
+      "severity": "high",
+      "likelihood": "medium",
+      "mitigations": [
+        "Hold all GC locks in before_fork",
+        "Reset all locks in after_fork (child only)",
+        "Test fork scenarios explicitly"
+      ]
+    },
+    {
+      "id": "R5.4",
+      "description": "Write barrier mismatches break generational invariants",
+      "severity": "medium",
+      "likelihood": "low",
+      "mitigations": [
+        "For initial version, implement as non-generational (no barriers needed)",
+        "Delegate to Ruby's existing barrier helpers",
+        "Add barrier verification in debug mode"
+      ]
+    }
+  ],
+  "notes": [
+    "Many of these can be implemented as pass-throughs to Ruby helpers initially",
+    "Finalizers are complex - study MMTk implementation carefully",
+    "Fork handling is critical for production use",
+    "Test with real applications that use weak refs and finalizers"
+  ]
+}

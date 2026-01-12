@@ -1,0 +1,502 @@
+{
+  "phase": {
+    "number": 4,
+    "name": "GC Cycle: Marking and Sweeping (Mark-Region Only)",
+    "description": "Implement the core Immix mark-region collection WITHOUT evacuation. Evacuation is deferred to Phase 8. Focus on correct marking with conservative line marking, and sweep to Usable/Full states.",
+    "success_criteria": [
+      "GC.start completes without crashes",
+      "Dead objects are correctly identified and reclaimed",
+      "Live objects are preserved across collections",
+      "Block states (Usable/Full) are correctly assigned after sweep",
+      "Conservative line marking: Live + ConservLive on next line",
+      "No dangling pointers or use-after-free bugs"
+    ],
+    "dependencies": [
+      "Phase 3 complete (allocation working)"
+    ],
+    "estimated_effort": "3-4 days"
+  },
+  "corrections_from_review": [
+    "REMOVED opportunistic evacuation from this phase - deferred to Phase 8",
+    "REMOVED histogram building - only needed for evacuation",
+    "Simplified block states to Usable/Full only",
+    "Conservative line marking: mark current line as Live, next line as ConservLive",
+    "Sweep resets non-Live/ConservLive lines to Free"
+  ],
+  "tasks": [
+    {
+      "id": "4.1",
+      "title": "Implement stop-the-world coordination",
+      "description": "Create the mechanism to pause all ractors/threads for garbage collection.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/mmtk/mmtk.c (rb_mmtk_block_for_gc, rb_mmtk_stop_the_world)"
+      ],
+      "implementation_notes": [
+        "Use rb_gc_vm_barrier() to stop all threads",
+        "Set world_stopped flag in objspace",
+        "Signal waiting GC threads via condition variable",
+        "Implement mutator blocking similar to MMTk pattern",
+        "Track mutator_blocking_count for barrier synchronization"
+      ],
+      "functions_to_implement": [
+        "static void immix_stop_the_world(struct immix_objspace *objspace)",
+        "static void immix_resume_mutators(struct immix_objspace *objspace)",
+        "static void immix_block_for_gc(struct immix_objspace *objspace, struct immix_ractor_cache *cache)"
+      ],
+      "acceptance_criteria": [
+        "All mutators pause during GC",
+        "GC completes before mutators resume",
+        "No race conditions or deadlocks",
+        "Condition variables work correctly"
+      ]
+    },
+    {
+      "id": "4.2",
+      "title": "Implement rb_gc_impl_start entry point",
+      "description": "Implement the main GC entry point that orchestrates the collection cycle.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Handle full_mark, immediate_mark, immediate_sweep, compact parameters",
+        "Set during_gc flag",
+        "Fire RUBY_INTERNAL_EVENT_GC_START event",
+        "Initialize VM context for GC worker",
+        "Record GC start time if measuring",
+        "Increment gc_count",
+        "Orchestrate: stop world -> mark -> sweep -> (evacuate) -> resume"
+      ],
+      "acceptance_criteria": [
+        "GC runs to completion",
+        "Parameters affect GC behavior appropriately",
+        "Events fired at correct times",
+        "Timing recorded accurately"
+      ]
+    },
+    {
+      "id": "4.3",
+      "title": "Implement root marking",
+      "description": "Mark all GC roots including VM roots, stack, and global references.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Call rb_gc_mark_roots(objspace, NULL) to mark VM roots",
+        "Call rb_gc_save_machine_context() before marking",
+        "VM context must be set via rb_gc_worker_thread_set_vm_context",
+        "Roots include: stack frames, global variables, C extension roots"
+      ],
+      "functions_to_implement": [
+        "static void immix_mark_roots(struct immix_objspace *objspace)"
+      ],
+      "acceptance_criteria": [
+        "All roots are discovered",
+        "Root marking doesn't crash",
+        "VM context properly managed"
+      ]
+    },
+    {
+      "id": "4.4",
+      "title": "Implement rb_gc_impl_mark",
+      "description": "Mark an object as live and queue it for child traversal.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Check if object is already marked (avoid re-marking)",
+        "Set object's mark bit in header",
+        "Mark the line(s) containing the object",
+        "Add object to mark stack for child traversal",
+        "Handle special cases: immediate values, already marked"
+      ],
+      "acceptance_criteria": [
+        "Objects marked exactly once",
+        "Line marks updated correctly",
+        "Mark stack doesn't overflow"
+      ]
+    },
+    {
+      "id": "4.5",
+      "title": "Implement rb_gc_impl_mark_and_move and rb_gc_impl_mark_and_pin",
+      "description": "Implement marking variants that support compaction.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "mark_and_move: mark object and allow it to be moved during evacuation",
+        "mark_and_pin: mark object and prevent movement",
+        "Pinned objects set a pin bit in header",
+        "These are called by rb_gc_mark_children for reference fields"
+      ],
+      "acceptance_criteria": [
+        "Objects marked correctly",
+        "Pin bit respected during evacuation",
+        "Pointer updates work for mark_and_move"
+      ]
+    },
+    {
+      "id": "4.6",
+      "title": "Implement rb_gc_impl_mark_maybe",
+      "description": "Conservatively mark a potential object reference.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Used for conservative stack scanning",
+        "Verify value looks like valid heap pointer",
+        "If valid, mark the object",
+        "Pin conservatively-found objects (can't update stack)"
+      ],
+      "acceptance_criteria": [
+        "Valid objects are marked",
+        "Invalid values don't crash",
+        "Conservative references are pinned"
+      ]
+    },
+    {
+      "id": "4.7",
+      "title": "Implement object graph traversal",
+      "description": "Traverse the object graph from marked roots, marking all reachable objects.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Use explicit mark stack (not recursion) to avoid stack overflow",
+        "Pop object from stack, call rb_gc_mark_children",
+        "rb_gc_mark_children calls back into rb_gc_impl_mark_* for children",
+        "Continue until mark stack is empty",
+        "Consider mark stack growth/reallocation"
+      ],
+      "functions_to_implement": [
+        "static void immix_mark_phase(struct immix_objspace *objspace)"
+      ],
+      "acceptance_criteria": [
+        "All reachable objects discovered",
+        "No stack overflow on deep graphs",
+        "Terminates correctly"
+      ]
+    },
+    {
+      "id": "4.8",
+      "title": "Implement line mark propagation",
+      "description": "During marking, propagate object marks to line marks for efficient sweeping.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Small objects (< 128B): mark only starting line",
+        "Medium objects: mark all spanned lines",
+        "Use atomic stores for thread-safety if parallel marking",
+        "Consider conservative vs exact line marking based on size class bit"
+      ],
+      "functions_to_implement": [
+        "static void immix_mark_lines_for_object(struct immix_objspace *objspace, VALUE obj)"
+      ],
+      "acceptance_criteria": [
+        "Correct lines marked for each object size",
+        "Thread-safe line marking",
+        "No over-marking of dead lines"
+      ]
+    },
+    {
+      "id": "4.9",
+      "title": "Implement sweep phase",
+      "description": "After marking, scan all blocks to identify free/recyclable/unavailable states.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "For each block: count marked lines, count holes",
+        "Free block: zero marked lines",
+        "Recyclable block: some free lines (>= threshold)",
+        "Unavailable block: too few free lines",
+        "Update block state and move to appropriate list",
+        "Build histograms during sweep"
+      ],
+      "functions_to_implement": [
+        "static void immix_sweep_phase(struct immix_objspace *objspace)",
+        "static void immix_sweep_block(struct immix_objspace *objspace, struct immix_block *block)"
+      ],
+      "acceptance_criteria": [
+        "Block states correctly assigned",
+        "Free blocks reclaimed",
+        "Recyclable blocks available for allocation",
+        "No live objects in free blocks"
+      ]
+    },
+    {
+      "id": "4.10",
+      "title": "Implement histogram building",
+      "description": "Build histograms of live bytes and available space by fragmentation level.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Mark histogram: bytes of live data per hole-count bucket",
+        "Available histogram: bytes available per hole-count bucket",
+        "Buckets indexed by number of holes in block",
+        "Used to select evacuation candidates",
+        "Reset histograms before each sweep"
+      ],
+      "functions_to_implement": [
+        "static void immix_build_histograms(struct immix_objspace *objspace)",
+        "static void immix_update_histogram(struct immix_histogram *hist, struct immix_block *block)"
+      ],
+      "acceptance_criteria": [
+        "Histograms accurately reflect heap state",
+        "Bucket counts are correct",
+        "Total bytes match sum of buckets"
+      ]
+    },
+    {
+      "id": "4.11",
+      "title": "Implement evacuation candidate selection",
+      "description": "Select blocks for evacuation based on fragmentation histograms.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Reserve ~2.5% of heap as evacuation headroom",
+        "Select blocks with highest hole counts first",
+        "Estimate live bytes to copy from mark histogram",
+        "Stop selecting when estimated copy would exceed headroom",
+        "Mark selected blocks as evacuation candidates"
+      ],
+      "functions_to_implement": [
+        "static void immix_select_evacuation_candidates(struct immix_objspace *objspace)"
+      ],
+      "acceptance_criteria": [
+        "Most fragmented blocks selected first",
+        "Headroom budget respected",
+        "Selection completes efficiently"
+      ]
+    },
+    {
+      "id": "4.12",
+      "title": "Implement opportunistic evacuation",
+      "description": "During marking, copy live objects from evacuation candidate blocks.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "When marking object in candidate block, copy it to fresh block",
+        "Use bump allocator for copies (same as regular allocation)",
+        "Set forwarding pointer in original object",
+        "Call rb_gc_move_obj_during_marking to update references",
+        "Honor pin bits - don't move pinned objects",
+        "Track evacuated_bytes for stats"
+      ],
+      "functions_to_implement": [
+        "static VALUE immix_evacuate_object(struct immix_objspace *objspace, VALUE obj)",
+        "static bool immix_should_evacuate(struct immix_objspace *objspace, VALUE obj)"
+      ],
+      "acceptance_criteria": [
+        "Objects copied correctly",
+        "Forwarding pointers set",
+        "References updated via VM helper",
+        "Pinned objects not moved"
+      ]
+    },
+    {
+      "id": "4.13",
+      "title": "Implement rb_gc_impl_location",
+      "description": "Return the current location of an object (may have been moved).",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "If object has forwarding pointer, return forwarded address",
+        "Otherwise return original address",
+        "Used by VM to update references after evacuation"
+      ],
+      "acceptance_criteria": [
+        "Returns correct address for moved objects",
+        "Returns same address for unmoved objects",
+        "Handles special values correctly"
+      ]
+    },
+    {
+      "id": "4.14",
+      "title": "Implement rb_gc_impl_object_moved_p",
+      "description": "Check if an object has been moved during evacuation.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Check forwarded bit in object header",
+        "Return true if object has forwarding pointer"
+      ],
+      "acceptance_criteria": [
+        "Correctly identifies moved objects",
+        "Returns false for unmoved objects"
+      ]
+    },
+    {
+      "id": "4.15",
+      "title": "Implement line mark clearing",
+      "description": "After sweep, clear line marks in preparation for next cycle.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Clear line marks in free and recyclable blocks",
+        "Keep marks in unavailable blocks (still live)",
+        "Or clear all marks at start of next marking phase",
+        "Consider which approach is more efficient"
+      ],
+      "acceptance_criteria": [
+        "Marks cleared appropriately",
+        "Next GC cycle works correctly",
+        "No stale marks causing incorrect behavior"
+      ]
+    },
+    {
+      "id": "4.16",
+      "title": "Implement rb_gc_impl_during_gc_p",
+      "description": "Return whether a GC is currently in progress.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Return objspace->during_gc flag",
+        "Used by VM to prevent nested GC calls"
+      ],
+      "acceptance_criteria": [
+        "Returns true during GC",
+        "Returns false otherwise"
+      ]
+    },
+    {
+      "id": "4.17",
+      "title": "Implement GC triggering heuristics",
+      "description": "Determine when to trigger garbage collection based on allocation pressure.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Trigger when no free/recyclable blocks available",
+        "Consider malloc memory pressure",
+        "Implement rb_gc_impl_gc_enable/disable to control triggering",
+        "GC stress mode triggers on every allocation"
+      ],
+      "acceptance_criteria": [
+        "GC triggered at appropriate times",
+        "Enable/disable controls work",
+        "Stress mode works correctly"
+      ]
+    },
+    {
+      "id": "4.18",
+      "title": "Implement rb_gc_impl_prepare_heap",
+      "description": "Prepare heap for allocation after GC.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Called after GC completes",
+        "Reset allocation caches to use newly available blocks",
+        "Fire RUBY_INTERNAL_EVENT_GC_END_SWEEP event"
+      ],
+      "acceptance_criteria": [
+        "Ractor caches reset correctly",
+        "Allocation works after GC",
+        "Event fired"
+      ]
+    },
+    {
+      "id": "4.19",
+      "title": "Add GC cycle tests",
+      "description": "Create tests that verify GC correctness.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_gc_cycle.rb"
+      ],
+      "implementation_notes": [
+        "Test that GC.start completes",
+        "Test that unreferenced objects are collected",
+        "Test that referenced objects survive",
+        "Test object graph preservation",
+        "Test evacuation reduces fragmentation"
+      ],
+      "acceptance_criteria": [
+        "All correctness tests pass",
+        "No memory leaks",
+        "No dangling pointers"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R4.1",
+      "description": "Evacuation over-copies, exhausting headroom and causing cascading GC cycles",
+      "severity": "high",
+      "likelihood": "medium",
+      "mitigations": [
+        "Conservative headroom budget (~2.5%)",
+        "Expose tunables for headroom and thresholds",
+        "Log evacuation decisions under debug mode",
+        "Fall back to mark-region (no evacuation) if budget exceeded"
+      ]
+    },
+    {
+      "id": "R4.2",
+      "description": "Line metadata races between marker threads corrupt mark state",
+      "severity": "high",
+      "likelihood": "medium",
+      "mitigations": [
+        "Use byte-sized marks with atomic stores",
+        "Or use thread-local mark buffers merged at sync points",
+        "Add debug mode validation of line marks vs object marks"
+      ]
+    },
+    {
+      "id": "R4.3",
+      "description": "Mark stack overflow on deep object graphs",
+      "severity": "medium",
+      "likelihood": "low",
+      "mitigations": [
+        "Use dynamically growing mark stack",
+        "Implement overflow handling (spill to auxiliary storage)",
+        "Test with deeply nested structures"
+      ]
+    },
+    {
+      "id": "R4.4",
+      "description": "Forwarding pointer races during concurrent reference updates",
+      "severity": "high",
+      "likelihood": "low",
+      "mitigations": [
+        "Perform evacuation in STW phase",
+        "Use memory barriers for forwarding pointer writes",
+        "Validate pointers before dereferencing"
+      ]
+    }
+  ],
+  "notes": [
+    "This is the most complex phase - take time to get it right",
+    "Start with simple mark-sweep before adding evacuation",
+    "Evacuation can be disabled initially for debugging",
+    "Use rb_gc_rp() and rb_obj_info() for debugging object state"
+  ]
+}

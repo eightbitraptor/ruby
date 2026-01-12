@@ -1,0 +1,386 @@
+{
+  "phase": {
+    "number": 6,
+    "name": "Diagnostics, Configuration, and Telemetry",
+    "description": "Expose Immix-specific statistics, GC configuration interfaces, event hooks for profiling, and debug logging infrastructure.",
+    "success_criteria": [
+      "GC.stat returns accurate Immix-specific metrics",
+      "GC.config allows reading/writing Immix tunables",
+      "GC.latest_gc_info provides useful collection details",
+      "Event hooks fire at appropriate times",
+      "Debug logging aids development and troubleshooting"
+    ],
+    "dependencies": [
+      "Phase 5 complete (runtime integration working)"
+    ],
+    "estimated_effort": "2-3 days"
+  },
+  "tasks": [
+    {
+      "id": "6.1",
+      "title": "Implement rb_gc_impl_active_gc_name",
+      "description": "Return the GC implementation name.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Return static string 'immix'",
+        "Used by GC.stat and for identification"
+      ],
+      "acceptance_criteria": [
+        "Returns 'immix'",
+        "Appears in GC.stat output"
+      ]
+    },
+    {
+      "id": "6.2",
+      "title": "Implement rb_gc_impl_stat",
+      "description": "Return GC statistics as a hash or single value.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "If hash_or_sym is Hash, populate with all stats",
+        "If hash_or_sym is Symbol, return just that stat",
+        "Standard keys: count, heap_allocated_pages, heap_live_slots, etc.",
+        "Immix-specific keys: immix_block_count, immix_recyclable_blocks, immix_hole_count, etc."
+      ],
+      "stats_to_implement": [
+        "count - number of GC runs",
+        "time - total GC time in seconds",
+        "heap_allocated_pages - number of blocks",
+        "heap_live_slots - live object count",
+        "heap_free_slots - free slot count",
+        "total_allocated_objects",
+        "total_freed_objects",
+        "malloc_increase_bytes",
+        "immix_block_count - total Immix blocks",
+        "immix_free_blocks - free blocks",
+        "immix_recyclable_blocks - recyclable blocks",
+        "immix_unavailable_blocks - unavailable blocks",
+        "immix_los_bytes - large object space bytes",
+        "immix_los_count - large object count",
+        "immix_evacuated_bytes - bytes evacuated this cycle",
+        "immix_hole_ratio - average holes per block"
+      ],
+      "acceptance_criteria": [
+        "Hash contains all standard keys",
+        "Values are accurate",
+        "Symbol lookup returns correct value"
+      ]
+    },
+    {
+      "id": "6.3",
+      "title": "Implement rb_gc_impl_stat_heap",
+      "description": "Return per-heap statistics.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Immix has single heap (or Immix + LOS)",
+        "heap_name can be :immix or :los",
+        "Return appropriate stats for each heap type"
+      ],
+      "acceptance_criteria": [
+        "Per-heap stats available",
+        "Unknown heap names handled gracefully"
+      ]
+    },
+    {
+      "id": "6.4",
+      "title": "Implement rb_gc_impl_latest_gc_info",
+      "description": "Return information about the most recent GC.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Store info during GC: reason, time, reclaimed bytes, etc.",
+        "Return hash or single value based on key parameter",
+        "Keys: major_by, gc_by, have_finalizer, immediate_sweep, state"
+      ],
+      "acceptance_criteria": [
+        "Info reflects most recent GC",
+        "Standard keys present",
+        "Immix-specific info included"
+      ]
+    },
+    {
+      "id": "6.5",
+      "title": "Implement rb_gc_impl_gc_count",
+      "description": "Return the number of GC cycles.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Return objspace->gc_count",
+        "Increment during each rb_gc_impl_start"
+      ],
+      "acceptance_criteria": [
+        "Count accurate",
+        "Matches GC.stat[:count]"
+      ]
+    },
+    {
+      "id": "6.6",
+      "title": "Implement rb_gc_impl_config_get",
+      "description": "Return current GC configuration as a hash.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Return hash of configurable parameters",
+        "Include: rgengc_allow_full_mark, implementation specific options"
+      ],
+      "config_keys": [
+        "implementation - 'immix'",
+        "immix_evacuation_enabled - bool",
+        "immix_headroom_percent - float",
+        "immix_evacuation_threshold - int (hole count)"
+      ],
+      "acceptance_criteria": [
+        "Returns hash with config values",
+        "Values reflect current state"
+      ]
+    },
+    {
+      "id": "6.7",
+      "title": "Implement rb_gc_impl_config_set",
+      "description": "Set GC configuration from a hash.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Accept hash with configuration keys",
+        "Validate values before applying",
+        "Raise ArgumentError for invalid keys/values",
+        "Some keys may be read-only"
+      ],
+      "acceptance_criteria": [
+        "Valid config applied",
+        "Invalid config raises error",
+        "Read-only keys cannot be changed"
+      ]
+    },
+    {
+      "id": "6.8",
+      "title": "Implement rb_gc_impl_stress_get and rb_gc_impl_stress_set",
+      "description": "Get/set GC stress mode.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Stress mode triggers GC on every allocation",
+        "Can be true/false or a class to trigger on",
+        "Store in objspace->gc_stress"
+      ],
+      "acceptance_criteria": [
+        "Stress mode can be toggled",
+        "Allocations trigger GC when enabled"
+      ]
+    },
+    {
+      "id": "6.9",
+      "title": "Implement timing measurement",
+      "description": "Track and report GC timing.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "rb_gc_impl_set_measure_total_time: enable/disable timing",
+        "rb_gc_impl_get_measure_total_time: check if enabled",
+        "rb_gc_impl_get_total_time: return total ns spent in GC",
+        "Use clock_gettime(CLOCK_MONOTONIC) for timing"
+      ],
+      "acceptance_criteria": [
+        "Timing can be enabled/disabled",
+        "Total time accurate",
+        "Minimal overhead when disabled"
+      ]
+    },
+    {
+      "id": "6.10",
+      "title": "Implement rb_gc_impl_set_event_hook",
+      "description": "Configure which GC events trigger hooks.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Store event mask in objspace",
+        "Check rb_gc_event_hook_required_p before firing events",
+        "Events: NEWOBJ, FREEOBJ, GC_START, GC_END_MARK, GC_END_SWEEP"
+      ],
+      "acceptance_criteria": [
+        "Event hooks can be configured",
+        "Only configured events fire"
+      ]
+    },
+    {
+      "id": "6.11",
+      "title": "Implement rb_gc_impl_object_metadata",
+      "description": "Return metadata about a specific object.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Return array of name/value pairs",
+        "Include: age, flags, wb_protected, pinned, etc.",
+        "Immix-specific: block_index, line_index, evacuated"
+      ],
+      "acceptance_criteria": [
+        "Metadata returned for valid objects",
+        "Immix-specific info included"
+      ]
+    },
+    {
+      "id": "6.12",
+      "title": "Implement rb_gc_impl_garbage_object_p",
+      "description": "Check if an object is garbage (not yet collected).",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Check if object is in heap but unmarked",
+        "Used for debugging and introspection"
+      ],
+      "acceptance_criteria": [
+        "Correctly identifies garbage objects",
+        "Returns false for live objects"
+      ]
+    },
+    {
+      "id": "6.13",
+      "title": "Add debug logging infrastructure",
+      "description": "Create logging macros and functions for debugging.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c",
+        "gc/immix/immix.h"
+      ],
+      "implementation_notes": [
+        "Define IMMIX_DEBUG_LOG macro (conditionally compiled)",
+        "Log levels: ERROR, WARN, INFO, DEBUG, TRACE",
+        "Control via environment variable RUBY_IMMIX_DEBUG",
+        "Include timestamps, thread IDs, function names"
+      ],
+      "acceptance_criteria": [
+        "Logging can be enabled via env var",
+        "Log output is useful for debugging",
+        "No overhead when disabled"
+      ]
+    },
+    {
+      "id": "6.14",
+      "title": "Add heap visualization helper",
+      "description": "Create function to dump heap state for debugging.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Dump block states, line marks, object locations",
+        "Output to stderr or file",
+        "Useful for debugging fragmentation issues"
+      ],
+      "functions_to_implement": [
+        "static void immix_dump_heap(struct immix_objspace *objspace)",
+        "static void immix_dump_block(struct immix_block *block)"
+      ],
+      "acceptance_criteria": [
+        "Produces readable output",
+        "Shows fragmentation clearly"
+      ]
+    },
+    {
+      "id": "6.15",
+      "title": "Document statistics and configuration",
+      "description": "Document all Immix-specific stats and config options.",
+      "type": "documentation",
+      "files_to_modify": [
+        "gc/IMMIX_PLAN.md"
+      ],
+      "implementation_notes": [
+        "List all GC.stat keys with descriptions",
+        "List all GC.config keys with valid values",
+        "Explain when each stat is useful",
+        "Include examples"
+      ],
+      "acceptance_criteria": [
+        "All keys documented",
+        "Examples provided",
+        "Clear explanations"
+      ]
+    },
+    {
+      "id": "6.16",
+      "title": "Add stats verification tests",
+      "description": "Test that statistics are accurate.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_stats.rb"
+      ],
+      "implementation_notes": [
+        "Verify stat values are reasonable",
+        "Compare before/after GC",
+        "Test config get/set",
+        "Test stress mode"
+      ],
+      "acceptance_criteria": [
+        "Stats tests pass",
+        "Config changes take effect"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R6.1",
+      "description": "Misreported statistics mislead tooling and users",
+      "severity": "medium",
+      "likelihood": "medium",
+      "mitigations": [
+        "Cross-check stats against default GC for shared keys",
+        "Add unit tests verifying stat types and ranges",
+        "Document any semantic differences"
+      ]
+    },
+    {
+      "id": "R6.2",
+      "description": "Timing overhead affects GC performance",
+      "severity": "low",
+      "likelihood": "low",
+      "mitigations": [
+        "Only call clock_gettime when measure_total_time enabled",
+        "Use cheap monotonic clock",
+        "Batch timing around phases, not individual operations"
+      ]
+    },
+    {
+      "id": "R6.3",
+      "description": "Config setters allow dangerous values causing instability",
+      "severity": "medium",
+      "likelihood": "medium",
+      "mitigations": [
+        "Validate all inputs",
+        "Clamp values to safe ranges",
+        "Document valid ranges in error messages"
+      ]
+    }
+  ],
+  "notes": [
+    "Stats should be useful for both users and developers",
+    "Follow default GC naming conventions where applicable",
+    "Debug logging is invaluable during development",
+    "Consider adding GC profiling hooks for flame graphs"
+  ]
+}

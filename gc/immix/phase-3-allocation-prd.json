@@ -1,0 +1,403 @@
+{
+  "phase": {
+    "number": 3,
+    "name": "Allocation Fast Paths & Large Object Handling",
+    "description": "Implement efficient object allocation using Immix's bump-pointer allocation with hole reuse, following MMTk's size-before-object pattern and Immix-Rust's hole scanning algorithm.",
+    "success_criteria": [
+      "rb_gc_impl_new_obj allocates objects correctly via bump pointer",
+      "Object size stored in slot[-1] per MMTk pattern",
+      "Hole scanning finds free lines in recyclable blocks",
+      "Lines marked as FreshAlloc when allocated into",
+      "Large objects (>=8KB) are tracked via LOS accounting",
+      "Allocation benchmarks within 2x of default GC",
+      "No memory corruption or leaks under allocation stress"
+    ],
+    "dependencies": [
+      "Phase 2 complete (objspace and metadata structures defined)"
+    ],
+    "estimated_effort": "3-4 days"
+  },
+  "corrections_from_review": [
+    "Added size-before-object storage pattern (obj[-1] = size) from MMTk",
+    "Hole scanning uses simple linear search per Immix-Rust",
+    "Lines must be marked FreshAlloc when allocated into",
+    "Medium object threshold is 256B (line size), not 128B"
+  ],
+  "tasks": [
+    {
+      "id": "3.1",
+      "title": "Implement bump-pointer allocation with size prefix",
+      "description": "Create the fast-path allocation routine following MMTk's pattern: store size before object, return pointer to object (not size slot).",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/mmtk/mmtk.c:733-748 (rb_mmtk_alloc_fast_path)",
+        "gc/mmtk/mmtk.c:791-812 (rb_gc_impl_new_obj)"
+      ],
+      "implementation_notes": [
+        "CRITICAL: Store object size at slot[-1] before the object",
+        "Allocation: alloc_ptr = cursor; cursor += size + sizeof(VALUE); slot = alloc_ptr + sizeof(VALUE)",
+        "slot[-1] = size (for rb_gc_impl_obj_slot_size)",
+        "slot[0] = flags, slot[1] = klass (Ruby object header)",
+        "Objects must be aligned to 8 bytes",
+        "Fast path should be inlineable: just cursor bump and limit check"
+      ],
+      "functions_to_implement": [
+        "static VALUE immix_alloc_fast(struct immix_ractor_cache *cache, size_t size)",
+        "static VALUE immix_alloc_slow(struct immix_objspace *objspace, struct immix_ractor_cache *cache, size_t size)"
+      ],
+      "acceptance_criteria": [
+        "rb_gc_impl_obj_slot_size returns correct size via obj[-1]",
+        "Allocation returns valid aligned addresses",
+        "Object header (flags, klass) at correct offsets",
+        "No buffer overruns"
+      ]
+    },
+    {
+      "id": "3.2",
+      "title": "Implement hole scanning in recyclable blocks",
+      "description": "When current hole is exhausted, scan line marks to find the next hole (contiguous free lines).",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Start scanning from current_line in current block",
+        "A hole starts at first UNMARKED line and extends until MARKED line",
+        "Hole size = (end_line - start_line) * IMMIX_LINE_SIZE",
+        "Update cursor to start of hole, limit to end of hole",
+        "If no more holes in block, return block and get new one",
+        "Consider word-at-a-time scanning for performance"
+      ],
+      "functions_to_implement": [
+        "static bool immix_find_next_hole(struct immix_block *block, uint8_t *start_line, uint8_t *end_line)",
+        "static void immix_setup_hole(struct immix_ractor_cache *cache, struct immix_block *block, uint8_t start_line, uint8_t end_line)"
+      ],
+      "acceptance_criteria": [
+        "Correctly identifies hole boundaries",
+        "Skips marked lines",
+        "Handles edge cases (first line, last line, no holes)",
+        "Performance is acceptable"
+      ]
+    },
+    {
+      "id": "3.3",
+      "title": "Implement block acquisition for allocation",
+      "description": "When current block has no more holes, acquire a new block from the pool.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Prefer recyclable blocks over free blocks (key Immix optimization)",
+        "Return exhausted block to unavailable state",
+        "Initialize new block's allocation state",
+        "If no blocks available, trigger GC",
+        "Lock mutex when accessing block pools"
+      ],
+      "functions_to_implement": [
+        "static struct immix_block *immix_acquire_block(struct immix_objspace *objspace, struct immix_ractor_cache *cache)"
+      ],
+      "acceptance_criteria": [
+        "Recyclable blocks preferred when available",
+        "Triggers GC when heap exhausted",
+        "Thread-safe block acquisition",
+        "Exhausted blocks properly classified"
+      ]
+    },
+    {
+      "id": "3.4",
+      "title": "Implement overflow allocator for medium objects",
+      "description": "Medium objects (>1 line but <8KB) that don't fit the current hole should use fresh blocks to avoid wasting hole tails.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Medium object = size > remaining_hole but size < LARGE_OBJECT_THRESHOLD",
+        "Allocate from a fresh (free) block, not recyclable",
+        "This handles ~4% of allocations according to paper",
+        "Can use a separate 'overflow block' per ractor cache",
+        "Don't switch main allocation block - just borrow from overflow"
+      ],
+      "functions_to_implement": [
+        "static VALUE immix_alloc_overflow(struct immix_objspace *objspace, struct immix_ractor_cache *cache, size_t size)"
+      ],
+      "acceptance_criteria": [
+        "Medium objects allocated without wasting small holes",
+        "Fresh blocks used for overflow",
+        "Main allocation block unchanged after overflow",
+        "Statistics track overflow allocations separately"
+      ]
+    },
+    {
+      "id": "3.5",
+      "title": "Implement large object allocation via LOS",
+      "description": "Objects >= 8KB bypass Immix blocks entirely and are allocated via malloc, tracked separately.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Use rb_gc_impl_malloc for LOS allocation (integrates with Ruby's malloc hooks)",
+        "Track LOS objects in a separate data structure (list or hash)",
+        "Update los_bytes and los_count in objspace",
+        "LOS objects need their own mark handling during GC",
+        "Consider alignment requirements for large objects"
+      ],
+      "functions_to_implement": [
+        "static VALUE immix_alloc_large(struct immix_objspace *objspace, size_t size)"
+      ],
+      "acceptance_criteria": [
+        "Large objects allocated correctly",
+        "LOS statistics accurate",
+        "Memory returned to system when freed",
+        "No interference with Immix block allocation"
+      ]
+    },
+    {
+      "id": "3.6",
+      "title": "Implement rb_gc_impl_new_obj",
+      "description": "Wire together all allocation paths into the main allocation entry point.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/mmtk/mmtk.c (rb_gc_impl_new_obj)"
+      ],
+      "implementation_notes": [
+        "Dispatch based on size: small (<= line), medium (> line, < LOS), large (>= LOS)",
+        "Handle wb_protected flag appropriately",
+        "Initialize object header with klass and flags",
+        "Fire RUBY_INTERNAL_EVENT_NEWOBJ if event hook required",
+        "Check for GC stress mode",
+        "Update total_allocated_objects"
+      ],
+      "acceptance_criteria": [
+        "All object sizes allocated correctly",
+        "Object header properly initialized",
+        "Event hooks fired when enabled",
+        "GC stress triggers collection"
+      ]
+    },
+    {
+      "id": "3.7",
+      "title": "Implement rb_gc_impl_obj_slot_size",
+      "description": "Return the actual allocated size of an object's slot.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "For Immix objects, return the size rounded up to allocation alignment",
+        "For LOS objects, return the actual allocated size",
+        "May need to store size in object metadata or derive from address"
+      ],
+      "acceptance_criteria": [
+        "Returns correct slot size for all object types",
+        "Consistent with allocation behavior"
+      ]
+    },
+    {
+      "id": "3.8",
+      "title": "Implement rb_gc_impl_heap_id_for_size",
+      "description": "Return a heap identifier for a given allocation size.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Immix doesn't have discrete heaps like default GC",
+        "Return 0 for all Immix allocations, different ID for LOS",
+        "Must be consistent with rb_gc_impl_heap_sizes"
+      ],
+      "acceptance_criteria": [
+        "Returns valid heap ID for any size",
+        "Consistent with heap_sizes output"
+      ]
+    },
+    {
+      "id": "3.9",
+      "title": "Implement rb_gc_impl_size_allocatable_p",
+      "description": "Return whether a given size can be allocated.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Immix can allocate any size from minimum to block size",
+        "LOS handles sizes up to system limits",
+        "Check for reasonable upper bound"
+      ],
+      "acceptance_criteria": [
+        "Returns true for valid allocation sizes",
+        "Returns false for unreasonable sizes (e.g., negative, huge)"
+      ]
+    },
+    {
+      "id": "3.10",
+      "title": "Implement rb_gc_impl_malloc/calloc/realloc/free",
+      "description": "Implement malloc-family functions that integrate with Immix's memory accounting.",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "reference_files": [
+        "gc/mmtk/mmtk.c (malloc functions)"
+      ],
+      "implementation_notes": [
+        "These are for Ruby's internal malloc needs, not object allocation",
+        "Track allocated bytes for GC triggering heuristics",
+        "May need to trigger GC if memory pressure is high",
+        "gc_allowed parameter indicates if GC can be triggered",
+        "Must be thread-safe (may be called without GVL)"
+      ],
+      "acceptance_criteria": [
+        "Memory allocates/frees correctly",
+        "Accounting is accurate",
+        "Thread-safe operation",
+        "GC triggered when appropriate"
+      ]
+    },
+    {
+      "id": "3.11",
+      "title": "Implement rb_gc_impl_adjust_memory_usage",
+      "description": "Adjust memory accounting for external allocations (e.g., string buffers).",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Called when Ruby objects allocate/free external memory",
+        "Positive diff = memory allocated, negative = freed",
+        "Update accounting and potentially trigger GC"
+      ],
+      "acceptance_criteria": [
+        "Memory accounting updated correctly",
+        "Triggers GC when memory exceeds threshold"
+      ]
+    },
+    {
+      "id": "3.12",
+      "title": "Implement line marking for allocated objects",
+      "description": "When allocating, mark the lines covered by the object as in-use (for conservative marking).",
+      "type": "implementation",
+      "files_to_modify": [
+        "gc/immix/immix.c"
+      ],
+      "implementation_notes": [
+        "Small objects (<= 128B) only mark the starting line",
+        "Medium objects mark all covered lines",
+        "This supports conservative marking during GC",
+        "Use IMMIX_LINE_CONSERVATIVELY_MARKED for freshly allocated lines"
+      ],
+      "functions_to_implement": [
+        "static void immix_mark_allocated_lines(struct immix_block *block, void *start, size_t size)"
+      ],
+      "acceptance_criteria": [
+        "Correct lines marked for object",
+        "Small vs medium object handling correct",
+        "No interference with GC marking"
+      ]
+    },
+    {
+      "id": "3.13",
+      "title": "Add allocation stress testing",
+      "description": "Create tests that stress the allocation system with various patterns.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/test_allocation.rb"
+      ],
+      "implementation_notes": [
+        "Test small object allocation (< 128 bytes)",
+        "Test medium object allocation (128B - 8KB)",
+        "Test large object allocation (>= 8KB)",
+        "Test mixed allocation patterns",
+        "Test allocation under memory pressure",
+        "Verify no memory leaks or corruption"
+      ],
+      "acceptance_criteria": [
+        "All allocation patterns work correctly",
+        "Memory accounting is accurate",
+        "No crashes under stress"
+      ]
+    },
+    {
+      "id": "3.14",
+      "title": "Add allocation benchmarks",
+      "description": "Create benchmarks to measure allocation performance vs default GC.",
+      "type": "testing",
+      "files_to_create": [
+        "gc/immix/test/bench_allocation.rb"
+      ],
+      "implementation_notes": [
+        "Benchmark small object allocation rate",
+        "Benchmark medium object allocation rate",
+        "Benchmark hole reuse efficiency",
+        "Compare against default GC baseline",
+        "Document expected performance characteristics"
+      ],
+      "acceptance_criteria": [
+        "Benchmarks run and produce results",
+        "Performance is within acceptable range of default GC",
+        "Results are reproducible"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R3.1",
+      "description": "Hole scanning becomes O(n) under high fragmentation, causing allocation stalls",
+      "severity": "high",
+      "likelihood": "medium",
+      "mitigations": [
+        "Cache last-known hole position per block",
+        "Use word-at-a-time line mark scanning",
+        "Deprioritize highly fragmented blocks",
+        "Add metrics to track scan times"
+      ]
+    },
+    {
+      "id": "R3.2",
+      "description": "LOS allocations bypass GC triggers, causing runaway memory growth",
+      "severity": "high",
+      "likelihood": "medium",
+      "mitigations": [
+        "Track LOS bytes in memory pressure calculations",
+        "Trigger GC based on combined Immix + LOS memory",
+        "Add regression tests for LOS-heavy workloads"
+      ]
+    },
+    {
+      "id": "R3.3",
+      "description": "Overflow allocator fragments fresh blocks, reducing effective heap size",
+      "severity": "medium",
+      "likelihood": "medium",
+      "mitigations": [
+        "Track overflow allocation rate",
+        "Consider dedicating specific blocks for overflow",
+        "Return partially-used overflow blocks to recyclable pool"
+      ]
+    },
+    {
+      "id": "R3.4",
+      "description": "Object alignment requirements vary by Ruby object type",
+      "severity": "medium",
+      "likelihood": "low",
+      "mitigations": [
+        "Always align to 8 bytes (covers most requirements)",
+        "Verify alignment matches Ruby's RVALUE alignment",
+        "Add assertions for alignment in debug builds"
+      ]
+    }
+  ],
+  "notes": [
+    "Allocation performance is critical - this is the most frequently called GC code",
+    "The fast path should be as short as possible (cursor bump + bounds check)",
+    "GC is not fully implemented yet, so recycling won't work until Phase 4",
+    "Test with both single-ractor and multi-ractor workloads"
+  ]
+}
