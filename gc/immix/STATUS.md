@@ -2,9 +2,9 @@
 
 **Last Updated**: January 2026
 
-## Current Status: Phase 7 In Progress (Validation & Testing)
+## Current Status: Phase 7 Complete (Validation & Testing)
 
-The Immix GC is a **functional mark-sweep collector** that passes **1884 of 1884 bootstrap tests** (excluding Ractor tests which hang). Key fixes in this phase: shutdown finalizers now properly flush IO streams, and `ObjectSpace._id2ref` works correctly.
+The Immix GC is a **functional mark-sweep collector** that passes **all 2037 bootstrap tests**, including all 153 Ractor tests. Key fixes in this phase: shutdown finalizers, `ObjectSpace._id2ref`, and Ractor+fork deadlock.
 
 ## Completed Milestones
 
@@ -124,12 +124,12 @@ puts "Success: #{persistent.size} persistent objects"
 - GC timing infrastructure with nanosecond precision
 - Fixed shutdown crash with finalizers (use alloc_map for scanning)
 
-### Phase 7: Validation & Testing (In Progress)
-- [x] Bootstrap tests: **1884/1884 pass** (excluding Ractor)
+### Phase 7: Validation & Testing ✅
+- [x] Bootstrap tests: **2037/2037 pass** (all tests including Ractor)
 - [x] Shutdown finalizers: Fixed IO flushing by calling zombie `dfree` at shutdown
 - [x] `ObjectSpace._id2ref`: Implemented `rb_gc_impl_each_object`
 - [x] `ObjectSpace.each_object`: Fixed callback parameters
-- [ ] Ractor tests: Currently hang (known limitation)
+- [x] Ractor + fork: Fixed deadlock by implementing proper fork handlers
 - [ ] Run Ruby's full test suite
 - [ ] Benchmark against default GC
 - [ ] Memory profiling (Valgrind, ASan)
