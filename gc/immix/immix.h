@@ -78,6 +78,14 @@ struct immix_weak_refs {
     size_t capacity;
 };
 
+/* Zombie object structure - overlays freed object memory */
+struct immix_zombie {
+    uintptr_t flags;
+    uintptr_t next;
+    void (*dfree)(void *);
+    void *data;
+};
+
 struct immix_objspace {
     struct immix_mark_stack mark_stack;
     struct immix_weak_refs weak_refs;
@@ -102,6 +110,7 @@ struct immix_objspace {
     size_t total_allocated_objects;
     size_t total_freed_objects;
     st_table *finalizer_table;
+    uintptr_t deferred_final;  /* Linked list of zombie objects awaiting finalizer */
     pthread_mutex_t lock;
 };
 
