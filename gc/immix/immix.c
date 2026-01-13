@@ -8,46 +8,244 @@
 
 #define IMMIX_HEAP_COUNT 6
 #define IMMIX_MAX_OBJ_SIZE 640
+#define IMMIX_INITIAL_BLOCKS 4
 
 static size_t heap_sizes[IMMIX_HEAP_COUNT + 1] = {
     32, 40, 80, 160, 320, IMMIX_MAX_OBJ_SIZE, 0
 };
 
-struct objspace {
-    bool gc_enabled;
-    bool gc_stress;
-    bool measure_gc_time;
-    size_t gc_count;
-    size_t total_allocated_objects;
-    unsigned long long total_gc_time;
-    st_table *finalizer_table;
-};
+static struct immix_block *
+immix_alloc_block(struct immix_objspace *objspace)
+{
+    struct immix_block *block = calloc(1, sizeof(struct immix_block));
+    if (!block) return NULL;
+    size_t alloc_size = IMMIX_BLOCK_SIZE * 2;
+    void *mem = malloc(alloc_size);
+    if (!mem) {
+        free(block);
+        return NULL;
+    }
+    uintptr_t mem_start = (uintptr_t)mem;
+    uintptr_t mem_end = mem_start + alloc_size;
+    uintptr_t aligned_start = (mem_start + IMMIX_BLOCK_SIZE - 1) & IMMIX_BLOCK_MASK;
+    if (aligned_start + IMMIX_BLOCK_SIZE > mem_end) {
+        free(mem);
+        free(block);
+        return NULL;
+    }
+    block->start = aligned_start;
+    block->mmap_base = mem;
+    block->mmap_size = alloc_size;
+    block->state = IMMIX_BLOCK_USABLE;
+    block->free_lines = IMMIX_LINES_PER_BLOCK;
+    block->hole_count = 1;
+    memset((void *)aligned_start, 0, IMMIX_BLOCK_SIZE);
+    objspace->total_blocks++;
+    objspace->total_heap_bytes += IMMIX_BLOCK_SIZE;
+    /* fprintf(stderr, "immix: block at %p start=%p end=%p\n", block, (void*)block->start, (void*)(block->start + IMMIX_BLOCK_SIZE)); */
+    return block;
+}
 
-struct ractor_cache {
-    void *bump_cursor;
-    void *bump_limit;
-};
+static void
+immix_free_block(struct immix_objspace *objspace, struct immix_block *block)
+{
+    objspace->total_blocks--;
+    objspace->total_heap_bytes -= IMMIX_BLOCK_SIZE;
+    free(block->mmap_base);
+    free(block);
+}
+
+static void
+immix_block_list_push(struct immix_block **list, struct immix_block *block)
+{
+    block->next = *list;
+    block->prev = NULL;
+    if (*list) {
+        (*list)->prev = block;
+    }
+    *list = block;
+}
+
+static void
+immix_block_list_remove(struct immix_block **list, struct immix_block *block)
+{
+    if (block->prev) {
+        block->prev->next = block->next;
+    } else {
+        *list = block->next;
+    }
+    if (block->next) {
+        block->next->prev = block->prev;
+    }
+    block->next = NULL;
+    block->prev = NULL;
+}
+
+static struct immix_block *
+immix_get_block(struct immix_objspace *objspace)
+{
+    struct immix_block *block = NULL;
+    pthread_mutex_lock(&objspace->lock);
+    if (objspace->usable_blocks) {
+        block = objspace->usable_blocks;
+        immix_block_list_remove(&objspace->usable_blocks, block);
+        objspace->usable_block_count--;
+    } else if (objspace->free_blocks) {
+        block = objspace->free_blocks;
+        immix_block_list_remove(&objspace->free_blocks, block);
+        objspace->free_block_count--;
+    } else {
+        block = immix_alloc_block(objspace);
+    }
+    pthread_mutex_unlock(&objspace->lock);
+    return block;
+}
+
+static void
+immix_return_block(struct immix_objspace *objspace, struct immix_block *block)
+{
+    pthread_mutex_lock(&objspace->lock);
+    if (block->free_lines == IMMIX_LINES_PER_BLOCK) {
+        immix_block_list_push(&objspace->free_blocks, block);
+        objspace->free_block_count++;
+    } else if (block->free_lines > 0) {
+        block->state = IMMIX_BLOCK_USABLE;
+        immix_block_list_push(&objspace->usable_blocks, block);
+        objspace->usable_block_count++;
+    } else {
+        block->state = IMMIX_BLOCK_FULL;
+        immix_block_list_push(&objspace->full_blocks, block);
+        objspace->full_block_count++;
+    }
+    pthread_mutex_unlock(&objspace->lock);
+}
+
+static struct immix_block *
+immix_find_block_for_addr(struct immix_objspace *objspace, void *ptr)
+{
+    uintptr_t addr = (uintptr_t)ptr;
+    for (struct immix_block *block = objspace->usable_blocks; block; block = block->next) {
+        if (addr >= block->start && addr < block->start + IMMIX_BLOCK_SIZE) {
+            return block;
+        }
+    }
+    for (struct immix_block *block = objspace->full_blocks; block; block = block->next) {
+        if (addr >= block->start && addr < block->start + IMMIX_BLOCK_SIZE) {
+            return block;
+        }
+    }
+    for (struct immix_ractor_cache *cache = objspace->ractor_caches; cache; cache = cache->next) {
+        if (cache->current_block) {
+            struct immix_block *block = cache->current_block;
+            if (addr >= block->start && addr < block->start + IMMIX_BLOCK_SIZE) {
+                return block;
+            }
+        }
+    }
+    return NULL;
+}
+
+static size_t
+immix_find_next_hole(struct immix_block *block, size_t start_line, size_t *hole_size)
+{
+    size_t i = start_line;
+    while (i < IMMIX_LINES_PER_BLOCK && block->line_marks[i] != IMMIX_LINE_FREE) {
+        i++;
+    }
+    if (i >= IMMIX_LINES_PER_BLOCK) {
+        *hole_size = 0;
+        return IMMIX_LINES_PER_BLOCK;
+    }
+    size_t hole_start = i;
+    while (i < IMMIX_LINES_PER_BLOCK && block->line_marks[i] == IMMIX_LINE_FREE) {
+        i++;
+    }
+    *hole_size = i - hole_start;
+    return hole_start;
+}
+
+static bool
+immix_cache_refill(struct immix_objspace *objspace, struct immix_ractor_cache *cache)
+{
+    if (cache->current_block) {
+        size_t hole_size;
+        size_t hole_start = immix_find_next_hole(cache->current_block, cache->current_line, &hole_size);
+        if (hole_size > 0) {
+            cache->current_block->free_lines -= hole_size;
+            for (size_t i = hole_start; i < hole_start + hole_size; i++) {
+                cache->current_block->line_marks[i] = IMMIX_LINE_FRESH_ALLOC;
+            }
+            cache->current_line = hole_start + hole_size;
+            cache->cursor = (char *)(cache->current_block->start + hole_start * IMMIX_LINE_SIZE);
+            cache->limit = (char *)(cache->current_block->start + (hole_start + hole_size) * IMMIX_LINE_SIZE);
+            return true;
+        }
+        immix_return_block(objspace, cache->current_block);
+        cache->current_block = NULL;
+    }
+    struct immix_block *block = immix_get_block(objspace);
+    if (!block) {
+        block = immix_alloc_block(objspace);
+        if (!block) {
+            return false;
+        }
+    }
+    cache->current_block = block;
+    cache->current_line = 0;
+    size_t hole_size;
+    size_t hole_start = immix_find_next_hole(block, 0, &hole_size);
+    if (hole_size == 0) {
+        hole_start = 0;
+        hole_size = IMMIX_LINES_PER_BLOCK;
+    }
+    block->free_lines -= hole_size;
+    for (size_t i = hole_start; i < hole_start + hole_size; i++) {
+        block->line_marks[i] = IMMIX_LINE_FRESH_ALLOC;
+    }
+    cache->current_line = hole_start + hole_size;
+    cache->cursor = (char *)(block->start + hole_start * IMMIX_LINE_SIZE);
+    cache->limit = (char *)(block->start + (hole_start + hole_size) * IMMIX_LINE_SIZE);
+    return true;
+}
 
 void *
 rb_gc_impl_objspace_alloc(void)
 {
-    struct objspace *objspace = calloc(1, sizeof(struct objspace));
+    struct immix_objspace *objspace = calloc(1, sizeof(struct immix_objspace));
     return objspace;
 }
 
 void
 rb_gc_impl_objspace_init(void *objspace_ptr)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     objspace->gc_enabled = true;
     objspace->measure_gc_time = true;
     objspace->finalizer_table = st_init_numtable();
+    pthread_mutex_init(&objspace->lock, NULL);
+    for (int i = 0; i < IMMIX_INITIAL_BLOCKS; i++) {
+        struct immix_block *block = immix_alloc_block(objspace);
+        if (block) {
+            immix_block_list_push(&objspace->free_blocks, block);
+            objspace->free_block_count++;
+        }
+    }
 }
 
 void *
 rb_gc_impl_ractor_cache_alloc(void *objspace_ptr, void *ractor)
 {
-    struct ractor_cache *cache = calloc(1, sizeof(struct ractor_cache));
+    struct immix_objspace *objspace = objspace_ptr;
+    struct immix_ractor_cache *cache = calloc(1, sizeof(struct immix_ractor_cache));
+    if (!cache) return NULL;
+    pthread_mutex_lock(&objspace->lock);
+    cache->next = objspace->ractor_caches;
+    if (objspace->ractor_caches) {
+        objspace->ractor_caches->prev = cache;
+    }
+    objspace->ractor_caches = cache;
+    objspace->ractor_cache_count++;
+    pthread_mutex_unlock(&objspace->lock);
     return cache;
 }
 
@@ -96,30 +294,71 @@ rb_gc_impl_shutdown_free_objects(void *objspace_ptr)
 void
 rb_gc_impl_objspace_free(void *objspace_ptr)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
+    while (objspace->ractor_caches) {
+        struct immix_ractor_cache *cache = objspace->ractor_caches;
+        objspace->ractor_caches = cache->next;
+        if (cache->current_block) {
+            immix_free_block(objspace, cache->current_block);
+        }
+        free(cache);
+    }
+    while (objspace->free_blocks) {
+        struct immix_block *block = objspace->free_blocks;
+        objspace->free_blocks = block->next;
+        immix_free_block(objspace, block);
+    }
+    while (objspace->usable_blocks) {
+        struct immix_block *block = objspace->usable_blocks;
+        objspace->usable_blocks = block->next;
+        immix_free_block(objspace, block);
+    }
+    while (objspace->full_blocks) {
+        struct immix_block *block = objspace->full_blocks;
+        objspace->full_blocks = block->next;
+        immix_free_block(objspace, block);
+    }
     if (objspace->finalizer_table) {
         st_free_table(objspace->finalizer_table);
     }
+    pthread_mutex_destroy(&objspace->lock);
     free(objspace);
 }
 
 void
 rb_gc_impl_ractor_cache_free(void *objspace_ptr, void *cache_ptr)
 {
-    free(cache_ptr);
+    struct immix_objspace *objspace = objspace_ptr;
+    struct immix_ractor_cache *cache = cache_ptr;
+    pthread_mutex_lock(&objspace->lock);
+    if (cache->prev) {
+        cache->prev->next = cache->next;
+    } else {
+        objspace->ractor_caches = cache->next;
+    }
+    if (cache->next) {
+        cache->next->prev = cache->prev;
+    }
+    objspace->ractor_cache_count--;
+    pthread_mutex_unlock(&objspace->lock);
+    if (cache->current_block) {
+        immix_return_block(objspace, cache->current_block);
+    }
+    free(cache);
 }
 
 void
 rb_gc_impl_start(void *objspace_ptr, bool full_mark, bool immediate_mark, bool immediate_sweep, bool compact)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     objspace->gc_count++;
 }
 
 bool
 rb_gc_impl_during_gc_p(void *objspace_ptr)
 {
-    return false;
+    struct immix_objspace *objspace = objspace_ptr;
+    return objspace->during_gc;
 }
 
 void
@@ -130,45 +369,50 @@ rb_gc_impl_prepare_heap(void *objspace_ptr)
 void
 rb_gc_impl_gc_enable(void *objspace_ptr)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     objspace->gc_enabled = true;
 }
 
 void
 rb_gc_impl_gc_disable(void *objspace_ptr, bool finish_current_gc)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     objspace->gc_enabled = false;
 }
 
 bool
 rb_gc_impl_gc_enabled_p(void *objspace_ptr)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     return objspace->gc_enabled;
 }
 
 void
 rb_gc_impl_stress_set(void *objspace_ptr, VALUE flag)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     objspace->gc_stress = RTEST(flag);
 }
 
 VALUE
 rb_gc_impl_stress_get(void *objspace_ptr)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     return objspace->gc_stress ? Qtrue : Qfalse;
 }
 
 VALUE
 rb_gc_impl_config_get(void *objspace_ptr)
 {
+    struct immix_objspace *objspace = objspace_ptr;
     VALUE hash = rb_hash_new();
     rb_hash_aset(hash, ID2SYM(rb_intern("implementation")), rb_str_new_cstr("immix"));
     rb_hash_aset(hash, ID2SYM(rb_intern("block_size")), SIZET2NUM(IMMIX_BLOCK_SIZE));
     rb_hash_aset(hash, ID2SYM(rb_intern("line_size")), SIZET2NUM(IMMIX_LINE_SIZE));
+    rb_hash_aset(hash, ID2SYM(rb_intern("total_blocks")), SIZET2NUM(objspace->total_blocks));
+    rb_hash_aset(hash, ID2SYM(rb_intern("free_blocks")), SIZET2NUM(objspace->free_block_count));
+    rb_hash_aset(hash, ID2SYM(rb_intern("usable_blocks")), SIZET2NUM(objspace->usable_block_count));
+    rb_hash_aset(hash, ID2SYM(rb_intern("full_blocks")), SIZET2NUM(objspace->full_block_count));
     return hash;
 }
 
@@ -180,7 +424,8 @@ rb_gc_impl_config_set(void *objspace_ptr, VALUE hash)
 VALUE
 rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags, bool wb_protected, size_t alloc_size)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
+    struct immix_ractor_cache *cache = cache_ptr;
     if (alloc_size > IMMIX_MAX_OBJ_SIZE) {
         rb_bug("immix: allocation size %zu exceeds maximum %d", alloc_size, IMMIX_MAX_OBJ_SIZE);
     }
@@ -191,9 +436,30 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
         }
     }
     size_t total_size = alloc_size + sizeof(VALUE);
-    VALUE *alloc_obj = malloc(total_size);
+    VALUE *alloc_obj = NULL;
+    if (cache && cache->cursor) {
+        char *new_cursor = cache->cursor + total_size;
+        if (new_cursor <= cache->limit) {
+            alloc_obj = (VALUE *)cache->cursor;
+            cache->cursor = new_cursor;
+            cache->allocated_bytes += total_size;
+        }
+    }
+    if (!alloc_obj && cache) {
+        if (immix_cache_refill(objspace, cache)) {
+            char *new_cursor = cache->cursor + total_size;
+            if (new_cursor <= cache->limit) {
+                alloc_obj = (VALUE *)cache->cursor;
+                cache->cursor = new_cursor;
+                cache->allocated_bytes += total_size;
+            }
+        }
+    }
     if (!alloc_obj) {
-        rb_bug("immix: malloc failed for size %zu", total_size);
+        alloc_obj = malloc(total_size);
+        if (!alloc_obj) {
+            rb_bug("immix: malloc failed for size %zu", total_size);
+        }
     }
     alloc_obj++;
     alloc_obj[-1] = alloc_size;
@@ -343,7 +609,7 @@ rb_gc_impl_make_zombie(void *objspace_ptr, VALUE obj, void (*dfree)(void *), voi
 VALUE
 rb_gc_impl_define_finalizer(void *objspace_ptr, VALUE obj, VALUE block)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     VALUE table;
     st_data_t data;
     RBASIC(obj)->flags |= FL_FINALIZE;
@@ -364,7 +630,7 @@ rb_gc_impl_define_finalizer(void *objspace_ptr, VALUE obj, VALUE block)
 void
 rb_gc_impl_undefine_finalizer(void *objspace_ptr, VALUE obj)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     st_data_t data = obj;
     int lev = RB_GC_VM_LOCK();
     st_delete(objspace->finalizer_table, &data, 0);
@@ -375,7 +641,7 @@ rb_gc_impl_undefine_finalizer(void *objspace_ptr, VALUE obj)
 void
 rb_gc_impl_copy_finalizer(void *objspace_ptr, VALUE dest, VALUE obj)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     VALUE table;
     st_data_t data;
     if (!FL_TEST(obj, FL_FINALIZE)) return;
@@ -407,28 +673,28 @@ rb_gc_impl_after_fork(void *objspace_ptr, rb_pid_t pid)
 void
 rb_gc_impl_set_measure_total_time(void *objspace_ptr, VALUE flag)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     objspace->measure_gc_time = RTEST(flag);
 }
 
 bool
 rb_gc_impl_get_measure_total_time(void *objspace_ptr)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     return objspace->measure_gc_time;
 }
 
 unsigned long long
 rb_gc_impl_get_total_time(void *objspace_ptr)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     return objspace->total_gc_time;
 }
 
 size_t
 rb_gc_impl_gc_count(void *objspace_ptr)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     return objspace->gc_count;
 }
 
@@ -462,6 +728,9 @@ enum gc_stat_sym {
     gc_stat_sym_count,
     gc_stat_sym_time,
     gc_stat_sym_total_allocated_objects,
+    gc_stat_sym_heap_total_bytes,
+    gc_stat_sym_heap_used_bytes,
+    gc_stat_sym_total_blocks,
     gc_stat_sym_last
 };
 
@@ -475,6 +744,9 @@ setup_gc_stat_symbols(void)
         S(count);
         S(time);
         S(total_allocated_objects);
+        S(heap_total_bytes);
+        S(heap_used_bytes);
+        S(total_blocks);
 #undef S
     }
 }
@@ -482,7 +754,7 @@ setup_gc_stat_symbols(void)
 VALUE
 rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
 {
-    struct objspace *objspace = objspace_ptr;
+    struct immix_objspace *objspace = objspace_ptr;
     VALUE hash = Qnil, key = Qnil;
     setup_gc_stat_symbols();
     if (RB_TYPE_P(hash_or_sym, T_HASH)) {
@@ -502,6 +774,9 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     SET(count, objspace->gc_count);
     SET(time, objspace->total_gc_time / (1000 * 1000));
     SET(total_allocated_objects, objspace->total_allocated_objects);
+    SET(heap_total_bytes, objspace->total_heap_bytes);
+    SET(heap_used_bytes, objspace->used_heap_bytes);
+    SET(total_blocks, objspace->total_blocks);
 #undef SET
     if (!NIL_P(key)) {
         return Qundef;
