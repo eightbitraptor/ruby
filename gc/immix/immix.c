@@ -760,6 +760,21 @@ immix_gc_sweep_phase(struct immix_objspace *objspace)
     objspace->free_block_count = new_free_count;
     objspace->usable_block_count = new_usable_count;
     objspace->full_block_count = new_full_count;
+
+    /* Calculate used heap bytes based on marked lines */
+    size_t used_lines = 0;
+    for (block = new_full; block; block = block->next) {
+        used_lines += IMMIX_USABLE_LINES - block->free_lines;
+    }
+    for (block = new_usable; block; block = block->next) {
+        used_lines += IMMIX_USABLE_LINES - block->free_lines;
+    }
+    for (struct immix_ractor_cache *cache = objspace->ractor_caches; cache; cache = cache->next) {
+        if (cache->current_block) {
+            used_lines += IMMIX_USABLE_LINES - cache->current_block->free_lines;
+        }
+    }
+    objspace->used_heap_bytes = used_lines * IMMIX_LINE_SIZE;
 }
 
 static unsigned long long
