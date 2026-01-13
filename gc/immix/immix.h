@@ -111,6 +111,7 @@ struct immix_objspace {
     size_t total_freed_objects;
     st_table *finalizer_table;
     uintptr_t deferred_final;  /* Linked list of zombie objects awaiting finalizer */
+    unsigned int fork_vm_lock_lev;  /* VM lock level saved during fork */
     pthread_mutex_t lock;
 };
 

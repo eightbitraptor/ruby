@@ -1477,11 +1477,33 @@ rb_gc_impl_shutdown_call_finalizer(void *objspace_ptr)
 void
 rb_gc_impl_before_fork(void *objspace_ptr)
 {
+    struct immix_objspace *objspace = objspace_ptr;
+
+    /* Acquire VM lock and barrier to stop other ractors */
+    objspace->fork_vm_lock_lev = RB_GC_VM_LOCK();
+    rb_gc_vm_barrier();
+
+    /* Also acquire our internal lock to ensure consistent state */
+    pthread_mutex_lock(&objspace->lock);
 }
 
 void
 rb_gc_impl_after_fork(void *objspace_ptr, rb_pid_t pid)
 {
+    struct immix_objspace *objspace = objspace_ptr;
+
+    if (pid == 0) {
+        /* Child process: reinitialize the mutex (it's in unknown state) */
+        pthread_mutex_init(&objspace->lock, NULL);
+    }
+    else {
+        /* Parent process: just unlock */
+        pthread_mutex_unlock(&objspace->lock);
+    }
+
+    /* Release VM lock */
+    RB_GC_VM_UNLOCK(objspace->fork_vm_lock_lev);
+    objspace->fork_vm_lock_lev = 0;
 }
 
 void
