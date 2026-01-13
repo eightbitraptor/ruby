@@ -640,17 +640,39 @@ immix_sweep_block(struct immix_objspace *objspace, struct immix_block *block)
                 }
                 else {
                     int type = flags & RUBY_T_MASK;
-                    if (type > T_MASK || type == T_NONE || type == T_ZOMBIE) {
-                        /* Invalid or already freed object - just clear alloc bit */
+                    if (type > T_MASK || type == T_NONE) {
+                        /* Invalid object - just clear alloc bit */
                         immix_clear_alloc_bit(block, (void *)obj);
+                    }
+                    else if (type == T_ZOMBIE) {
+                        /* Zombie - run C-level dfree; Ruby finalizers run later */
+                        struct immix_zombie *zombie = (struct immix_zombie *)obj;
+                        if (zombie->dfree) {
+                            zombie->dfree(zombie->data);
+                        }
+                        /* If FL_FINALIZE set, add to deferred list for later */
+                        if (FL_TEST_RAW(obj, FL_FINALIZE)) {
+                            /* Add to deferred list - will be processed after VM unlock */
+                            zombie->next = objspace->deferred_final;
+                            objspace->deferred_final = (uintptr_t)obj;
+                        }
+                        else {
+                            /* No Ruby finalizers, just free */
+                            RBASIC(obj)->flags = 0;
+                            immix_clear_alloc_bit(block, (void *)obj);
+                            objspace->total_freed_objects++;
+                        }
                     }
                     else {
                         rb_gc_obj_free_vm_weak_references(obj);
-                        rb_gc_obj_free(objspace, obj);
-                        /* Always clear flags and alloc bit to prevent double-free */
-                        RBASIC(obj)->flags = 0;
-                        immix_clear_alloc_bit(block, (void *)obj);
-                        objspace->total_freed_objects++;
+                        if (rb_gc_obj_free(objspace, obj)) {
+                            /* Object truly freed - clear flags and alloc bit */
+                            RBASIC(obj)->flags = 0;
+                            immix_clear_alloc_bit(block, (void *)obj);
+                            objspace->total_freed_objects++;
+                        }
+                        /* If rb_gc_obj_free returns FALSE, object became zombie.
+                         * Keep the alloc bit set so we find it next GC cycle. */
                     }
                 }
             }
@@ -748,6 +770,35 @@ immix_gettime_ns(void)
     return (unsigned long long)tv.tv_sec * 1000000000ULL + (unsigned long long)tv.tv_usec * 1000ULL;
 }
 
+/* Forward declaration */
+static void immix_run_finalizers(struct immix_objspace *objspace, VALUE zombie);
+
+/* Process deferred finalizers - must be called outside VM lock */
+static void
+immix_process_deferred_finalizers(struct immix_objspace *objspace)
+{
+    VALUE zombie;
+
+    /* Atomically get and clear the deferred list */
+    while ((zombie = (VALUE)__sync_lock_test_and_set(&objspace->deferred_final, 0)) != 0) {
+        while (zombie) {
+            struct immix_zombie *z = (struct immix_zombie *)zombie;
+            VALUE next = (VALUE)z->next;
+
+            /* Run Ruby-level finalizers */
+            immix_run_finalizers(objspace, zombie);
+
+            /* Now truly free the zombie */
+            struct immix_block *block = immix_block_for_ptr((void *)zombie);
+            RBASIC(zombie)->flags = 0;
+            immix_clear_alloc_bit(block, (void *)zombie);
+            objspace->total_freed_objects++;
+
+            zombie = next;
+        }
+    }
+}
+
 static void
 immix_gc_cycle(struct immix_objspace *objspace)
 {
@@ -764,6 +815,9 @@ immix_gc_cycle(struct immix_objspace *objspace)
     immix_gc_sweep_phase(objspace);
 
     RB_GC_VM_UNLOCK(lev);
+
+    /* Process deferred finalizers outside VM lock */
+    immix_process_deferred_finalizers(objspace);
 
     objspace->during_gc = false;
     objspace->gc_count++;
@@ -1125,6 +1179,34 @@ rb_gc_impl_each_objects(void *objspace_ptr, int (*callback)(void *, void *, size
 void
 rb_gc_impl_each_object(void *objspace_ptr, void (*func)(VALUE obj, void *data), void *data)
 {
+}
+
+/* Callback for rb_gc_run_obj_finalizer - returns the i-th finalizer block */
+static VALUE
+immix_get_finalizer(long i, void *data)
+{
+    VALUE table = (VALUE)data;
+    return RARRAY_AREF(table, i + 1);  /* Skip object_id at index 0 */
+}
+
+/* Run Ruby-level finalizers for a zombie object */
+static void
+immix_run_finalizers(struct immix_objspace *objspace, VALUE zombie)
+{
+    if (!FL_TEST_RAW(zombie, FL_FINALIZE)) {
+        return;
+    }
+
+    FL_UNSET(zombie, FL_FINALIZE);
+    st_data_t key = (st_data_t)zombie;
+    st_data_t data;
+
+    if (st_delete(objspace->finalizer_table, &key, &data)) {
+        VALUE table = (VALUE)data;
+        VALUE objid = RARRAY_AREF(table, 0);
+        long count = RARRAY_LEN(table) - 1;  /* Minus 1 for object_id */
+        rb_gc_run_obj_finalizer(objid, count, immix_get_finalizer, (void *)table);
+    }
 }
 
 void
