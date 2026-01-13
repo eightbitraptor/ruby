@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <sys/time.h>
 #include "ruby/ruby.h"
 #include "gc/gc.h"
 #include "gc/gc_impl.h"
@@ -739,9 +740,22 @@ immix_gc_sweep_phase(struct immix_objspace *objspace)
     objspace->full_block_count = new_full_count;
 }
 
+static unsigned long long
+immix_gettime_ns(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (unsigned long long)tv.tv_sec * 1000000000ULL + (unsigned long long)tv.tv_usec * 1000ULL;
+}
+
 static void
 immix_gc_cycle(struct immix_objspace *objspace)
 {
+    unsigned long long start_time = 0;
+    if (objspace->measure_gc_time) {
+        start_time = immix_gettime_ns();
+    }
+
     objspace->during_gc = true;
 
     unsigned int lev = RB_GC_VM_LOCK();
@@ -753,6 +767,11 @@ immix_gc_cycle(struct immix_objspace *objspace)
 
     objspace->during_gc = false;
     objspace->gc_count++;
+
+    if (objspace->measure_gc_time && start_time > 0) {
+        unsigned long long end_time = immix_gettime_ns();
+        objspace->total_gc_time += (end_time - start_time);
+    }
 }
 
 void
