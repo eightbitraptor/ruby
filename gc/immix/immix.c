@@ -1130,6 +1130,7 @@ rb_gc_impl_mark_maybe(void *objspace_ptr, VALUE obj)
 void
 rb_gc_impl_declare_weak_references(void *objspace_ptr, VALUE obj)
 {
+    FL_SET_RAW(obj, RUBY_FL_WEAK_REFERENCE);
 }
 
 bool

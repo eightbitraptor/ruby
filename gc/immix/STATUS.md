@@ -130,6 +130,7 @@ puts "Success: #{persistent.size} persistent objects"
 - [x] `ObjectSpace._id2ref`: Implemented `rb_gc_impl_each_object`
 - [x] `ObjectSpace.each_object`: Fixed callback parameters
 - [x] Ractor + fork: Fixed deadlock by implementing proper fork handlers
+- [x] WeakRef/WeakMap: Implement `rb_gc_impl_declare_weak_references` to set RUBY_FL_WEAK_REFERENCE flag
 - [ ] Run Ruby's full test suite
 - [ ] Benchmark against default GC
 - [ ] Memory profiling (Valgrind, ASan)
