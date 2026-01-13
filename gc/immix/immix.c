@@ -1130,9 +1130,21 @@ rb_gc_impl_each_object(void *objspace_ptr, void (*func)(VALUE obj, void *data), 
 void
 rb_gc_impl_make_zombie(void *objspace_ptr, VALUE obj, void (*dfree)(void *), void *data)
 {
-    if (dfree) {
-        dfree(data);
-    }
+    struct immix_objspace *objspace = objspace_ptr;
+    struct immix_zombie *zombie = (struct immix_zombie *)obj;
+
+    /* Keep FL_FINALIZE if set, clear everything else */
+    VALUE old_flags = zombie->flags;
+    zombie->flags = T_ZOMBIE | (old_flags & FL_FINALIZE);
+    zombie->dfree = dfree;
+    zombie->data = data;
+
+    /* Add to deferred finalizer list (atomic for thread safety) */
+    uintptr_t prev, next = objspace->deferred_final;
+    do {
+        zombie->next = prev = next;
+        next = __sync_val_compare_and_swap(&objspace->deferred_final, prev, (uintptr_t)obj);
+    } while (next != prev);
 }
 
 VALUE
