@@ -40,6 +40,7 @@ struct immix_block {
     struct immix_block *prev;
     uint8_t line_marks[IMMIX_LINES_PER_BLOCK];
     uint8_t alloc_map[IMMIX_ALLOC_MAP_BYTES];
+    uint8_t mark_bits[IMMIX_ALLOC_MAP_BYTES];
 };
 
 #define IMMIX_BLOCK_MAGIC 0x494D4D58  /* "IMMX" */
@@ -57,7 +58,30 @@ struct immix_ractor_cache {
     size_t allocated_bytes;
 };
 
+#define IMMIX_MARK_STACK_INIT_SIZE 4096
+
+struct immix_mark_stack {
+    uintptr_t *buffer;
+    size_t size;
+    size_t capacity;
+};
+
+struct immix_block_registry {
+    struct immix_block **blocks;
+    size_t count;
+    size_t capacity;
+};
+
+struct immix_weak_refs {
+    uintptr_t *buffer;
+    size_t size;
+    size_t capacity;
+};
+
 struct immix_objspace {
+    struct immix_mark_stack mark_stack;
+    struct immix_weak_refs weak_refs;
+    struct immix_block_registry block_registry;
     struct immix_block *free_blocks;
     struct immix_block *usable_blocks;
     struct immix_block *full_blocks;
@@ -125,6 +149,38 @@ immix_clear_alloc_bit(struct immix_block *block, void *ptr)
 {
     size_t slot = ((uintptr_t)ptr - (uintptr_t)block) / sizeof(void *);
     block->alloc_map[slot / 8] &= ~(1 << (slot % 8));
+}
+
+static inline void
+immix_clear_alloc_bits_for_lines(struct immix_block *block, size_t start_line, size_t num_lines)
+{
+    /* Each line has 256/8 = 32 slots, which is exactly 4 bytes in alloc_map */
+    size_t first_byte = start_line * (IMMIX_LINE_SIZE / sizeof(void *) / 8);
+    size_t end_byte = (start_line + num_lines) * (IMMIX_LINE_SIZE / sizeof(void *) / 8);
+    for (size_t i = first_byte; i < end_byte && i < IMMIX_ALLOC_MAP_BYTES; i++) {
+        block->alloc_map[i] = 0;
+    }
+}
+
+static inline void
+immix_set_mark_bit(struct immix_block *block, void *ptr)
+{
+    size_t slot = ((uintptr_t)ptr - (uintptr_t)block) / sizeof(void *);
+    block->mark_bits[slot / 8] |= (1 << (slot % 8));
+}
+
+static inline bool
+immix_get_mark_bit(struct immix_block *block, void *ptr)
+{
+    size_t slot = ((uintptr_t)ptr - (uintptr_t)block) / sizeof(void *);
+    return (block->mark_bits[slot / 8] & (1 << (slot % 8))) != 0;
+}
+
+static inline void
+immix_clear_mark_bit(struct immix_block *block, void *ptr)
+{
+    size_t slot = ((uintptr_t)ptr - (uintptr_t)block) / sizeof(void *);
+    block->mark_bits[slot / 8] &= ~(1 << (slot % 8));
 }
 
 static inline bool
