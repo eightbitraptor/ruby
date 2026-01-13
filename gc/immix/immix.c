@@ -903,13 +903,35 @@ rb_gc_impl_config_get(void *objspace_ptr)
 {
     struct immix_objspace *objspace = objspace_ptr;
     VALUE hash = rb_hash_new();
+
+    /* Basic configuration */
     rb_hash_aset(hash, ID2SYM(rb_intern("implementation")), rb_str_new_cstr("immix"));
     rb_hash_aset(hash, ID2SYM(rb_intern("block_size")), SIZET2NUM(IMMIX_BLOCK_SIZE));
     rb_hash_aset(hash, ID2SYM(rb_intern("line_size")), SIZET2NUM(IMMIX_LINE_SIZE));
+    rb_hash_aset(hash, ID2SYM(rb_intern("lines_per_block")), SIZET2NUM(IMMIX_LINES_PER_BLOCK));
+    rb_hash_aset(hash, ID2SYM(rb_intern("usable_lines_per_block")), SIZET2NUM(IMMIX_USABLE_LINES));
+    rb_hash_aset(hash, ID2SYM(rb_intern("max_object_size")), SIZET2NUM(IMMIX_MAX_OBJ_SIZE));
+
+    /* Block counts */
     rb_hash_aset(hash, ID2SYM(rb_intern("total_blocks")), SIZET2NUM(objspace->total_blocks));
     rb_hash_aset(hash, ID2SYM(rb_intern("free_blocks")), SIZET2NUM(objspace->free_block_count));
-    rb_hash_aset(hash, ID2SYM(rb_intern("usable_blocks")), SIZET2NUM(objspace->usable_block_count));
+    rb_hash_aset(hash, ID2SYM(rb_intern("recyclable_blocks")), SIZET2NUM(objspace->usable_block_count));
     rb_hash_aset(hash, ID2SYM(rb_intern("full_blocks")), SIZET2NUM(objspace->full_block_count));
+
+    /* Fragmentation statistics - count holes and free lines in recyclable blocks */
+    size_t total_holes = 0;
+    size_t total_free_lines = 0;
+    for (struct immix_block *block = objspace->usable_blocks; block; block = block->next) {
+        total_holes += block->hole_count;
+        total_free_lines += block->free_lines;
+    }
+    rb_hash_aset(hash, ID2SYM(rb_intern("recyclable_holes")), SIZET2NUM(total_holes));
+    rb_hash_aset(hash, ID2SYM(rb_intern("recyclable_free_lines")), SIZET2NUM(total_free_lines));
+
+    /* Average hole size in recyclable blocks (fragmentation indicator) */
+    double avg_hole_size = total_holes > 0 ? (double)total_free_lines / total_holes : 0.0;
+    rb_hash_aset(hash, ID2SYM(rb_intern("avg_hole_size_lines")), DBL2NUM(avg_hole_size));
+
     return hash;
 }
 
