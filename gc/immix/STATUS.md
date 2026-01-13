@@ -124,13 +124,14 @@ puts "Success: #{persistent.size} persistent objects"
 - GC timing infrastructure with nanosecond precision
 - Fixed shutdown crash with finalizers (use alloc_map for scanning)
 
-### Phase 7: Validation & Testing ✅
+### Phase 7: Validation & Testing (In Progress)
 - [x] Bootstrap tests: **2037/2037 pass** (all tests including Ractor)
 - [x] Shutdown finalizers: Fixed IO flushing by calling zombie `dfree` at shutdown
 - [x] `ObjectSpace._id2ref`: Implemented `rb_gc_impl_each_object`
 - [x] `ObjectSpace.each_object`: Fixed callback parameters
 - [x] Ractor + fork: Fixed deadlock by implementing proper fork handlers
 - [x] WeakRef/WeakMap: Implement `rb_gc_impl_declare_weak_references` to set RUBY_FL_WEAK_REFERENCE flag
+- [x] **ObjectSpace iteration**: Fixed crash in `ObjectSpace.count_objects_size` with collect-then-iterate approach
 - [ ] Run Ruby's full test suite
 - [ ] Benchmark against default GC
 - [ ] Memory profiling (Valgrind, ASan)
