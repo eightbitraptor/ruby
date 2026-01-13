@@ -629,6 +629,8 @@ immix_sweep_block(struct immix_objspace *objspace, struct immix_block *block)
         if (immix_get_alloc_bit(block, (void *)obj)) {
             size_t size = *(VALUE *)cursor;
             if (size == 0 || size > IMMIX_MAX_OBJ_SIZE) {
+                /* Invalid size - clear this stale alloc bit */
+                immix_clear_alloc_bit(block, (void *)obj);
                 cursor += sizeof(VALUE);
                 continue;
             }
@@ -848,6 +850,7 @@ rb_gc_impl_start(void *objspace_ptr, bool full_mark, bool immediate_mark, bool i
 {
     struct immix_objspace *objspace = objspace_ptr;
     if (!objspace->gc_enabled) return;
+    if (objspace->during_iteration) return;  /* Don't GC during ObjectSpace iteration */
     immix_gc_cycle(objspace);
 }
 
@@ -1174,8 +1177,10 @@ rb_gc_impl_writebarrier_remember(void *objspace_ptr, VALUE obj)
 {
 }
 
+/* Collect all objects from a block into the objects array.
+ * Does NOT call any callbacks - just collects addresses. */
 static void
-immix_each_objects_in_block(struct immix_block *block, int (*callback)(void *, void *, size_t, void *), void *data)
+immix_collect_objects_in_block(struct immix_block *block, VALUE **objects, size_t *count, size_t *capacity)
 {
     uintptr_t cursor = (uintptr_t)block + IMMIX_METADATA_BYTES;
     uintptr_t block_end = (uintptr_t)block + IMMIX_BLOCK_SIZE;
@@ -1187,19 +1192,15 @@ immix_each_objects_in_block(struct immix_block *block, int (*callback)(void *, v
                 cursor += sizeof(VALUE);
                 continue;
             }
-            /* Only pass live objects to callback - skip freed and zombie */
-            VALUE flags = RBASIC(obj)->flags;
-            if (flags != 0) {
-                int type = flags & RUBY_T_MASK;
-                if (type != T_NONE && type != T_ZOMBIE) {
-                    /* Callback expects (start, end, stride) where iterating
-                     * from start to end by stride visits each object once.
-                     * For single object: end = start + stride */
-                    if (callback((void *)obj, (void *)(obj + sizeof(VALUE)), sizeof(VALUE), data) != 0) {
-                        return;
-                    }
+            /* Collect this object address */
+            if (*count >= *capacity) {
+                *capacity = (*capacity == 0) ? 1024 : (*capacity * 2);
+                *objects = realloc(*objects, *capacity * sizeof(VALUE));
+                if (!*objects) {
+                    rb_bug("immix: failed to allocate object array for each_objects");
                 }
             }
+            (*objects)[(*count)++] = obj;
             cursor += size + sizeof(VALUE);
         } else {
             cursor += sizeof(VALUE);
@@ -1207,21 +1208,81 @@ immix_each_objects_in_block(struct immix_block *block, int (*callback)(void *, v
     }
 }
 
+/* Check if an object is still valid (has non-zero flags and valid type).
+ * Similar to MMTk's mmtk_is_mmtk_object check. */
+static bool
+immix_is_valid_object(VALUE obj)
+{
+    VALUE flags = RBASIC(obj)->flags;
+    if (flags == 0) return false;
+    int type = flags & RUBY_T_MASK;
+    /* Skip T_NONE, T_ZOMBIE, and T_MOVED */
+    if (type == T_NONE || type == T_ZOMBIE || type == 0x1e) return false;
+    return true;
+}
+
 void
 rb_gc_impl_each_objects(void *objspace_ptr, int (*callback)(void *, void *, size_t, void *), void *data)
 {
     struct immix_objspace *objspace = objspace_ptr;
+
+    /* Following MMTk's approach: collect ALL objects into an array first,
+     * then iterate over the array. This prevents issues with mutations
+     * during callback execution. */
+
+    VALUE *objects = NULL;
+    size_t obj_count = 0;
+    size_t obj_capacity = 0;
+
+    /* Collect objects from all blocks */
     for (struct immix_block *block = objspace->full_blocks; block; block = block->next) {
-        immix_each_objects_in_block(block, callback, data);
-    }
-    for (struct immix_block *block = objspace->usable_blocks; block; block = block->next) {
-        immix_each_objects_in_block(block, callback, data);
-    }
-    for (struct immix_ractor_cache *cache = objspace->ractor_caches; cache; cache = cache->next) {
-        if (cache->current_block) {
-            immix_each_objects_in_block(cache->current_block, callback, data);
+        if (block->magic == IMMIX_BLOCK_MAGIC) {
+            immix_collect_objects_in_block(block, &objects, &obj_count, &obj_capacity);
         }
     }
+    for (struct immix_block *block = objspace->usable_blocks; block; block = block->next) {
+        if (block->magic == IMMIX_BLOCK_MAGIC) {
+            immix_collect_objects_in_block(block, &objects, &obj_count, &obj_capacity);
+        }
+    }
+    for (struct immix_ractor_cache *cache = objspace->ractor_caches; cache; cache = cache->next) {
+        if (cache->current_block && cache->current_block->magic == IMMIX_BLOCK_MAGIC) {
+            immix_collect_objects_in_block(cache->current_block, &objects, &obj_count, &obj_capacity);
+        }
+    }
+
+    /* Mark that we're iterating to prevent GC during iteration */
+    objspace->during_iteration = true;
+
+    /* Now iterate over the collected objects, checking validity before each callback */
+    for (size_t i = 0; i < obj_count; i++) {
+        VALUE obj = objects[i];
+        /* Check if object is still valid (like MMTk's mmtk_is_mmtk_object) */
+        if (!immix_is_valid_object(obj)) continue;
+
+        /* Get slot size for this object - validate it's reasonable */
+        size_t slot_size = rb_gc_impl_obj_slot_size(obj);
+        if (slot_size == 0 || slot_size > IMMIX_MAX_OBJ_SIZE) {
+            /* Invalid slot size - skip this object */
+            continue;
+        }
+
+        /* Final validity check - ensure type is not T_NONE */
+        VALUE flags = RBASIC(obj)->flags;
+        int type = flags & RUBY_T_MASK;
+        if (type == T_NONE) {
+            /* This shouldn't happen since immix_is_valid_object should catch it */
+            continue;
+        }
+
+        /* Call callback with (start, end, stride) like MMTk does */
+        if (callback((void *)obj, (void *)(obj + slot_size), slot_size, data) != 0) {
+            break;
+        }
+    }
+
+    objspace->during_iteration = false;
+    free(objects);
 }
 
 static void
@@ -1239,11 +1300,10 @@ immix_each_object_in_block(struct immix_block *block, void (*func)(VALUE obj, vo
                 continue;
             }
             VALUE flags = RBASIC(obj)->flags;
-            if (flags != 0) {
-                int type = flags & RUBY_T_MASK;
-                if (type != T_NONE && type != T_ZOMBIE) {
-                    func(obj, data);
-                }
+            int type = flags & RUBY_T_MASK;
+            /* Skip if type is T_NONE (0) or T_ZOMBIE */
+            if (type != T_NONE && type != T_ZOMBIE) {
+                func(obj, data);
             }
             cursor += size + sizeof(VALUE);
         } else {

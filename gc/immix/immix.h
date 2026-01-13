@@ -104,6 +104,7 @@ struct immix_objspace {
     bool gc_enabled;
     bool gc_stress;
     bool during_gc;
+    bool during_iteration;  /* Prevents GC during ObjectSpace iteration */
     size_t gc_count;
     bool measure_gc_time;
     unsigned long long total_gc_time;
