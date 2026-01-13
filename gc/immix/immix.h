@@ -21,29 +21,31 @@ struct st_table;
 
 enum immix_line_mark {
     IMMIX_LINE_FREE = 0,
-    IMMIX_LINE_LIVE,
-    IMMIX_LINE_FRESH_ALLOC,
-    IMMIX_LINE_CONSERV_LIVE,
-    IMMIX_LINE_PREV_LIVE
+    IMMIX_LINE_MARKED,
+    IMMIX_LINE_MARKED_CONSERVATIVE
 };
 
 enum immix_block_state {
-    IMMIX_BLOCK_USABLE = 0,
-    IMMIX_BLOCK_FULL
+    IMMIX_BLOCK_FREE = 0,
+    IMMIX_BLOCK_RECYCLABLE,
+    IMMIX_BLOCK_UNAVAILABLE
 };
 
 struct immix_block {
-    uintptr_t start;
-    void *mmap_base;
-    size_t mmap_size;
+    uint32_t magic;
     enum immix_block_state state;
     uint16_t free_lines;
     uint16_t hole_count;
-    uint8_t line_marks[IMMIX_LINES_PER_BLOCK];
-    uint8_t alloc_map[IMMIX_ALLOC_MAP_BYTES];
     struct immix_block *next;
     struct immix_block *prev;
+    uint8_t line_marks[IMMIX_LINES_PER_BLOCK];
+    uint8_t alloc_map[IMMIX_ALLOC_MAP_BYTES];
 };
+
+#define IMMIX_BLOCK_MAGIC 0x494D4D58  /* "IMMX" */
+#define IMMIX_METADATA_LINES ((sizeof(struct immix_block) + IMMIX_LINE_SIZE - 1) / IMMIX_LINE_SIZE)
+#define IMMIX_USABLE_LINES (IMMIX_LINES_PER_BLOCK - IMMIX_METADATA_LINES)
+#define IMMIX_METADATA_BYTES (IMMIX_METADATA_LINES * IMMIX_LINE_SIZE)
 
 struct immix_ractor_cache {
     struct immix_ractor_cache *next;
@@ -79,38 +81,58 @@ struct immix_objspace {
     pthread_mutex_t lock;
 };
 
-static inline uintptr_t
-immix_block_start(void *ptr)
+static inline struct immix_block *
+immix_block_for_ptr(void *ptr)
 {
-    return (uintptr_t)ptr & IMMIX_BLOCK_MASK;
+    return (struct immix_block *)((uintptr_t)ptr & IMMIX_BLOCK_MASK);
+}
+
+static inline uintptr_t
+immix_block_data_start(struct immix_block *block)
+{
+    return (uintptr_t)block + IMMIX_METADATA_BYTES;
+}
+
+static inline uintptr_t
+immix_block_data_end(struct immix_block *block)
+{
+    return (uintptr_t)block + IMMIX_BLOCK_SIZE;
 }
 
 static inline size_t
 immix_line_index(void *ptr)
 {
-    uintptr_t block_start = immix_block_start(ptr);
-    return ((uintptr_t)ptr - block_start) >> IMMIX_LOG_BYTES_IN_LINE;
+    struct immix_block *block = immix_block_for_ptr(ptr);
+    return ((uintptr_t)ptr - (uintptr_t)block) >> IMMIX_LOG_BYTES_IN_LINE;
 }
 
 static inline void
 immix_set_alloc_bit(struct immix_block *block, void *ptr)
 {
-    size_t slot = ((uintptr_t)ptr - block->start) / sizeof(void *);
+    size_t slot = ((uintptr_t)ptr - (uintptr_t)block) / sizeof(void *);
     block->alloc_map[slot / 8] |= (1 << (slot % 8));
 }
 
 static inline bool
 immix_get_alloc_bit(struct immix_block *block, void *ptr)
 {
-    size_t slot = ((uintptr_t)ptr - block->start) / sizeof(void *);
+    size_t slot = ((uintptr_t)ptr - (uintptr_t)block) / sizeof(void *);
     return (block->alloc_map[slot / 8] & (1 << (slot % 8))) != 0;
 }
 
 static inline void
 immix_clear_alloc_bit(struct immix_block *block, void *ptr)
 {
-    size_t slot = ((uintptr_t)ptr - block->start) / sizeof(void *);
+    size_t slot = ((uintptr_t)ptr - (uintptr_t)block) / sizeof(void *);
     block->alloc_map[slot / 8] &= ~(1 << (slot % 8));
+}
+
+static inline bool
+immix_ptr_in_block(struct immix_block *block, void *ptr)
+{
+    uintptr_t addr = (uintptr_t)ptr;
+    uintptr_t block_addr = (uintptr_t)block;
+    return addr >= block_addr + IMMIX_METADATA_BYTES && addr < block_addr + IMMIX_BLOCK_SIZE;
 }
 
 #endif /* IMMIX_H */
