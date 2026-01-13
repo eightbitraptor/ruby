@@ -1186,9 +1186,49 @@ rb_gc_impl_each_objects(void *objspace_ptr, int (*callback)(void *, void *, size
     }
 }
 
+static void
+immix_each_object_in_block(struct immix_block *block, void (*func)(VALUE obj, void *data), void *data)
+{
+    uintptr_t cursor = (uintptr_t)block + IMMIX_METADATA_BYTES;
+    uintptr_t block_end = (uintptr_t)block + IMMIX_BLOCK_SIZE;
+
+    while (cursor < block_end) {
+        VALUE obj = (VALUE)(cursor + sizeof(VALUE));
+        if (immix_get_alloc_bit(block, (void *)obj)) {
+            size_t size = *(VALUE *)cursor;
+            if (size == 0 || size > IMMIX_MAX_OBJ_SIZE) {
+                cursor += sizeof(VALUE);
+                continue;
+            }
+            VALUE flags = RBASIC(obj)->flags;
+            if (flags != 0) {
+                int type = flags & RUBY_T_MASK;
+                if (type != T_NONE && type != T_ZOMBIE) {
+                    func(obj, data);
+                }
+            }
+            cursor += size + sizeof(VALUE);
+        } else {
+            cursor += sizeof(VALUE);
+        }
+    }
+}
+
 void
 rb_gc_impl_each_object(void *objspace_ptr, void (*func)(VALUE obj, void *data), void *data)
 {
+    struct immix_objspace *objspace = objspace_ptr;
+    for (struct immix_block *block = objspace->full_blocks; block; block = block->next) {
+        immix_each_object_in_block(block, func, data);
+    }
+    for (struct immix_block *block = objspace->usable_blocks; block; block = block->next) {
+        immix_each_object_in_block(block, func, data);
+    }
+    for (struct immix_ractor_cache *cache = objspace->ractor_caches; cache; cache = cache->next) {
+        if (cache->current_block) {
+            immix_each_object_in_block(cache->current_block, func, data);
+        }
+    }
 }
 
 /* Callback for rb_gc_run_obj_finalizer - returns the i-th finalizer block */
