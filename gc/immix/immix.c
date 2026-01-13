@@ -1149,8 +1149,18 @@ immix_each_objects_in_block(struct immix_block *block, int (*callback)(void *, v
                 cursor += sizeof(VALUE);
                 continue;
             }
-            if (callback((void *)obj, (void *)(obj + size), sizeof(VALUE), data) != 0) {
-                return;
+            /* Only pass live objects to callback - skip freed and zombie */
+            VALUE flags = RBASIC(obj)->flags;
+            if (flags != 0) {
+                int type = flags & RUBY_T_MASK;
+                if (type != T_NONE && type != T_ZOMBIE) {
+                    /* Callback expects (start, end, stride) where iterating
+                     * from start to end by stride visits each object once.
+                     * For single object: end = start + stride */
+                    if (callback((void *)obj, (void *)(obj + sizeof(VALUE)), sizeof(VALUE), data) != 0) {
+                        return;
+                    }
+                }
             }
             cursor += size + sizeof(VALUE);
         } else {
