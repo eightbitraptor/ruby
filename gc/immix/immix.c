@@ -705,9 +705,53 @@ rb_gc_impl_copy_finalizer(void *objspace_ptr, VALUE dest, VALUE obj)
     RB_GC_VM_UNLOCK(lev);
 }
 
+static void
+immix_finalize_object_in_block(struct immix_block *block, void *objspace_ptr)
+{
+    uintptr_t cursor = (uintptr_t)block + IMMIX_METADATA_BYTES;
+    uintptr_t block_end = (uintptr_t)block + IMMIX_BLOCK_SIZE;
+    while (cursor < block_end) {
+        VALUE obj = (VALUE)(cursor + sizeof(VALUE));
+        size_t size = *(VALUE *)cursor;
+        if (size >= 32 && size <= IMMIX_MAX_OBJ_SIZE && (size % 8) == 0) {
+            VALUE flags = RBASIC(obj)->flags;
+            if (flags != 0) {
+                int type = flags & RUBY_T_MASK;
+                if (type != T_NONE && type != T_ZOMBIE) {
+                    if (rb_gc_shutdown_call_finalizer_p(obj)) {
+                        rb_gc_obj_free_vm_weak_references(obj);
+                        if (rb_gc_obj_free(objspace_ptr, obj)) {
+                            RBASIC(obj)->flags = 0;
+                        }
+                    }
+                }
+            }
+            cursor += size + sizeof(VALUE);
+        } else {
+            cursor += sizeof(VALUE);
+        }
+    }
+}
+
 void
 rb_gc_impl_shutdown_call_finalizer(void *objspace_ptr)
 {
+    struct immix_objspace *objspace = objspace_ptr;
+    for (struct immix_block *block = objspace->full_blocks; block; block = block->next) {
+        immix_finalize_object_in_block(block, objspace_ptr);
+    }
+    for (struct immix_block *block = objspace->usable_blocks; block; block = block->next) {
+        immix_finalize_object_in_block(block, objspace_ptr);
+    }
+    for (struct immix_ractor_cache *cache = objspace->ractor_caches; cache; cache = cache->next) {
+        if (cache->current_block) {
+            immix_finalize_object_in_block(cache->current_block, objspace_ptr);
+        }
+    }
+    if (objspace->finalizer_table) {
+        st_free_table(objspace->finalizer_table);
+        objspace->finalizer_table = NULL;
+    }
 }
 
 void
