@@ -1520,9 +1520,14 @@ enum gc_stat_sym {
     gc_stat_sym_count,
     gc_stat_sym_time,
     gc_stat_sym_total_allocated_objects,
+    gc_stat_sym_total_freed_objects,
     gc_stat_sym_heap_total_bytes,
     gc_stat_sym_heap_used_bytes,
+    gc_stat_sym_heap_free_bytes,
     gc_stat_sym_total_blocks,
+    gc_stat_sym_free_blocks,
+    gc_stat_sym_recyclable_blocks,
+    gc_stat_sym_full_blocks,
     gc_stat_sym_last
 };
 
@@ -1536,9 +1541,14 @@ setup_gc_stat_symbols(void)
         S(count);
         S(time);
         S(total_allocated_objects);
+        S(total_freed_objects);
         S(heap_total_bytes);
         S(heap_used_bytes);
+        S(heap_free_bytes);
         S(total_blocks);
+        S(free_blocks);
+        S(recyclable_blocks);
+        S(full_blocks);
 #undef S
     }
 }
@@ -1566,9 +1576,14 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     SET(count, objspace->gc_count);
     SET(time, objspace->total_gc_time / (1000 * 1000));
     SET(total_allocated_objects, objspace->total_allocated_objects);
+    SET(total_freed_objects, objspace->total_freed_objects);
     SET(heap_total_bytes, objspace->total_heap_bytes);
     SET(heap_used_bytes, objspace->used_heap_bytes);
+    SET(heap_free_bytes, objspace->total_heap_bytes - objspace->used_heap_bytes);
     SET(total_blocks, objspace->total_blocks);
+    SET(free_blocks, objspace->free_block_count);
+    SET(recyclable_blocks, objspace->usable_block_count);
+    SET(full_blocks, objspace->full_block_count);
 #undef SET
     if (!NIL_P(key)) {
         return Qundef;
