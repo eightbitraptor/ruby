@@ -885,6 +885,16 @@ gc_sweep_fast_path_p(VALUE obj)
       case T_COMPLEX:
         return !rb_shape_has_fields(shape_id);
 
+      case T_DATA:
+        if (flags & RUBY_FL_USERPRIV0) {
+            uintptr_t type = (uintptr_t)RTYPEDDATA(obj)->type;
+            if (type & TYPED_DATA_EMBEDDED) {
+                RUBY_DATA_FUNC dfree = ((const rb_data_type_t *)(type & TYPED_DATA_PTR_MASK))->function.dfree;
+                return (uintptr_t)dfree + 1 <= 1;
+            }
+        }
+        return false;
+
       case T_IMEMO:
         switch (imemo_type(obj)) {
           case imemo_constcache:
