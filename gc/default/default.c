@@ -849,77 +849,54 @@ static inline bool
 gc_sweep_fast_path_p(VALUE obj)
 {
     VALUE flags = RBASIC(obj)->flags;
-    uint32_t type = (uint32_t)(flags & RUBY_T_MASK);
 
-    switch (type) {
+    if (flags & FL_FINALIZE) return false;
+
+    shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
+    if (rb_shape_has_object_id(shape_id)) return false;
+
+    switch (flags & RUBY_T_MASK) {
       case T_OBJECT:
-        if (LIKELY(!(flags & (ROBJECT_HEAP | FL_FINALIZE)))) {
-            return !rb_shape_has_object_id(RBASIC_SHAPE_ID(obj));
-        }
-        return false;
+        return !(flags & ROBJECT_HEAP);
 
       case T_STRING:
-        if (LIKELY(!(flags & (RSTRING_NOEMBED | RSTRING_FSTR | FL_FINALIZE)))) {
-            shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
-            return !rb_shape_has_object_id(shape_id) && !rb_shape_has_fields(shape_id);
-        }
-        return false;
+        if (flags & (RSTRING_NOEMBED | RSTRING_FSTR)) return false;
+        return !rb_shape_has_fields(shape_id);
 
       case T_ARRAY:
-        if (LIKELY((flags & RARRAY_EMBED_FLAG) && !(flags & FL_FINALIZE))) {
-            shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
-            return !rb_shape_has_object_id(shape_id) && !rb_shape_has_fields(shape_id);
-        }
-        return false;
+        if (!(flags & RARRAY_EMBED_FLAG)) return false;
+        return !rb_shape_has_fields(shape_id);
 
       case T_HASH:
-        if (LIKELY(!(flags & (RHASH_ST_TABLE_FLAG | FL_FINALIZE)))) {
-            shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
-            return !rb_shape_has_object_id(shape_id) && !rb_shape_has_fields(shape_id);
-        }
-        return false;
+        if (flags & RHASH_ST_TABLE_FLAG) return false;
+        return !rb_shape_has_fields(shape_id);
 
       case T_BIGNUM:
-        if (LIKELY((flags & BIGNUM_EMBED_FLAG) && !(flags & FL_FINALIZE))) {
-            shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
-            return !rb_shape_has_object_id(shape_id) && !rb_shape_has_fields(shape_id);
-        }
-        return false;
+        if (!(flags & BIGNUM_EMBED_FLAG)) return false;
+        return !rb_shape_has_fields(shape_id);
 
       case T_STRUCT:
-        if (LIKELY((flags & RSTRUCT_EMBED_LEN_MASK) && !(flags & FL_FINALIZE))) {
-            shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
-            return !rb_shape_has_object_id(shape_id) && !rb_shape_has_fields(shape_id);
-        }
-        return false;
+        if (!(flags & RSTRUCT_EMBED_LEN_MASK)) return false;
+        if (flags & RSTRUCT_GEN_FIELDS) return !rb_shape_has_fields(shape_id);
+        return true;
 
       case T_FLOAT:
       case T_RATIONAL:
       case T_COMPLEX:
-        if (LIKELY(!(flags & FL_FINALIZE))) {
-            shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
-            return !rb_shape_has_object_id(shape_id) && !rb_shape_has_fields(shape_id);
-        }
-        return false;
+        return !rb_shape_has_fields(shape_id);
 
       case T_IMEMO:
-        if (LIKELY(!(flags & FL_FINALIZE))) {
-            if (UNLIKELY(rb_shape_has_object_id(RBASIC_SHAPE_ID(obj)))) {
-                return false;
-            }
-            switch (imemo_type(obj)) {
-              case imemo_constcache:
-              case imemo_cref:
-              case imemo_ifunc:
-              case imemo_memo:
-              case imemo_svar:
-              case imemo_throw_data:
-                return true;
-              default:
-                return false;
-            }
+        switch (imemo_type(obj)) {
+          case imemo_constcache:
+          case imemo_cref:
+          case imemo_ifunc:
+          case imemo_memo:
+          case imemo_svar:
+          case imemo_throw_data:
+            return true;
+          default:
+            return false;
         }
-        return false;
 
       default:
         return false;
