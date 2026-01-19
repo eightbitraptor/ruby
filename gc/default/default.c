@@ -853,7 +853,7 @@ gc_sweep_fast_path_p(VALUE obj)
     if (flags & FL_FINALIZE) return false;
 
     shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
-    if (rb_shape_has_object_id(shape_id)) return false;
+    if (id2ref_tbl && rb_shape_has_object_id(shape_id)) return false;
 
     switch (flags & RUBY_T_MASK) {
       case T_OBJECT:
