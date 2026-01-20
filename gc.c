@@ -168,6 +168,10 @@ rb_gc_cr_unlock(unsigned int lev, const char *file, int line)
 unsigned int
 rb_gc_vm_lock_no_barrier(const char *file, int line)
 {
+    // During parallel marking from a native pthread, we don't have an EC.
+    // STW guarantees we're the only thread running, so no lock needed.
+    if (rb_current_execution_context(false) == NULL) return 0;
+
     unsigned int lev = 0;
     rb_vm_lock_enter_nb(&lev, file, line);
     return lev;
@@ -176,6 +180,8 @@ rb_gc_vm_lock_no_barrier(const char *file, int line)
 void
 rb_gc_vm_unlock_no_barrier(unsigned int lev, const char *file, int line)
 {
+    if (rb_current_execution_context(false) == NULL) return;
+
     rb_vm_lock_leave_nb(&lev, file, line);
 }
 

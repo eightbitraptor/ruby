@@ -273,8 +273,10 @@ vm_ep_in_heap_p_(const rb_execution_context_t *ec, const VALUE *ep)
 int
 rb_vm_ep_in_heap_p(const VALUE *ep)
 {
-    const rb_execution_context_t *ec = GET_EC();
-    if (ec->vm_stack == NULL) return TRUE;
+    const rb_execution_context_t *ec = rb_current_execution_context(false);
+    // No EC means we're on a non-Ruby thread (e.g., parallel GC marking).
+    // Without a stack to compare against, assume it's in the heap.
+    if (ec == NULL || ec->vm_stack == NULL) return TRUE;
     return vm_ep_in_heap_p_(ec, ep);
 }
 #endif
@@ -3718,8 +3720,9 @@ rb_execution_context_mark(const rb_execution_context_t *ec)
     }
 
     /* mark machine stack */
+    rb_execution_context_t *current_ec = rb_current_execution_context(false);
     if (ec->machine.stack_start && ec->machine.stack_end &&
-        ec != GET_EC() /* marked for current ec at the first stage of marking */
+        (current_ec == NULL || ec != current_ec)
         ) {
         rb_gc_mark_machine_context(ec);
     }
