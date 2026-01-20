@@ -12,13 +12,17 @@ void rb_ractor_sched_barrier_end(rb_vm_t *vm, rb_ractor_t *cr);
 static bool
 vm_locked(rb_vm_t *vm)
 {
-    return vm_locked_by_ractor_p(vm, GET_RACTOR());
+    rb_ractor_t *cr = rb_current_ractor_raw(false);
+    if (cr == NULL) return false;
+    return vm->ractor.sync.lock_owner == cr;
 }
 
 #if RUBY_DEBUG > 0
 void
 RUBY_ASSERT_vm_locking(void)
 {
+    if (rb_current_ractor_raw(false) == NULL) return;
+
     if (rb_multi_ractor_p()) {
         rb_vm_t *vm = GET_VM();
         VM_ASSERT(vm_locked(vm));
@@ -163,12 +167,18 @@ rb_vm_lock_enter_body(unsigned int *lev APPEND_LOCATION_ARGS)
 void
 rb_vm_lock_enter_body_nb(unsigned int *lev APPEND_LOCATION_ARGS)
 {
+    rb_ractor_t *cr = rb_current_ractor_raw(false);
+    if (cr == NULL) {
+        *lev = 0;
+        return;
+    }
+
     rb_vm_t *vm = GET_VM();
     if (vm_locked(vm)) {
         vm_lock_enter(NULL, vm, true, true, lev APPEND_LOCATION_PARAMS);
     }
     else {
-        vm_lock_enter(GET_RACTOR(), vm, false, true, lev APPEND_LOCATION_PARAMS);
+        vm_lock_enter(cr, vm, false, true, lev APPEND_LOCATION_PARAMS);
     }
 }
 
@@ -182,6 +192,8 @@ rb_vm_lock_enter_body_cr(rb_ractor_t *cr, unsigned int *lev APPEND_LOCATION_ARGS
 void
 rb_vm_lock_leave_body_nb(unsigned int *lev APPEND_LOCATION_ARGS)
 {
+    if (rb_current_ractor_raw(false) == NULL) return;
+
     vm_lock_leave(GET_VM(), true, lev APPEND_LOCATION_PARAMS);
 }
 

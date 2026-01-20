@@ -883,10 +883,15 @@ RVALUE_AGE_SET_BITMAP(VALUE obj, int age)
 {
     RUBY_ASSERT(age <= RVALUE_OLD_AGE);
     bits_t *age_bits = GET_HEAP_PAGE(obj)->age_bits;
-    // clear the bits
-    age_bits[RVALUE_AGE_BITMAP_INDEX(obj)] &= ~(RVALUE_AGE_BIT_MASK << (RVALUE_AGE_BITMAP_OFFSET(obj)));
-    // shift the correct value in
-    age_bits[RVALUE_AGE_BITMAP_INDEX(obj)] |= ((bits_t)age << RVALUE_AGE_BITMAP_OFFSET(obj));
+    bits_t *ptr = &age_bits[RVALUE_AGE_BITMAP_INDEX(obj)];
+    bits_t mask = RVALUE_AGE_BIT_MASK << RVALUE_AGE_BITMAP_OFFSET(obj);
+    bits_t new_age_bits = (bits_t)age << RVALUE_AGE_BITMAP_OFFSET(obj);
+    bits_t old_val, new_val;
+
+    do {
+        old_val = *ptr;
+        new_val = (old_val & ~mask) | new_age_bits;
+    } while (RUBY_ATOMIC_SIZE_CAS(*ptr, old_val, new_val) != old_val);
 }
 
 static void
