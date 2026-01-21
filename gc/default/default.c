@@ -538,7 +538,12 @@ typedef struct rb_objspace {
         size_t worker_marked_slots[2];
         rb_darray(VALUE) worker_weak_refs[2];
         pthread_t helper_thread;
-        rb_atomic_t helper_done;
+        pthread_mutex_t lock;
+        pthread_cond_t cond_start;
+        pthread_cond_t cond_done;
+        bool thread_started;
+        bool work_available;
+        bool shutdown;
     } parallel_mark;
 
     struct {
@@ -4751,8 +4756,25 @@ static void *
 parallel_mark_helper_thread(void *arg)
 {
     rb_objspace_t *objspace = arg;
-    gc_parallel_mark_drain(objspace, 1);
-    RUBY_ATOMIC_SET(objspace->parallel_mark.helper_done, 1);
+
+    pthread_mutex_lock(&objspace->parallel_mark.lock);
+    while (!objspace->parallel_mark.shutdown) {
+        while (!objspace->parallel_mark.work_available && !objspace->parallel_mark.shutdown) {
+            pthread_cond_wait(&objspace->parallel_mark.cond_start, &objspace->parallel_mark.lock);
+        }
+
+        if (objspace->parallel_mark.shutdown) break;
+
+        objspace->parallel_mark.work_available = false;
+        pthread_mutex_unlock(&objspace->parallel_mark.lock);
+
+        gc_parallel_mark_drain(objspace, 1);
+
+        pthread_mutex_lock(&objspace->parallel_mark.lock);
+        pthread_cond_signal(&objspace->parallel_mark.cond_done);
+    }
+    pthread_mutex_unlock(&objspace->parallel_mark.lock);
+
     return NULL;
 }
 
@@ -5801,12 +5823,12 @@ gc_marks_rest(rb_objspace_t *objspace)
 
         objspace->parallel_mark.worker_marked_slots[1] = 0;
         rb_darray_clear(objspace->parallel_mark.worker_weak_refs[1]);
-        objspace->parallel_mark.helper_done = 0;
 
-        pthread_create(&objspace->parallel_mark.helper_thread, NULL,
-                       parallel_mark_helper_thread, objspace);
-
-        pthread_join(objspace->parallel_mark.helper_thread, NULL);
+        pthread_mutex_lock(&objspace->parallel_mark.lock);
+        objspace->parallel_mark.work_available = true;
+        pthread_cond_signal(&objspace->parallel_mark.cond_start);
+        pthread_cond_wait(&objspace->parallel_mark.cond_done, &objspace->parallel_mark.lock);
+        pthread_mutex_unlock(&objspace->parallel_mark.lock);
 
         objspace->marked_slots += objspace->parallel_mark.worker_marked_slots[1];
 
@@ -9451,6 +9473,17 @@ rb_gc_impl_objspace_free(void *objspace_ptr)
     if (is_lazy_sweeping(objspace))
         rb_bug("lazy sweeping underway when freeing object space");
 
+    if (objspace->parallel_mark.thread_started) {
+        pthread_mutex_lock(&objspace->parallel_mark.lock);
+        objspace->parallel_mark.shutdown = true;
+        pthread_cond_signal(&objspace->parallel_mark.cond_start);
+        pthread_mutex_unlock(&objspace->parallel_mark.lock);
+        pthread_join(objspace->parallel_mark.helper_thread, NULL);
+        pthread_mutex_destroy(&objspace->parallel_mark.lock);
+        pthread_cond_destroy(&objspace->parallel_mark.cond_start);
+        pthread_cond_destroy(&objspace->parallel_mark.cond_done);
+    }
+
     free(objspace->profile.records);
     objspace->profile.records = NULL;
 
@@ -9648,6 +9681,15 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
     }
 
     init_mark_stack(&objspace->mark_stack);
+
+    pthread_mutex_init(&objspace->parallel_mark.lock, NULL);
+    pthread_cond_init(&objspace->parallel_mark.cond_start, NULL);
+    pthread_cond_init(&objspace->parallel_mark.cond_done, NULL);
+    objspace->parallel_mark.work_available = false;
+    objspace->parallel_mark.shutdown = false;
+    objspace->parallel_mark.thread_started = true;
+    pthread_create(&objspace->parallel_mark.helper_thread, NULL,
+                   parallel_mark_helper_thread, objspace);
 
     objspace->profile.invoke_time = getrusage_time();
     finalizer_table = st_init_numtable();
