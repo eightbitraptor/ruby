@@ -188,6 +188,10 @@ static RB_THREAD_LOCAL_SPECIFIER int malloc_increase_local;
 #define MEASURE_FREELIST 0
 #endif
 
+#ifndef BATCH_FREELIST
+#define BATCH_FREELIST 0
+#endif
+
 #define USE_TICK_T                 (PRINT_ENTER_EXIT_TICK || PRINT_ROOT_TICKS || MEASURE_FREELIST)
 
 #ifndef HEAP_COUNT
@@ -3482,7 +3486,57 @@ struct gc_sweep_context {
     int final_slots;
     int freed_slots;
     int empty_slots;
+#if BATCH_FREELIST
+    /* Batch freelist: accumulate freed slots, prepend to page freelist once */
+    struct free_slot *batch_head;
+    struct free_slot *batch_tail;
+#endif
 };
+
+#if BATCH_FREELIST
+/* Add object to batch freelist (no page->freelist access) */
+static inline void
+gc_sweep_add_freeobj_batch(struct gc_sweep_context *ctx, VALUE obj)
+{
+    rb_asan_unpoison_object(obj, false);
+
+    struct free_slot *slot = (struct free_slot *)obj;
+    slot->flags = 0;
+    slot->next = ctx->batch_head;
+    ctx->batch_head = slot;
+    if (ctx->batch_tail == NULL) {
+        ctx->batch_tail = slot;
+    }
+
+    rb_asan_poison_object(obj);
+}
+
+/* Flush batch freelist to page freelist */
+static inline void
+gc_sweep_flush_batch(rb_objspace_t *objspace, struct gc_sweep_context *ctx)
+{
+    if (ctx->batch_head) {
+        struct heap_page *page = ctx->page;
+
+#if MEASURE_FREELIST
+        tick_t t1 = tick();
+#endif
+
+        asan_unlock_freelist(page);
+        ctx->batch_tail->next = page->freelist;
+        page->freelist = ctx->batch_head;
+        asan_lock_freelist(page);
+
+#if MEASURE_FREELIST
+        freelist_total_ticks += tick() - t1;
+        freelist_call_count++;
+#endif
+
+        ctx->batch_head = NULL;
+        ctx->batch_tail = NULL;
+    }
+}
+#endif /* BATCH_FREELIST */
 
 static inline void
 gc_sweep_plane(rb_objspace_t *objspace, rb_heap_t *heap, uintptr_t p, bits_t bitset, struct gc_sweep_context *ctx)
@@ -3527,7 +3581,11 @@ gc_sweep_plane(rb_objspace_t *objspace, rb_heap_t *heap, uintptr_t p, bits_t bit
                     // so that if we're compacting, we can re-use the slots
                     (void)VALGRIND_MAKE_MEM_UNDEFINED((void*)p, BASE_SLOT_SIZE);
                     RVALUE_AGE_SET_BITMAP(vp, 0);
+#if BATCH_FREELIST
+                    gc_sweep_add_freeobj_batch(ctx, vp);
+#else
                     heap_page_add_freeobj(objspace, sweep_page, vp);
+#endif
                     gc_report(3, objspace, "page_sweep: %s is added to freelist\n", rb_obj_info(vp));
                     ctx->freed_slots++;
                 }
@@ -3548,7 +3606,11 @@ gc_sweep_plane(rb_objspace_t *objspace, rb_heap_t *heap, uintptr_t p, bits_t bit
                 gc_report(3, objspace, "page_sweep: %s is added to freelist\n", rb_obj_info(vp));
                 ctx->empty_slots++;
                 RVALUE_AGE_SET_BITMAP(vp, 0);
+#if BATCH_FREELIST
+                gc_sweep_add_freeobj_batch(ctx, vp);
+#else
                 heap_page_add_freeobj(objspace, sweep_page, vp);
+#endif
                 break;
               case T_ZOMBIE:
                 /* already counted */
@@ -3617,6 +3679,10 @@ gc_sweep_page(rb_objspace_t *objspace, rb_heap_t *heap, struct gc_sweep_context 
         }
         p += BITS_BITLENGTH * BASE_SLOT_SIZE;
     }
+
+#if BATCH_FREELIST
+    gc_sweep_flush_batch(objspace, ctx);
+#endif
 
     if (!heap->compact_cursor) {
         gc_setup_mark_bits(sweep_page);
@@ -3903,6 +3969,10 @@ gc_sweep_step(rb_objspace_t *objspace, rb_heap_t *heap)
             .final_slots = 0,
             .freed_slots = 0,
             .empty_slots = 0,
+#if BATCH_FREELIST
+            .batch_head = NULL,
+            .batch_tail = NULL,
+#endif
         };
         gc_sweep_page(objspace, heap, &ctx);
         int free_slots = ctx.freed_slots + ctx.empty_slots;
@@ -5558,6 +5628,10 @@ gc_compact_move(rb_objspace_t *objspace, rb_heap_t *heap, VALUE src)
             .final_slots = 0,
             .freed_slots = 0,
             .empty_slots = 0,
+#if BATCH_FREELIST
+            .batch_head = NULL,
+            .batch_tail = NULL,
+#endif
         };
 
         /* The page of src could be partially compacted, so it may contain
