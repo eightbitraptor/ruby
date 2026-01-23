@@ -184,7 +184,11 @@ static RB_THREAD_LOCAL_SPECIFIER int malloc_increase_local;
 #define PRINT_ROOT_TICKS 0
 #endif
 
-#define USE_TICK_T                 (PRINT_ENTER_EXIT_TICK || PRINT_ROOT_TICKS)
+#ifndef MEASURE_FREELIST
+#define MEASURE_FREELIST 0
+#endif
+
+#define USE_TICK_T                 (PRINT_ENTER_EXIT_TICK || PRINT_ROOT_TICKS || MEASURE_FREELIST)
 
 #ifndef HEAP_COUNT
 # define HEAP_COUNT 5
@@ -1034,6 +1038,11 @@ static bool ruby_enable_autocompact = false;
 static gc_compact_compare_func ruby_autocompact_compare_func;
 #endif
 
+#if MEASURE_FREELIST
+static tick_t freelist_total_ticks = 0;
+static unsigned long long freelist_call_count = 0;
+#endif
+
 static void init_mark_stack(mark_stack_t *stack);
 static int garbage_collect(rb_objspace_t *, unsigned int reason);
 
@@ -1587,6 +1596,10 @@ static void heap_page_free(rb_objspace_t *objspace, struct heap_page *page);
 static inline void
 heap_page_add_freeobj(rb_objspace_t *objspace, struct heap_page *page, VALUE obj)
 {
+#if MEASURE_FREELIST
+    tick_t t1 = tick();
+#endif
+
     rb_asan_unpoison_object(obj, false);
 
     asan_unlock_freelist(page);
@@ -1610,6 +1623,11 @@ heap_page_add_freeobj(rb_objspace_t *objspace, struct heap_page *page, VALUE obj
 
     rb_asan_poison_object(obj);
     gc_report(3, objspace, "heap_page_add_freeobj: add %p to freelist\n", (void *)obj);
+
+#if MEASURE_FREELIST
+    freelist_total_ticks += tick() - t1;
+    freelist_call_count++;
+#endif
 }
 
 static void
@@ -3848,6 +3866,16 @@ gc_sweep_finish(rb_objspace_t *objspace)
 
     rb_gc_event_hook(0, RUBY_INTERNAL_EVENT_GC_END_SWEEP);
     gc_mode_transition(objspace, gc_mode_none);
+
+#if MEASURE_FREELIST
+    if (freelist_call_count > 0) {
+        fprintf(stderr, "[FREELIST] calls: %llu, ticks: %"PRItick", ticks/call: %.2f\n",
+                freelist_call_count, freelist_total_ticks,
+                (double)freelist_total_ticks / freelist_call_count);
+        freelist_total_ticks = 0;
+        freelist_call_count = 0;
+    }
+#endif
 
 #if RGENGC_CHECK_MODE >= 2
     gc_verify_internal_consistency(objspace);
