@@ -844,6 +844,8 @@ struct_alloc(VALUE klass)
     else {
         NEWOBJ_OF(st, struct RStruct, klass, flags, sizeof(struct RStruct), 0);
 
+        FL_SET_RAW((VALUE)st, RUBY_FL_NEEDS_CLEANUP);
+
         st->as.heap.ptr = NULL;
         st->as.heap.fields_obj = 0;
         st->as.heap.len = 0;

@@ -1365,6 +1365,7 @@ rb_obj_set_fields(VALUE obj, VALUE fields_obj, ID field_name, VALUE original_fie
                 RB_VM_LOCKING() {
                     st_insert(generic_fields_tbl_, (st_data_t)obj, (st_data_t)fields_obj);
                 }
+                FL_SET_RAW(obj, RUBY_FL_NEEDS_CLEANUP);
                 RB_OBJ_WRITTEN(obj, original_fields_obj, fields_obj);
 
                 rb_execution_context_t *ec = GET_EC();
@@ -1569,7 +1570,7 @@ obj_transition_too_complex(VALUE obj, st_table *table)
                 old_fields = ROBJECT_FIELDS(obj);
             }
             else {
-                FL_SET_RAW(obj, ROBJECT_HEAP);
+                FL_SET_RAW(obj, ROBJECT_HEAP | RUBY_FL_NEEDS_CLEANUP);
             }
             RBASIC_SET_SHAPE_ID(obj, shape_id);
             ROBJECT_SET_FIELDS_HASH(obj, table);
@@ -1889,7 +1890,7 @@ rb_ensure_iv_list_size(VALUE obj, uint32_t current_len, uint32_t new_capacity)
         VALUE *ptr = ROBJECT_FIELDS(obj);
         VALUE *newptr = ALLOC_N(VALUE, new_capacity);
         MEMCPY(newptr, ptr, VALUE, current_len);
-        FL_SET_RAW(obj, ROBJECT_HEAP);
+        FL_SET_RAW(obj, ROBJECT_HEAP | RUBY_FL_NEEDS_CLEANUP);
         ROBJECT(obj)->as.heap.fields = newptr;
     }
 }

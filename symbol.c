@@ -314,6 +314,8 @@ sym_set_create(VALUE sym, void *data)
     if (create_dynamic_symbol) {
         NEWOBJ_OF(obj, struct RSymbol, rb_cSymbol, T_SYMBOL | FL_WB_PROTECTED, sizeof(struct RSymbol), 0);
 
+        FL_SET_RAW((VALUE)obj, RUBY_FL_NEEDS_CLEANUP);
+
         rb_encoding *enc = rb_enc_get(str);
         rb_enc_set_index((VALUE)obj, rb_enc_to_index(enc));
         RB_OBJ_WRITE((VALUE)obj, &obj->fstr, str);

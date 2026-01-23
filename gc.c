@@ -1087,6 +1087,8 @@ rb_data_object_wrap(VALUE klass, void *datap, RUBY_DATA_FUNC dmark, RUBY_DATA_FU
     if (klass) rb_data_object_check(klass);
     VALUE obj = newobj_of(GET_RACTOR(), klass, T_DATA, ROOT_SHAPE_ID, !dmark, sizeof(struct RTypedData));
 
+    FL_SET_RAW(obj, RUBY_FL_NEEDS_CLEANUP);
+
     rb_gc_register_pinning_obj(obj);
 
     struct RData *data = (struct RData *)obj;
@@ -1116,6 +1118,13 @@ typed_data_alloc(VALUE klass, VALUE typed_flag, void *datap, const rb_data_type_
     if (klass) rb_data_object_check(klass);
     bool wb_protected = (type->flags & RUBY_FL_WB_PROTECTED) || !type->function.dmark;
     VALUE obj = newobj_of(GET_RACTOR(), klass, T_DATA | RUBY_TYPED_FL_IS_TYPED_DATA, ROOT_SHAPE_ID, wb_protected, size);
+
+    // Set needs_cleanup unless embedded with NULL/DEFAULT dfree
+    // (matches fast-path logic in rb_gc_obj_needs_cleanup_p)
+    RUBY_DATA_FUNC dfree = type->function.dfree;
+    if (!(typed_flag & TYPED_DATA_EMBEDDED) || (uintptr_t)dfree + 1 > 1) {
+        FL_SET_RAW(obj, RUBY_FL_NEEDS_CLEANUP);
+    }
 
     rb_gc_register_pinning_obj(obj);
 
@@ -1247,11 +1256,14 @@ rb_gc_handle_weak_references(VALUE obj)
  * Returns true if the object requires a full rb_gc_obj_free() call during sweep,
  * false if it can be freed quickly without calling destructors or cleanup.
  *
- * Objects that return false are:
- * - Simple embedded objects without external allocations
- * - Objects without finalizers
- * - Objects without object IDs registered in id2ref
- * - Objects without generic instance variables
+ * This checks the RUBY_FL_NEEDS_CLEANUP flag which is set when objects:
+ * - Have finalizers (FL_FINALIZE)
+ * - Have weak references (RUBY_FL_WEAK_REFERENCE)
+ * - Have observed object_id stored in id2ref
+ * - Have generic instance variables
+ * - Have external/heap allocations
+ * - Are fstrings
+ * - Are types that always require cleanup (T_FILE, T_DATA, etc.)
  *
  * This is used by the GC sweep fast path to avoid function call overhead
  * for the majority of simple objects.
@@ -1259,88 +1271,7 @@ rb_gc_handle_weak_references(VALUE obj)
 bool
 rb_gc_obj_needs_cleanup_p(VALUE obj)
 {
-    VALUE flags = RBASIC(obj)->flags;
-
-    if (flags & FL_FINALIZE) return true;
-
-    switch (flags & RUBY_T_MASK) {
-      case T_IMEMO:
-        switch (imemo_type(obj)) {
-          case imemo_constcache:
-          case imemo_cref:
-          case imemo_ifunc:
-          case imemo_memo:
-          case imemo_svar:
-          case imemo_throw_data:
-            return false;
-          default:
-            return true;
-        }
-
-      case T_DATA:
-        if (flags & RUBY_TYPED_FL_IS_TYPED_DATA) {
-            uintptr_t type = (uintptr_t)RTYPEDDATA(obj)->type;
-            if (type & TYPED_DATA_EMBEDDED) {
-                RUBY_DATA_FUNC dfree = ((const rb_data_type_t *)(type & TYPED_DATA_PTR_MASK))->function.dfree;
-                // Fast path for embedded T_DATA with no custom free function.
-                // True when dfree is NULL (RUBY_NEVER_FREE) or -1 (RUBY_TYPED_DEFAULT_FREE).
-                if ((uintptr_t)dfree + 1 <= 1) return false;
-            }
-        }
-        return true;
-
-      case T_OBJECT:
-      case T_STRING:
-      case T_ARRAY:
-      case T_HASH:
-      case T_BIGNUM:
-      case T_STRUCT:
-      case T_FLOAT:
-      case T_RATIONAL:
-      case T_COMPLEX:
-        break;
-
-      default:
-        return true;
-    }
-
-    shape_id_t shape_id = RBASIC_SHAPE_ID(obj);
-    if (id2ref_tbl && rb_shape_has_object_id(shape_id)) return true;
-
-    switch (flags & RUBY_T_MASK) {
-      case T_OBJECT:
-        if (flags & ROBJECT_HEAP) return true;
-        return false;
-
-      case T_STRING:
-        if (flags & (RSTRING_NOEMBED | RSTRING_FSTR)) return true;
-        return rb_shape_has_fields(shape_id);
-
-      case T_ARRAY:
-        if (!(flags & RARRAY_EMBED_FLAG)) return true;
-        return rb_shape_has_fields(shape_id);
-
-      case T_HASH:
-        if (flags & RHASH_ST_TABLE_FLAG) return true;
-        return rb_shape_has_fields(shape_id);
-
-      case T_BIGNUM:
-        if (!(flags & BIGNUM_EMBED_FLAG)) return true;
-        return rb_shape_has_fields(shape_id);
-
-      case T_STRUCT:
-        if (!(flags & RSTRUCT_EMBED_LEN_MASK)) return true;
-        if (flags & RSTRUCT_GEN_FIELDS) return rb_shape_has_fields(shape_id);
-        return false;
-
-      case T_FLOAT:
-      case T_RATIONAL:
-      case T_COMPLEX:
-        return rb_shape_has_fields(shape_id);
-
-      default:
-        UNREACHABLE_RETURN(true);
-    }
+    return FL_TEST_RAW(obj, RUBY_FL_NEEDS_CLEANUP);
 }
 
 static void
@@ -2034,8 +1965,11 @@ class_object_id(VALUE klass)
         if (existing_id) {
             id = existing_id;
         }
-        else if (RB_UNLIKELY(id2ref_tbl)) {
-            st_insert(id2ref_tbl, id, klass);
+        else {
+            FL_SET_RAW(klass, RUBY_FL_NEEDS_CLEANUP);
+            if (RB_UNLIKELY(id2ref_tbl)) {
+                st_insert(id2ref_tbl, id, klass);
+            }
         }
         RB_GC_VM_UNLOCK(lock_lev);
     }
@@ -2080,6 +2014,8 @@ object_id0(VALUE obj)
 
     RUBY_ASSERT(RBASIC_SHAPE_ID(obj) == object_id_shape_id);
     RUBY_ASSERT(rb_shape_obj_has_id(obj));
+
+    FL_SET_RAW(obj, RUBY_FL_NEEDS_CLEANUP);
 
     if (RB_UNLIKELY(id2ref_tbl)) {
         RB_VM_LOCKING() {

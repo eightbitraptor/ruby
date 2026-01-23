@@ -137,7 +137,7 @@ VALUE rb_cSymbol;
 #define STR_FAKESTR FL_USER19
 
 #define STR_SET_NOEMBED(str) do {\
-    FL_SET((str), STR_NOEMBED);\
+    FL_SET((str), STR_NOEMBED | RUBY_FL_NEEDS_CLEANUP);\
     FL_UNSET((str), STR_SHARED | STR_SHARED_ROOT | STR_BORROWED);\
 } while (0)
 #define STR_SET_EMBED(str) FL_UNSET((str), STR_NOEMBED | STR_SHARED | STR_NOFREE)
@@ -522,7 +522,7 @@ fstring_concurrent_set_create(VALUE str, void *data)
     }
 
     ENC_CODERANGE_SET(str, coderange);
-    RBASIC(str)->flags |= RSTRING_FSTR;
+    RBASIC(str)->flags |= RSTRING_FSTR | RUBY_FL_NEEDS_CLEANUP;
     if (!RB_OBJ_SHAREABLE_P(str)) {
         RB_OBJ_SET_SHAREABLE(str);
     }
@@ -1940,7 +1940,7 @@ str_duplicate_setup_heap(VALUE klass, VALUE str, VALUE dup)
     RUBY_ASSERT(RB_OBJ_FROZEN_RAW(root));
 
     RSTRING(dup)->as.heap.ptr = RSTRING_PTR(str);
-    FL_SET_RAW(dup, RSTRING_NOEMBED);
+    FL_SET_RAW(dup, RSTRING_NOEMBED | RUBY_FL_NEEDS_CLEANUP);
     STR_SET_SHARED(dup, root);
     flags |= RSTRING_NOEMBED | STR_SHARED;
 

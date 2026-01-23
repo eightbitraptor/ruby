@@ -39,11 +39,38 @@ rb_imemo_name(enum imemo_type type)
  * allocation
  * ========================================================================= */
 
+/*
+ * Returns true if the imemo type requires cleanup during GC sweep.
+ * Some imemo types are trivially freeable (no external resources),
+ * while others need their dfree function called.
+ */
+static inline bool
+imemo_needs_cleanup_p(enum imemo_type type)
+{
+    switch (type) {
+      case imemo_constcache:
+      case imemo_cref:
+      case imemo_ifunc:
+      case imemo_memo:
+      case imemo_svar:
+      case imemo_throw_data:
+        return false;
+      default:
+        /* imemo_env, imemo_ment, imemo_iseq, imemo_tmpbuf,
+         * imemo_callinfo, imemo_callcache, imemo_fields */
+        return true;
+    }
+}
+
 VALUE
 rb_imemo_new(enum imemo_type type, VALUE v0, size_t size, bool is_shareable)
 {
     VALUE flags = T_IMEMO | FL_WB_PROTECTED | (type << FL_USHIFT) | (is_shareable ? FL_SHAREABLE : 0);
     NEWOBJ_OF(obj, void, v0, flags, size, 0);
+
+    if (imemo_needs_cleanup_p(type)) {
+        FL_SET_RAW((VALUE)obj, RUBY_FL_NEEDS_CLEANUP);
+    }
 
     return (VALUE)obj;
 }
@@ -54,6 +81,7 @@ rb_imemo_tmpbuf_new(void)
     VALUE flags = T_IMEMO | (imemo_tmpbuf << FL_USHIFT);
     NEWOBJ_OF(obj, rb_imemo_tmpbuf_t, 0, flags, sizeof(rb_imemo_tmpbuf_t), NULL);
 
+    FL_SET_RAW((VALUE)obj, RUBY_FL_NEEDS_CLEANUP);
     rb_gc_register_pinning_obj((VALUE)obj);
 
     obj->ptr = NULL;

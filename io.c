@@ -1112,6 +1112,7 @@ io_alloc(VALUE klass)
 {
     NEWOBJ_OF(io, struct RFile, klass, T_FILE, sizeof(struct RFile), 0);
 
+    FL_SET_RAW((VALUE)io, RUBY_FL_NEEDS_CLEANUP);
     io->fptr = 0;
 
     return (VALUE)io;

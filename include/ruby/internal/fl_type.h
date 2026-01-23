@@ -271,11 +271,17 @@ ruby_fl_type {
     RUBY_FL_WEAK_REFERENCE = (1<<9),
 
    /**
-    * This flag is no longer in use
+    * Object requires full cleanup during GC sweep.
+    *
+    * When set, the object cannot use the fast sweep path and must go through
+    * rb_gc_obj_free() during garbage collection. This flag is set when an
+    * object acquires external allocations, finalizers, object_id, weak
+    * references, or generic instance variables.
     *
     * @internal
+    * This flag is conservative - once set, it is never cleared.
     */
-    RUBY_FL_UNUSED10 = (1<<10),
+    RUBY_FL_NEEDS_CLEANUP = (1<<10),
 
     /**
      * This flag has something to do with data immutability.  When this flag is

@@ -970,6 +970,7 @@ match_alloc(VALUE klass)
     VALUE flags = T_MATCH | (RGENGC_WB_PROTECTED_MATCH ? FL_WB_PROTECTED : 0);
     NEWOBJ_OF(match, struct RMatch, klass, flags, alloc_size, 0);
 
+    FL_SET_RAW((VALUE)match, RUBY_FL_NEEDS_CLEANUP);
     match->str = Qfalse;
     match->regexp = Qfalse;
     memset(RMATCH_EXT(match), 0, sizeof(rb_matchext_t));
@@ -3411,6 +3412,7 @@ rb_reg_s_alloc(VALUE klass)
 {
     NEWOBJ_OF(re, struct RRegexp, klass, T_REGEXP | (RGENGC_WB_PROTECTED_REGEXP ? FL_WB_PROTECTED : 0), sizeof(struct RRegexp), 0);
 
+    FL_SET_RAW((VALUE)re, RUBY_FL_NEEDS_CLEANUP);
     re->ptr = 0;
     RB_OBJ_WRITE(re, &re->src, 0);
     re->usecnt = 0;
