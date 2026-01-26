@@ -1042,11 +1042,6 @@ static bool ruby_enable_autocompact = false;
 static gc_compact_compare_func ruby_autocompact_compare_func;
 #endif
 
-#if MEASURE_FREELIST
-static tick_t freelist_total_ticks = 0;
-static unsigned long long freelist_call_count = 0;
-#endif
-
 static void init_mark_stack(mark_stack_t *stack);
 static int garbage_collect(rb_objspace_t *, unsigned int reason);
 
@@ -1206,6 +1201,11 @@ tick(void)
 #else /* USE_TICK_T */
 #define MEASURE_LINE(expr) expr
 #endif /* USE_TICK_T */
+
+#if MEASURE_FREELIST
+static tick_t freelist_total_ticks = 0;
+static unsigned long long freelist_call_count = 0;
+#endif
 
 static inline VALUE check_rvalue_consistency(rb_objspace_t *objspace, const VALUE obj);
 
