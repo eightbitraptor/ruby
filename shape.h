@@ -173,6 +173,9 @@ RBASIC_SET_SHAPE_ID_NO_CHECKS(VALUE obj, shape_id_t shape_id)
     RBASIC(obj)->flags &= SHAPE_FLAG_MASK;
     RBASIC(obj)->flags |= ((VALUE)(shape_id) << SHAPE_FLAG_SHIFT);
 #endif
+    if (rb_shape_has_object_id(shape_id) || rb_shape_has_fields(shape_id)) {
+        RBASIC(obj)->flags |= RUBY_FL_NEEDS_CLEANUP;
+    }
 }
 
 static inline void
