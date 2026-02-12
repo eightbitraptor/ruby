@@ -1229,6 +1229,15 @@ fn gen_store_field(asm: &mut Assembler, recv: Opnd, id: ID, offset: i32, val: Op
     asm_comment!(asm, "Store field id={} offset={}", id.contents_lossy(), offset);
     let recv = asm.load(recv);
     asm.store(Opnd::mem(val_type.num_bits(), recv, offset), val);
+
+    // When writing a new shape_id (ivar shape transition), set
+    // FL_NEEDS_CLEANUP so the GC knows this object has fields to clean up.
+    if id == ID!(_shape_id) {
+        asm_comment!(asm, "set FL_NEEDS_CLEANUP");
+        let flags_opnd = Opnd::mem(VALUE_BITS, recv, RUBY_OFFSET_RBASIC_FLAGS);
+        let new_flags = asm.or(flags_opnd, Opnd::UImm(RUBY_FL_NEEDS_CLEANUP as u64));
+        asm.store(flags_opnd, new_flags);
+    }
 }
 
 fn gen_write_barrier(asm: &mut Assembler, recv: Opnd, val: Opnd, val_type: Type) {

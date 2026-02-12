@@ -3239,6 +3239,13 @@ fn gen_set_ivar(
 
                 // Store the new shape
                 asm.store(shape_opnd, Opnd::UImm(new_shape_id as u64));
+
+                // Set FL_NEEDS_CLEANUP so the GC knows this object has fields
+                // to clean up. This is always needed after an ivar shape
+                // transition because the new shape has at least one field.
+                let flags_opnd = Opnd::mem(64, recv, RUBY_OFFSET_RBASIC_FLAGS);
+                let new_flags = asm.or(flags_opnd, Opnd::UImm(RUBY_FL_NEEDS_CLEANUP as u64));
+                asm.store(flags_opnd, new_flags);
             },
 
             Some(ivar_index) => {
