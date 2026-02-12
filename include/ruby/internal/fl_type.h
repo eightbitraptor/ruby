@@ -86,6 +86,7 @@
 #define FL_USER17       RBIMPL_CAST((VALUE)RUBY_FL_USER17)               /**< @old{RUBY_FL_USER17} */
 #define FL_USER18       RBIMPL_CAST((VALUE)RUBY_FL_USER18)               /**< @old{RUBY_FL_USER18} */
 #define FL_USER19       RBIMPL_CAST((VALUE)(unsigned int)RUBY_FL_USER19) /**< @old{RUBY_FL_USER19} */
+#define FL_NEEDS_CLEANUP RBIMPL_CAST((VALUE)RUBY_FL_NEEDS_CLEANUP)
 
 #define ELTS_SHARED          RUBY_ELTS_SHARED     /**< @old{RUBY_ELTS_SHARED} */
 #define RB_OBJ_FREEZE        rb_obj_freeze_inline /**< @alias{rb_obj_freeze_inline} */
@@ -260,11 +261,14 @@ ruby_fl_type {
     RUBY_FL_WEAK_REFERENCE = (1<<9),
 
    /**
-    * This flag is no longer in use
+    * This object needs non-trivial cleanup during GC sweep.
+    * Set at allocation for types that always need cleanup, and at
+    * mutation sites where objects transition from simple to complex.
+    * Once set, never cleared (monotonic).
     *
     * @internal
     */
-    RUBY_FL_UNUSED10 = (1<<10),
+    RUBY_FL_NEEDS_CLEANUP = (1<<10),
 
     /**
      * This flag has something to do with data immutability.  When this flag is
