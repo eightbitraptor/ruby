@@ -1897,6 +1897,7 @@ rb_ensure_iv_list_size(VALUE obj, uint32_t current_len, uint32_t new_capacity)
         VALUE *newptr = ALLOC_N(VALUE, new_capacity);
         MEMCPY(newptr, ptr, VALUE, current_len);
         FL_SET_RAW(obj, ROBJECT_HEAP);
+        FL_SET_RAW(obj, RUBY_FL_NEEDS_CLEANUP);
         ROBJECT(obj)->as.heap.fields = newptr;
     }
 }
