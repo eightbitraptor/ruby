@@ -1184,7 +1184,7 @@ rb_gc_impl_define_finalizer(void *objspace_ptr, VALUE obj, VALUE block)
     VALUE table;
     st_data_t data;
 
-    RBASIC(obj)->flags |= FL_FINALIZE;
+    RBASIC(obj)->flags |= FL_FINALIZE | RUBY_FL_NEEDS_CLEANUP;
 
     int lev = RB_GC_VM_LOCK();
 
@@ -1247,6 +1247,7 @@ rb_gc_impl_copy_finalizer(void *objspace_ptr, VALUE dest, VALUE obj)
         RARRAY_ASET(table, 0, rb_obj_id(dest));
         st_insert(objspace->finalizer_table, dest, table);
         FL_SET(dest, FL_FINALIZE);
+        FL_SET(dest, RUBY_FL_NEEDS_CLEANUP);
     }
     else {
         rb_bug("rb_gc_copy_finalizer: FL_FINALIZE set but not found in finalizer_table: %s", rb_obj_info(obj));
