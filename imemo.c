@@ -43,6 +43,20 @@ VALUE
 rb_imemo_new(enum imemo_type type, VALUE v0, size_t size, bool is_shareable)
 {
     VALUE flags = T_IMEMO | FL_WB_PROTECTED | (type << FL_USHIFT) | (is_shareable ? FL_SHAREABLE : 0);
+
+    switch (type) {
+      case imemo_constcache:
+      case imemo_cref:
+      case imemo_ifunc:
+      case imemo_memo:
+      case imemo_svar:
+      case imemo_throw_data:
+        break;
+      default:
+        flags |= RUBY_FL_NEEDS_CLEANUP;
+        break;
+    }
+
     NEWOBJ_OF(obj, void, v0, flags, size, 0);
 
     return (VALUE)obj;
@@ -51,7 +65,7 @@ rb_imemo_new(enum imemo_type type, VALUE v0, size_t size, bool is_shareable)
 VALUE
 rb_imemo_tmpbuf_new(void)
 {
-    VALUE flags = T_IMEMO | (imemo_tmpbuf << FL_USHIFT);
+    VALUE flags = T_IMEMO | (imemo_tmpbuf << FL_USHIFT) | RUBY_FL_NEEDS_CLEANUP;
     NEWOBJ_OF(obj, rb_imemo_tmpbuf_t, 0, flags, sizeof(rb_imemo_tmpbuf_t), NULL);
 
     rb_gc_register_pinning_obj((VALUE)obj);
