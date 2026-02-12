@@ -1085,6 +1085,8 @@ rb_data_object_wrap(VALUE klass, void *datap, RUBY_DATA_FUNC dmark, RUBY_DATA_FU
     if (klass) rb_data_object_check(klass);
     VALUE obj = newobj_of(GET_RACTOR(), klass, T_DATA, ROOT_SHAPE_ID, !dmark, sizeof(struct RTypedData));
 
+    RBASIC(obj)->flags |= RUBY_FL_NEEDS_CLEANUP;
+
     rb_gc_register_pinning_obj(obj);
 
     struct RData *data = (struct RData *)obj;
@@ -1114,6 +1116,11 @@ typed_data_alloc(VALUE klass, VALUE typed_flag, void *datap, const rb_data_type_
     if (klass) rb_data_object_check(klass);
     bool wb_protected = (type->flags & RUBY_FL_WB_PROTECTED) || !type->function.dmark;
     VALUE obj = newobj_of(GET_RACTOR(), klass, T_DATA | RUBY_TYPED_FL_IS_TYPED_DATA, ROOT_SHAPE_ID, wb_protected, size);
+
+    if (!(typed_flag & TYPED_DATA_EMBEDDED) ||
+        (type->function.dfree != RUBY_NEVER_FREE && type->function.dfree != RUBY_TYPED_DEFAULT_FREE)) {
+        RBASIC(obj)->flags |= RUBY_FL_NEEDS_CLEANUP;
+    }
 
     rb_gc_register_pinning_obj(obj);
 
