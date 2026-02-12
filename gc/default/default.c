@@ -2173,6 +2173,18 @@ newobj_init(VALUE klass, VALUE flags, int wb_protected, rb_objspace_t *objspace,
         RVALUE_AGE_SET_CANDIDATE(objspace, obj);
     }
 
+    switch (t) {
+      case T_FILE:
+      case T_SYMBOL:
+      case T_CLASS:
+      case T_ICLASS:
+      case T_MODULE:
+      case T_REGEXP:
+      case T_MATCH:
+        RBASIC(obj)->flags |= RUBY_FL_NEEDS_CLEANUP;
+        break;
+    }
+
 #if RACTOR_CHECK_MODE
     void rb_ractor_setup_belonging(VALUE obj);
     rb_ractor_setup_belonging(obj);
