@@ -842,6 +842,7 @@ struct_alloc(VALUE klass)
         return (VALUE)st;
     }
     else {
+        flags |= RUBY_FL_NEEDS_CLEANUP;
         NEWOBJ_OF(st, struct RStruct, klass, flags, sizeof(struct RStruct), 0);
 
         st->as.heap.ptr = NULL;

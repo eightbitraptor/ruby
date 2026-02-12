@@ -101,7 +101,7 @@ should_be_T_ARRAY(VALUE ary)
     ary_verify(a); \
 } while (0)
 
-#define FL_UNSET_EMBED(ary) FL_UNSET((ary), RARRAY_EMBED_FLAG|RARRAY_EMBED_LEN_MASK)
+#define FL_UNSET_EMBED(ary) do { FL_UNSET((ary), RARRAY_EMBED_FLAG|RARRAY_EMBED_LEN_MASK); FL_SET((ary), RUBY_FL_NEEDS_CLEANUP); } while (0)
 #define FL_SET_SHARED(ary) do { \
     RUBY_ASSERT(!ARY_EMBED_P(ary)); \
     FL_SET((ary), RARRAY_SHARED_FLAG); \
@@ -701,7 +701,7 @@ static VALUE
 ary_alloc_heap(VALUE klass)
 {
     NEWOBJ_OF(ary, struct RArray, klass,
-                     T_ARRAY | (RGENGC_WB_PROTECTED_ARRAY ? FL_WB_PROTECTED : 0),
+                     T_ARRAY | RUBY_FL_NEEDS_CLEANUP | (RGENGC_WB_PROTECTED_ARRAY ? FL_WB_PROTECTED : 0),
                      sizeof(struct RArray), 0);
 
     ary->as.heap.len = 0;
@@ -819,7 +819,7 @@ static VALUE
 ec_ary_alloc_heap(rb_execution_context_t *ec, VALUE klass)
 {
     NEWOBJ_OF(ary, struct RArray, klass,
-            T_ARRAY | (RGENGC_WB_PROTECTED_ARRAY ? FL_WB_PROTECTED : 0),
+            T_ARRAY | RUBY_FL_NEEDS_CLEANUP | (RGENGC_WB_PROTECTED_ARRAY ? FL_WB_PROTECTED : 0),
             sizeof(struct RArray), ec);
 
     ary->as.heap.len = 0;

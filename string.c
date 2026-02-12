@@ -1015,7 +1015,7 @@ static inline VALUE
 str_alloc_heap(VALUE klass)
 {
     NEWOBJ_OF(str, struct RString, klass,
-            T_STRING | STR_NOEMBED | (RGENGC_WB_PROTECTED_STRING ? FL_WB_PROTECTED : 0), sizeof(struct RString), 0);
+            T_STRING | STR_NOEMBED | RUBY_FL_NEEDS_CLEANUP | (RGENGC_WB_PROTECTED_STRING ? FL_WB_PROTECTED : 0), sizeof(struct RString), 0);
 
     str->len = 0;
     str->as.heap.aux.capa = 0;
@@ -1469,6 +1469,7 @@ str_replace_shared_without_enc(VALUE str2, VALUE str)
             }
         }
         FL_SET(str2, STR_NOEMBED);
+        FL_SET(str2, RUBY_FL_NEEDS_CLEANUP);
         RSTRING(str2)->as.heap.ptr = ptr;
         STR_SET_SHARED(str2, root);
     }
@@ -1891,7 +1892,7 @@ static inline VALUE
 ec_str_alloc_heap(struct rb_execution_context_struct *ec, VALUE klass)
 {
     NEWOBJ_OF(str, struct RString, klass,
-            T_STRING | STR_NOEMBED | (RGENGC_WB_PROTECTED_STRING ? FL_WB_PROTECTED : 0), sizeof(struct RString), ec);
+            T_STRING | STR_NOEMBED | RUBY_FL_NEEDS_CLEANUP | (RGENGC_WB_PROTECTED_STRING ? FL_WB_PROTECTED : 0), sizeof(struct RString), ec);
 
     str->as.heap.aux.capa = 0;
     str->as.heap.ptr = NULL;
@@ -2106,6 +2107,7 @@ rb_str_init(int argc, VALUE *argv, VALUE str)
                 rb_enc_cr_str_exact_copy(str, orig);
             }
             FL_SET(str, STR_NOEMBED);
+            FL_SET(str, RUBY_FL_NEEDS_CLEANUP);
             RSTRING(str)->as.heap.aux.capa = capa;
         }
         else if (n == 1) {

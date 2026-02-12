@@ -3082,7 +3082,7 @@ bignew_1(VALUE klass, size_t len, int sign)
     }
     else {
         NEWOBJ_OF(big, struct RBignum, klass,
-                T_BIGNUM | (RGENGC_WB_PROTECTED_BIGNUM ? FL_WB_PROTECTED : 0), sizeof(struct RBignum), 0);
+                T_BIGNUM | RUBY_FL_NEEDS_CLEANUP | (RGENGC_WB_PROTECTED_BIGNUM ? FL_WB_PROTECTED : 0), sizeof(struct RBignum), 0);
         bigv = (VALUE)big;
         BIGNUM_SET_SIGN(bigv, sign);
         big->as.heap.digits = ALLOC_N(BDIGIT, len);
