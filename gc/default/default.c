@@ -187,7 +187,7 @@ static RB_THREAD_LOCAL_SPECIFIER int malloc_increase_local;
 #define USE_TICK_T                 (PRINT_ENTER_EXIT_TICK || PRINT_ROOT_TICKS)
 
 #ifndef HEAP_COUNT
-# define HEAP_COUNT 5
+# define HEAP_COUNT 6
 #endif
 
 typedef struct ractor_newobj_heap_cache {
@@ -687,9 +687,9 @@ size_t rb_gc_impl_obj_slot_size(VALUE obj);
 #endif
 
 #if SIZEOF_VALUE >= 8
-#define BASE_SLOT_SIZE_LOG2 6
-#else
 #define BASE_SLOT_SIZE_LOG2 5
+#else
+#define BASE_SLOT_SIZE_LOG2 4
 #endif
 #define BASE_SLOT_SIZE (1 << BASE_SLOT_SIZE_LOG2)
 
@@ -3548,7 +3548,7 @@ gc_sweep_plane(rb_objspace_t *objspace, rb_heap_t *heap, uintptr_t p, bits_t bit
                         rb_gc_event_hook(vp, RUBY_INTERNAL_EVENT_FREEOBJ);
                     }
 
-                    (void)VALGRIND_MAKE_MEM_UNDEFINED((void*)p, BASE_SLOT_SIZE);
+                    (void)VALGRIND_MAKE_MEM_UNDEFINED((void*)p, slot_size);
                     heap_page_add_freeobj(objspace, sweep_page, vp);
                     gc_report(3, objspace, "page_sweep: %s (fast path) added to freelist\n", rb_obj_info(vp));
                     ctx->freed_slots++;
@@ -3560,7 +3560,7 @@ gc_sweep_plane(rb_objspace_t *objspace, rb_heap_t *heap, uintptr_t p, bits_t bit
 
                     rb_gc_obj_free_vm_weak_references(vp);
                     if (rb_gc_obj_free(objspace, vp)) {
-                        (void)VALGRIND_MAKE_MEM_UNDEFINED((void*)p, BASE_SLOT_SIZE);
+                        (void)VALGRIND_MAKE_MEM_UNDEFINED((void*)p, slot_size);
                         heap_page_add_freeobj(objspace, sweep_page, vp);
                         gc_report(3, objspace, "page_sweep: %s is added to freelist\n", rb_obj_info(vp));
                         ctx->freed_slots++;
@@ -9496,7 +9496,7 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
         rb_bug("Could not preregister postponed job for GC");
     }
 
-    GC_ASSERT(sizeof(struct RBasic) + sizeof(VALUE[RBIMPL_RVALUE_EMBED_LEN_MAX]) + RVALUE_OVERHEAD <= BASE_SLOT_SIZE);
+    GC_ASSERT(sizeof(struct RBasic) + sizeof(VALUE[RBIMPL_RVALUE_EMBED_LEN_MAX]) + RVALUE_OVERHEAD <= (BASE_SLOT_SIZE << 1));
 
     for (int i = 0; i < HEAP_COUNT; i++) {
         rb_heap_t *heap = &heaps[i];
