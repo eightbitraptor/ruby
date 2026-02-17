@@ -433,7 +433,7 @@ fn inline_string_bytesize(fun: &mut hir::Function, block: hir::BlockId, recv: hi
             recv,
             id: ID!(len),
             offset: RUBY_OFFSET_RSTRING_LEN as i32,
-            return_type: types::CInt64,
+            return_type: types::CUInt32,
         });
 
         let result = fun.push_insn(block, hir::Insn::BoxFixnum {
@@ -457,7 +457,7 @@ fn inline_string_getbyte(fun: &mut hir::Function, block: hir::BlockId, recv: hir
             recv,
             id: ID!(len),
             offset: RUBY_OFFSET_RSTRING_LEN as i32,
-            return_type: types::CInt64,
+            return_type: types::CUInt32,
         });
         // TODO(max): Find a way to mark these guards as not needed for correctness... as in, once
         // the data dependency is gone (say, the StringGetbyte is elided), they can also be elided.
@@ -484,7 +484,7 @@ fn inline_string_setbyte(fun: &mut hir::Function, block: hir::BlockId, recv: hir
             recv,
             id: ID!(len),
             offset: RUBY_OFFSET_RSTRING_LEN as i32,
-            return_type: types::CInt64,
+            return_type: types::CUInt32,
         });
         let unboxed_index = fun.push_insn(block, hir::Insn::GuardLess { left: unboxed_index, right: len, state });
         let zero = fun.push_insn(block, hir::Insn::Const { val: hir::Const::CInt64(0) });
@@ -506,7 +506,7 @@ fn inline_string_empty_p(fun: &mut hir::Function, block: hir::BlockId, recv: hir
         recv,
         id: ID!(len),
         offset: RUBY_OFFSET_RSTRING_LEN as i32,
-        return_type: types::CInt64,
+        return_type: types::CUInt32,
     });
     let zero = fun.push_insn(block, hir::Insn::Const { val: hir::Const::CInt64(0) });
     let is_zero = fun.push_insn(block, hir::Insn::IsBitEqual { left: len, right: zero });

@@ -4243,7 +4243,7 @@ rb_warn_unchilled_literal(VALUE obj)
 
         VALUE str = obj;
         if (STR_SHARED_P(str)) {
-            str = RSTRING(obj)->as.heap.aux.shared;
+            str = RSTRING(obj)->as.shared;
         }
         VALUE created = get_created_info(str, &line);
         if (NIL_P(created)) {

@@ -61,12 +61,12 @@ bug_str_unterminated_substring(VALUE str, VALUE vbeg, VALUE vlen)
     if (RSTRING_LEN(str) < beg) rb_raise(rb_eIndexError, "beg: %ld", beg);
     if (RSTRING_LEN(str) < beg + len) rb_raise(rb_eIndexError, "end: %ld", beg + len);
     str = rb_str_new_shared(str);
-    RSTRING(str)->len = len;
+    RSTRING(str)->len = (uint32_t)len;
     if (STR_EMBED_P(str)) {
-        memmove(RSTRING(str)->as.embed.ary, RSTRING(str)->as.embed.ary + beg, len);
+        memmove(RSTRING(str)->as.ary, RSTRING(str)->as.ary + beg, len);
     }
     else {
-        RSTRING(str)->as.heap.ptr += beg;
+        RSTRING(str)->capa += (uint32_t)beg;
     }
     return str;
 }
@@ -111,9 +111,9 @@ bug_str_s_cstr_noembed(VALUE self, VALUE str)
     FL_SET((str2), STR_NOEMBED);
     memcpy(buf, RSTRING_PTR(str), capacity);
     RBASIC(str2)->flags &= ~(STR_SHARED | FL_USER5 | FL_USER6);
-    RSTRING(str2)->as.heap.aux.capa = RSTRING_LEN(str);
-    RSTRING(str2)->as.heap.ptr = buf;
-    RSTRING(str2)->len = RSTRING_LEN(str);
+    RSTRING(str2)->capa = (uint32_t)RSTRING_LEN(str);
+    RSTRING(str2)->as.ptr = buf;
+    RSTRING(str2)->len = (uint32_t)RSTRING_LEN(str);
 
     TERM_FILL(RSTRING_END(str2), TERM_LEN(str));
     return str2;
