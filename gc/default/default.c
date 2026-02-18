@@ -17,6 +17,15 @@
 
 #ifdef BUILDING_MODULAR_GC
 # define nlz_int64(x) (x == 0 ? 64 : (unsigned int)__builtin_clzll((unsigned long long)x))
+# ifdef _MSC_VER
+static inline unsigned int ntz_int32(uint32_t x) {
+    unsigned long index;
+    _BitScanForward(&index, x);
+    return index;
+}
+# else
+#  define ntz_int32(x) ((unsigned int)__builtin_ctz(x))
+# endif
 #else
 # include "internal/bits.h"
 #endif
@@ -800,6 +809,7 @@ struct free_slot {
 struct heap_page {
     unsigned short slot_size;
     unsigned char slot_size_log2;
+    uint32_t slot_div_magic;
     unsigned short total_slots;
     unsigned short free_slots;
     unsigned short final_slots;
@@ -876,13 +886,22 @@ heap_page_in_global_empty_pages_pool(rb_objspace_t *objspace, struct heap_page *
 #define GET_PAGE_HEADER(x) (&GET_PAGE_BODY(x)->header)
 #define GET_HEAP_PAGE(x)   (GET_PAGE_HEADER(x)->page)
 
-static inline size_t
-slot_index_for_offset(size_t offset, unsigned char slot_size_log2)
+static inline uint32_t
+compute_slot_div_magic(unsigned short slot_size)
 {
-    return offset >> slot_size_log2;
+    return (uint32_t)((uint64_t)UINT32_MAX / slot_size + 1);
 }
 
-#define SLOT_INDEX(page, p)          slot_index_for_offset((uintptr_t)(p) - (page)->start, (page)->slot_size_log2)
+static inline size_t
+slot_index_for_offset(size_t offset, unsigned char slot_size_log2, uint32_t slot_div_magic)
+{
+    if (LIKELY(slot_size_log2)) {
+        return offset >> slot_size_log2;
+    }
+    return (size_t)(((uint64_t)offset * slot_div_magic) >> 32);
+}
+
+#define SLOT_INDEX(page, p)          slot_index_for_offset((uintptr_t)(p) - (page)->start, (page)->slot_size_log2, (page)->slot_div_magic)
 #define SLOT_BITMAP_INDEX(page, p)   (SLOT_INDEX(page, p) / BITS_BITLENGTH)
 #define SLOT_BITMAP_OFFSET(page, p)  (SLOT_INDEX(page, p) & (BITS_BITLENGTH - 1))
 #define SLOT_BITMAP_BIT(page, p)     ((bits_t)1 << SLOT_BITMAP_OFFSET(page, p))
@@ -894,8 +913,6 @@ slot_index_for_offset(size_t offset, unsigned char slot_size_log2)
 #define MARKED_IN_BITMAP(bits, p)    _MARKED_IN_BITMAP(bits, GET_HEAP_PAGE(p), p)
 #define MARK_IN_BITMAP(bits, p)      _MARK_IN_BITMAP(bits, GET_HEAP_PAGE(p), p)
 #define CLEAR_IN_BITMAP(bits, p)     _CLEAR_IN_BITMAP(bits, GET_HEAP_PAGE(p), p)
-
-#define NUM_IN_PAGE(p)   (((bits_t)(p) & HEAP_PAGE_ALIGN_MASK) >> BASE_SLOT_SIZE_LOG2)
 
 #define GET_HEAP_MARK_BITS(x)           (&GET_HEAP_PAGE(x)->mark_bits[0])
 #define GET_HEAP_PINNED_BITS(x)         (&GET_HEAP_PAGE(x)->pinned_bits[0])
@@ -2012,16 +2029,29 @@ heap_add_page(rb_objspace_t *objspace, rb_heap_t *heap, struct heap_page *page)
     GC_ASSERT(!heap->sweeping_page);
     GC_ASSERT(heap_page_in_global_empty_pages_pool(objspace, page));
 
-    /* Align start to slot_size boundary (both are powers of 2) */
+    /* Align start to slot_size boundary */
     uintptr_t start = (uintptr_t)page->body + sizeof(struct heap_page_header);
-    start = (start + heap->slot_size - 1) & ~((uintptr_t)heap->slot_size - 1);
+    if (slot_size_is_power_of_two(heap->slot_size)) {
+        start = (start + heap->slot_size - 1) & ~((uintptr_t)heap->slot_size - 1);
+    }
+    else {
+        size_t remainder = start % heap->slot_size;
+        if (remainder != 0) start += heap->slot_size - remainder;
+    }
 
-    int slot_count = (int)((HEAP_PAGE_SIZE - (start - (uintptr_t)page->body))/heap->slot_size);
+    int slot_count = (int)((HEAP_PAGE_SIZE - (start - (uintptr_t)page->body)) / heap->slot_size);
 
     page->start = start;
     page->total_slots = slot_count;
     page->slot_size = heap->slot_size;
-    page->slot_size_log2 = BASE_SLOT_SIZE_LOG2 + (unsigned char)(heap - heaps);
+    if (slot_size_is_power_of_two(heap->slot_size)) {
+        page->slot_size_log2 = (unsigned char)ntz_int32(heap->slot_size);
+        page->slot_div_magic = 0;
+    }
+    else {
+        page->slot_size_log2 = 0;
+        page->slot_div_magic = compute_slot_div_magic(heap->slot_size);
+    }
     page->heap = heap;
 
     memset(&page->wb_unprotected_bits[0], 0, HEAP_PAGE_BITMAP_SIZE);
@@ -2388,8 +2418,17 @@ heap_idx_for_size(size_t size)
 
     if (size <= BASE_SLOT_SIZE) return 0;
 
-    /* ceil(log2(size)) - BASE_SLOT_SIZE_LOG2 */
-    size_t heap_idx = 64 - nlz_int64(size - 1) - BASE_SLOT_SIZE_LOG2;
+    /* The 48B pool (index 1) is not a power of two, so handle it explicitly.
+     * For sizes that fit in 48 bytes, return index 1.
+     * For larger sizes, use ceil(log2) but offset by 1 to account for
+     * the extra pool. */
+    if (size <= heap_slot_size_table[1]) return 1;
+
+    /* For power-of-two pools (64, 128, 256, 512, 1024):
+     * ceil(log2(size)) gives the bit position.
+     * Subtract BASE_SLOT_SIZE_LOG2 to get the base index,
+     * then add 1 to skip past the 48B pool. */
+    size_t heap_idx = 64 - nlz_int64(size - 1) - BASE_SLOT_SIZE_LOG2 + 1;
 
     if (heap_idx >= HEAP_COUNT) {
         rb_bug("heap_idx_for_size: allocation size too large "
