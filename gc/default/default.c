@@ -9620,8 +9620,14 @@ rb_gc_impl_init(void)
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("BASE_SLOT_SIZE")), SIZET2NUM(BASE_SLOT_SIZE - RVALUE_OVERHEAD));
     /* Minimum slot size for a standard RVALUE (RBasic + embedded VALUEs) */
     size_t rvalue_min = sizeof(struct RBasic) + sizeof(VALUE[RBIMPL_RVALUE_EMBED_LEN_MAX]) + RVALUE_OVERHEAD;
-    size_t rvalue_slot = BASE_SLOT_SIZE;
-    while (rvalue_slot < rvalue_min) rvalue_slot <<= 1;
+    size_t rvalue_slot = 0;
+    for (int i = 0; i < HEAP_COUNT; i++) {
+        if (heap_slot_size_table[i] >= rvalue_min) {
+            rvalue_slot = heap_slot_size_table[i];
+            break;
+        }
+    }
+    GC_ASSERT(rvalue_slot > 0);
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_SIZE")), SIZET2NUM(rvalue_slot - RVALUE_OVERHEAD));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("RBASIC_SIZE")), SIZET2NUM(sizeof(struct RBasic)));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_OVERHEAD")), SIZET2NUM(RVALUE_OVERHEAD));
