@@ -230,7 +230,14 @@ class TestGc < Test::Unit::TestCase
         GC.stat(stat)
       end
 
-      assert_equal (GC::INTERNAL_CONSTANTS[:BASE_SLOT_SIZE] + GC::INTERNAL_CONSTANTS[:RVALUE_OVERHEAD]) * (2**i), stat_heap[:slot_size]
+      # Slot sizes increase monotonically but are not necessarily powers of two
+      assert_operator stat_heap[:slot_size], :>, 0
+      if i > 0
+        prev_stat = {}
+        GC.stat_heap(i - 1, prev_stat)
+        assert_operator stat_heap[:slot_size], :>, prev_stat[:slot_size],
+          "Pool #{i} slot_size should be larger than pool #{i-1}"
+      end
       assert_operator stat_heap[:heap_live_slots], :<=, stat[:heap_live_slots]
       assert_operator stat_heap[:heap_free_slots], :<=, stat[:heap_free_slots]
       assert_operator stat_heap[:heap_final_slots], :<=, stat[:heap_final_slots]
