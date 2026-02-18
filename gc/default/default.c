@@ -5444,7 +5444,21 @@ gc_marks_finish(rb_objspace_t *objspace)
         }
 
         if (sweep_slots > max_free_slots) {
-            heap_pages_freeable_pages = (sweep_slots - max_free_slots) / HEAP_PAGE_OBJ_LIMIT;
+            size_t excess_slots = sweep_slots - max_free_slots;
+            size_t total_heap_pages = 0;
+            for (int i = 0; i < HEAP_COUNT; i++) {
+                total_heap_pages += heaps[i].total_pages;
+            }
+            /* Convert excess slots to pages using the actual average slots
+             * per page rather than HEAP_PAGE_OBJ_LIMIT (which is only correct
+             * for pool 0). Larger pools have far fewer slots per page, so using
+             * HEAP_PAGE_OBJ_LIMIT dramatically underestimates freeable pages. */
+            if (total_slots > 0 && total_heap_pages > 0) {
+                heap_pages_freeable_pages = excess_slots * total_heap_pages / total_slots;
+            }
+            else {
+                heap_pages_freeable_pages = 0;
+            }
         }
         else {
             heap_pages_freeable_pages = 0;
