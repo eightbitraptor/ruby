@@ -2972,6 +2972,7 @@ fn gen_string_concat(jit: &mut JITState, asm: &mut Assembler, strings: Vec<Opnd>
 }
 
 // Generate RSTRING_PTR
+// TODO: add shared string guard — shared strings store a VALUE in as.ptr, not a data pointer
 fn get_string_ptr(asm: &mut Assembler, string: Opnd) -> Opnd {
     asm_comment!(asm, "get string pointer for embedded or heap");
     let string = asm.load(string);

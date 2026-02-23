@@ -525,6 +525,8 @@ make_counters! {
     getbyte_idx_negative,
     getbyte_idx_out_of_bounds,
 
+    opt_str_shared,
+
     splatkw_not_hash,
     splatkw_not_nil,
 

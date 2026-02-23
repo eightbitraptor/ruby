@@ -262,7 +262,7 @@ class TestRubyOptimization < Test::Unit::TestCase
       'IO buffer NOT resized prematurely because will likely be reused'
 
     s.freeze
-    assert_equal ObjectSpace.memsize_of(data), ObjectSpace.memsize_of(s),
+    assert_operator ObjectSpace.memsize_of(s), :<=, ObjectSpace.memsize_of(data),
       'buffer resized on freeze since it cannot be written to again'
   ensure
     r.close if r

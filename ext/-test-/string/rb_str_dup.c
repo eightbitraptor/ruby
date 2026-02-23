@@ -21,7 +21,7 @@ bug_sharing_with_shared_p(VALUE self, VALUE str)
 {
     rb_check_type(str, T_STRING);
     if (bug_shared_string_p(self, str)) {
-        return bug_shared_string_p(self, RSTRING(str)->as.heap.aux.shared);
+        return bug_shared_string_p(self, RSTRING(str)->as.shared);
     }
     return Qfalse;
 }

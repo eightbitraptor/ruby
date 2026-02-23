@@ -156,27 +156,16 @@ enum ruby_rstring_flags {
      */
     RSTRING_NOEMBED         = RUBY_FL_USER1,
 
-    /* Actually,  string  encodings are  also  encoded  into the  flags,  using
-     * remaining bits.*/
+    /**
+     * The string shares its buffer with another string (the "shared root").
+     * When set, the `as.shared` union member holds the root VALUE and `capa`
+     * holds a byte offset into the root's buffer.
+     */
+    RSTRING_SHARED          = RUBY_FL_USER0,
 
     /**
-     * This  flag has  something  to do  with infamous  "f"string.   What is  a
-     * fstring?  Well  it is a  special subkind  of strings that  is immutable,
-     * deduped globally, and managed  by our GC.  It is much  like a Symbol (in
-     * fact Symbols are  dynamic these days and are  backended using fstrings).
-     * This concept  has been  silently introduced  at some  point in  2.x era.
-     * Since  then it  gained  wider  acceptance in  the  core.  But  extension
-     * libraries could not know that until very recently.  Strings of this flag
-     * live in  a special Limbo deep  inside of the interpreter.   Never try to
-     * manipulate it by hand.
-     *
-     * @internal
-     *
-     * Fstrings  are not  the only  variant  strings that  we implement  today.
-     * Other things are behind-the-scene.  This is the only one that is visible
-     * from extension  library.  There  is no  clear reason why  it has  to be.
-     * Given there are more "polite" ways to create fstrings, it seems this bit
-     * need not be exposed to extension libraries.  Might better be hidden.
+     * This flag has something to do with infamous "fstring". Fstrings are
+     * immutable, globally deduped, and managed by our GC.
      */
     RSTRING_FSTR            = RUBY_FL_USER17
 };
@@ -200,56 +189,34 @@ struct RString {
 
     /**
      * Length of the string, not including terminating NUL character.
+     * Limited to UINT32_MAX (~4GB).
      *
      * @note  This is in bytes.
      */
-    long len;
+    uint32_t len;
+
+    /**
+     * Multi-purpose field, meaning depends on flags:
+     * - !NOEMBED (embedded): unused
+     * - NOEMBED && !SHARED: heap buffer capacity
+     * - NOEMBED && SHARED: byte offset into shared root's buffer
+     * - PRECOMPUTED_HASH: precomputed hash value (32-bit)
+     */
+    uint32_t capa;
 
     /** String's specific fields. */
     union {
+        /** Pointer to heap-allocated buffer (independent heap strings). */
+        char *ptr;
+
+        /** Shared root VALUE (shared strings; RSTRING_SHARED flag set). */
+        VALUE shared;
 
         /**
-         * Strings  that use  separated  memory region  for  contents use  this
-         * pattern.
+         * Embedded contents (length 1 array for C compatibility).
+         * @see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=102452
          */
-        struct {
-            /**
-             * Pointer to  the contents of  the string.   In the old  days each
-             * string had  dedicated memory  regions.  That  is no  longer true
-             * today,  but there  still are  strings of  such properties.  This
-             * field could be used to point such things.
-             */
-            char *ptr;
-
-            /** Auxiliary info. */
-            union {
-
-                /**
-                 * Capacity of `*ptr`.  A continuous  memory region of at least
-                 * `capa` bytes  is expected to  exist at `*ptr`.  This  can be
-                 * bigger than `len`.
-                 */
-                long capa;
-
-                /**
-                 * Parent  of the  string.   Nowadays strings  can share  their
-                 * contents each other, constructing  gigantic nest of objects.
-                 * This situation is called "shared",  and this is the field to
-                 * control such properties.
-                 */
-                VALUE shared;
-            } aux;
-        } heap;
-
-        /** Embedded contents. */
-        struct {
-            /* This is a length 1 array because:
-             *   1. GCC has a bug that does not optimize C flexible array members
-             *      (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=102452)
-             *   2. Zero length arrays are not supported by all compilers
-             */
-            char ary[1];
-        } embed;
+        char ary[1];
     } as;
 };
 
@@ -366,7 +333,7 @@ RBIMPL_ATTR_ARTIFICIAL()
 static inline long
 RSTRING_LEN(VALUE str)
 {
-    return RSTRING(str)->len;
+    return (long)RSTRING(str)->len;
 }
 
 RBIMPL_ATTR_ARTIFICIAL()
@@ -380,17 +347,23 @@ RBIMPL_ATTR_ARTIFICIAL()
 static inline char *
 RSTRING_PTR(VALUE str)
 {
-    char *ptr = RB_FL_TEST_RAW(str, RSTRING_NOEMBED) ?
-        RSTRING(str)->as.heap.ptr :
-        RSTRING(str)->as.embed.ary;
+    char *ptr;
+
+    if (!RB_FL_TEST_RAW(str, RSTRING_NOEMBED)) {
+        ptr = RSTRING(str)->as.ary;
+    }
+    else if (RB_UNLIKELY(RB_FL_TEST_RAW(str, RSTRING_SHARED))) {
+        VALUE root = RSTRING(str)->as.shared;
+        RUBY_ASSERT(RB_FL_TEST_RAW(root, RUBY_T_MASK) == RUBY_T_STRING);
+        ptr = (RB_FL_TEST_RAW(root, RSTRING_NOEMBED) ?
+            RSTRING(root)->as.ptr : RSTRING(root)->as.ary)
+            + RSTRING(str)->capa;
+    }
+    else {
+        ptr = RSTRING(str)->as.ptr;
+    }
 
     if (RUBY_DEBUG && RB_UNLIKELY(! ptr)) {
-        /* :BEWARE: @shyouhei thinks  that currently, there are  rooms for this
-         * function to return  NULL.  Better check here for maximum safety.
-         *
-         * Also,  this is  not rb_warn()  because RSTRING_PTR()  can be  called
-         * during GC (see  what obj_info() does).  rb_warn()  needs to allocate
-         * Ruby objects.  That is not possible at this moment. */
         rb_debug_rstring_null_ptr("RSTRING_PTR");
     }
 
@@ -408,17 +381,7 @@ RBIMPL_ATTR_ARTIFICIAL()
 static inline char *
 RSTRING_END(VALUE str)
 {
-    char *ptr = RB_FL_TEST_RAW(str, RSTRING_NOEMBED) ?
-        RSTRING(str)->as.heap.ptr :
-        RSTRING(str)->as.embed.ary;
-    long len = RSTRING_LEN(str);
-
-    if (RUBY_DEBUG && RB_UNLIKELY(!ptr)) {
-        /* Ditto. */
-        rb_debug_rstring_null_ptr("RSTRING_END");
-    }
-
-    return &ptr[len];
+    return RSTRING_PTR(str) + RSTRING_LEN(str);
 }
 
 RBIMPL_ATTR_ARTIFICIAL()

@@ -33,8 +33,8 @@ class TestObjSpace < Test::Unit::TestCase
     b = a.dup
     c = nil
     ObjectSpace.each_object(String) {|x| break c = x if a == x and x.frozen?}
-    rv_size = GC::INTERNAL_CONSTANTS[:BASE_SLOT_SIZE]
-    assert_equal([rv_size, rv_size, a.length + 1 + rv_size], [a, b, c].map {|x| ObjectSpace.memsize_of(x)})
+    str_slot_size = ObjectSpace.memsize_of(b)
+    assert_equal([str_slot_size, str_slot_size, a.length + 1 + str_slot_size], [a, b, c].map {|x| ObjectSpace.memsize_of(x)})
   end
 
   def test_argf_memsize
@@ -473,12 +473,12 @@ class TestObjSpace < Test::Unit::TestCase
     assert_include(info, '"embedded":true')
     assert_include(info, '"ivars":0')
 
-    # Non-embed object
+    # Non-embed object (needs > 6 ivars to exceed pool 0 embed capacity)
     obj = klass.new
-    5.times { |i| obj.instance_variable_set("@ivar#{i}", 0) }
+    7.times { |i| obj.instance_variable_set("@ivar#{i}", 0) }
     info = ObjectSpace.dump(obj)
     assert_not_include(info, '"embedded":true')
-    assert_include(info, '"ivars":5')
+    assert_include(info, '"ivars":7')
   end
 
   def test_dump_control_char

@@ -5977,7 +5977,7 @@ fn jit_rb_str_bytesize(
 
     asm_comment!(asm, "get string length");
     let str_len_opnd = Opnd::mem(
-        std::os::raw::c_long::BITS as u8,
+        32, // uint32_t len
         asm.load(recv),
         RUBY_OFFSET_RSTRING_LEN as i32,
     );
@@ -6150,7 +6150,7 @@ fn jit_rb_str_getbyte(
     asm_comment!(asm, "get string length");
     let recv = asm.load(recv);
     let str_len_opnd = Opnd::mem(
-        std::os::raw::c_long::BITS as u8,
+        32, // uint32_t len
         asm.load(recv),
         RUBY_OFFSET_RSTRING_LEN as i32,
     );
@@ -6278,7 +6278,7 @@ fn jit_rb_str_empty_p(
 
     asm_comment!(asm, "get string length");
     let str_len_opnd = Opnd::mem(
-        std::os::raw::c_long::BITS as u8,
+        32, // uint32_t len
         asm.load(recv_opnd),
         RUBY_OFFSET_RSTRING_LEN as i32,
     );
@@ -7352,6 +7352,12 @@ fn get_string_ptr(asm: &mut Assembler, string_reg: Opnd) -> Opnd {
     asm_comment!(asm, "get string pointer for embedded or heap");
 
     let flags_opnd = Opnd::mem(VALUE_BITS, string_reg, RUBY_OFFSET_RBASIC_FLAGS);
+
+    // Guard: shared strings store a VALUE in as.ptr, not a data pointer.
+    // Deopt and let the interpreter handle them.
+    asm.test(flags_opnd, (RUBY_ELTS_SHARED as u64).into());
+    asm.jnz(Target::side_exit(Counter::opt_str_shared));
+
     asm.test(flags_opnd, (RSTRING_NOEMBED as u64).into());
     let heap_ptr_opnd = asm.load(Opnd::mem(
         usize::BITS as u8,
