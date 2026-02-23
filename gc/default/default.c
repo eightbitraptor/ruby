@@ -1980,38 +1980,9 @@ heap_add_page(rb_objspace_t *objspace, rb_heap_t *heap, struct heap_page *page)
     GC_ASSERT(!heap->sweeping_page);
     GC_ASSERT(heap_page_in_global_empty_pages_pool(objspace, page));
 
-<<<<<<< HEAD
-    /* Align start to the first slot_size boundary after the page header */
-||||||| parent of 8abc616f36 (gc: use power-of-2 size pool slot sizes)
-    /* adjust obj_limit (object number available in this page) */
-=======
     /* Align start to slot_size boundary (both are powers of 2) */
->>>>>>> 8abc616f36 (gc: use power-of-2 size pool slot sizes)
     uintptr_t start = (uintptr_t)page->body + sizeof(struct heap_page_header);
-<<<<<<< HEAD
-    size_t remainder = start % heap->slot_size;
-    if (remainder != 0) {
-        start += heap->slot_size - remainder;
-    }
-||||||| parent of 8abc616f36 (gc: use power-of-2 size pool slot sizes)
-    if (start % BASE_SLOT_SIZE != 0) {
-        int delta = BASE_SLOT_SIZE - (start % BASE_SLOT_SIZE);
-        start = start + delta;
-        GC_ASSERT(NUM_IN_PAGE(start) == 0 || NUM_IN_PAGE(start) == 1);
-
-        /* Find a num in page that is evenly divisible by `stride`.
-         * This is to ensure that objects are aligned with bit planes.
-         * In other words, ensure there are an even number of objects
-         * per bit plane. */
-        if (NUM_IN_PAGE(start) == 1) {
-            start += heap->slot_size - BASE_SLOT_SIZE;
-        }
-
-        GC_ASSERT(NUM_IN_PAGE(start) * BASE_SLOT_SIZE % heap->slot_size == 0);
-    }
-=======
     start = (start + heap->slot_size - 1) & ~((uintptr_t)heap->slot_size - 1);
->>>>>>> 8abc616f36 (gc: use power-of-2 size pool slot sizes)
 
     int slot_count = (int)((HEAP_PAGE_SIZE - (start - (uintptr_t)page->body))/heap->slot_size);
 

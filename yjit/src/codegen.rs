@@ -7320,7 +7320,7 @@ fn get_array_len(asm: &mut Assembler, array_opnd: Opnd) -> Opnd {
         _ => asm.load(array_opnd),
     };
     let array_len_opnd = Opnd::mem(
-        32, // uint32_t len
+        std::os::raw::c_long::BITS as u8,
         array_reg,
         RUBY_OFFSET_RARRAY_AS_HEAP_LEN,
     );

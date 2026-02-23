@@ -3481,7 +3481,7 @@ rb_str_resize(VALUE str, long len)
         }
         else if (str_embed_capa(str) >= len + termlen) {
             capa = RSTRING(str)->capa;
-            char *ptr = STR_HEAP_PTR(str);
+            char *ptr = RSTRING_PTR(str);
             STR_SET_EMBED(str);
             if (slen > len) slen = len;
             if (slen > 0) MEMCPY(RSTRING(str)->as.ary, ptr, char, slen);
