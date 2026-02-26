@@ -1605,6 +1605,20 @@ rb_gc_impl_get_measure_total_time(void *objspace_ptr)
     return objspace->flags.measure_gc;
 }
 
+static void
+gc_heap_compute_init_slots(size_t *init_slots, size_t total_pages, size_t floor_pages)
+{
+    size_t budget = total_pages - floor_pages * HEAP_COUNT;
+
+    for (int i = 0; i < HEAP_COUNT; i++) {
+        size_t pages = floor_pages
+            + (budget * gc_heap_init_weights[i] + GC_HEAP_INIT_WEIGHT_SUM / 2)
+            / GC_HEAP_INIT_WEIGHT_SUM;
+        size_t slot_size = (size_t)((1 << i) * BASE_SLOT_SIZE);
+        init_slots[i] = pages * (HEAP_PAGE_SIZE / slot_size);
+    }
+}
+
 static size_t
 minimum_slots_for_heap(rb_objspace_t *objspace, rb_heap_t *heap)
 {
