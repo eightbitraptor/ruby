@@ -9582,11 +9582,10 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
 #if RGENGC_ESTIMATE_OLDMALLOC
     objspace->rgengc.oldmalloc_increase_limit = gc_params.oldmalloc_limit_min;
 #endif
-    /* Set size pools allocatable pages. */
-    for (int i = 0; i < HEAP_COUNT; i++) {
-        /* Set the default value of heap_init_slots. */
-        gc_params.heap_init_slots[i] = GC_HEAP_INIT_SLOTS;
-    }
+    /* Compute per-pool init slots from the bimodal page distribution. */
+    gc_heap_compute_init_slots(gc_params.heap_init_slots,
+                               GC_HEAP_INIT_TOTAL_PAGES,
+                               GC_HEAP_INIT_FLOOR_PAGES);
 
     init_mark_stack(&objspace->mark_stack);
 
