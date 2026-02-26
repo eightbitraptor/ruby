@@ -220,7 +220,7 @@ static const unsigned int gc_heap_init_weights[HEAP_COUNT] = {
 #define GC_HEAP_INIT_WEIGHT_SUM 20846
 
 #ifndef GC_HEAP_INIT_TOTAL_PAGES
-#define GC_HEAP_INIT_TOTAL_PAGES 195  /* ~3.0 MiB at 64 KiB/page */
+#define GC_HEAP_INIT_TOTAL_PAGES 195  /* ~12 MiB at 64 KiB/page */
 #endif
 #ifndef GC_HEAP_INIT_FLOOR_PAGES
 #define GC_HEAP_INIT_FLOOR_PAGES 6
