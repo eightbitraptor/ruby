@@ -217,7 +217,7 @@ static const unsigned int gc_heap_init_weights[HEAP_COUNT] = {
 #define GC_HEAP_INIT_WEIGHT_SUM 20846
 
 #ifndef GC_HEAP_INIT_TOTAL_PAGES
-#define GC_HEAP_INIT_TOTAL_PAGES 195  /* ~12 MiB at 64 KiB/page */
+#define GC_HEAP_INIT_TOTAL_PAGES 195
 #endif
 #ifndef GC_HEAP_INIT_FLOOR_PAGES
 #define GC_HEAP_INIT_FLOOR_PAGES 6
@@ -7969,7 +7969,7 @@ get_envparam_double(const char *name, double *default_value, double lower_bound,
  * * RUBY_GC_HEAP_INIT_TOTAL_PAGES (new)
  *   - Total page budget for initial heap allocation across all pools.
  *     Pages are distributed proportionally using a bimodal curve.
- *     Default: 195 (~12 MiB at 64 KiB/page).
+ *     Default: 195.
  * * RUBY_GC_HEAP_INIT_FLOOR_PAGES (new)
  *   - Minimum pages per pool. Ensures no pool starts empty.
  *     Default: 6.
