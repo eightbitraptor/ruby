@@ -7966,6 +7966,14 @@ get_envparam_double(const char *name, double *default_value, double lower_bound,
  *     where R is this factor and
  *           N is the number of old objects just after last full GC.
  *
+ * * RUBY_GC_HEAP_INIT_TOTAL_PAGES (new)
+ *   - Total page budget for initial heap allocation across all pools.
+ *     Pages are distributed proportionally using a bimodal curve.
+ *     Default: 195 (~12 MiB at 64 KiB/page).
+ * * RUBY_GC_HEAP_INIT_FLOOR_PAGES (new)
+ *   - Minimum pages per pool. Ensures no pool starts empty.
+ *     Default: 6.
+ *
  *  * obsolete
  *    * RUBY_FREE_MIN       -> RUBY_GC_HEAP_FREE_SLOTS (from 2.1)
  *    * RUBY_HEAP_MIN_SLOTS -> RUBY_GC_HEAP_INIT_SLOTS (from 2.1)
@@ -7986,6 +7994,19 @@ rb_gc_impl_set_params(void *objspace_ptr)
     /* RUBY_GC_HEAP_FREE_SLOTS */
     if (get_envparam_size("RUBY_GC_HEAP_FREE_SLOTS", &gc_params.heap_free_slots, 0)) {
         /* ok */
+    }
+
+    /* RUBY_GC_HEAP_INIT_TOTAL_PAGES / RUBY_GC_HEAP_INIT_FLOOR_PAGES:
+     * Recompute the bimodal init slot distribution if either is set. */
+    {
+        size_t total_pages = GC_HEAP_INIT_TOTAL_PAGES;
+        size_t floor_pages = GC_HEAP_INIT_FLOOR_PAGES;
+        int recompute = 0;
+        recompute |= get_envparam_size("RUBY_GC_HEAP_INIT_TOTAL_PAGES", &total_pages, 0);
+        recompute |= get_envparam_size("RUBY_GC_HEAP_INIT_FLOOR_PAGES", &floor_pages, 0);
+        if (recompute) {
+            gc_heap_compute_init_slots(gc_params.heap_init_slots, total_pages, floor_pages);
+        }
     }
 
     for (int i = 0; i < HEAP_COUNT; i++) {
