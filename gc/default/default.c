@@ -201,6 +201,31 @@ typedef struct ractor_newobj_cache {
     rb_ractor_newobj_heap_cache_t heap_caches[HEAP_COUNT];
 } rb_ractor_newobj_cache_t;
 
+/*
+ * Bimodal page distribution weights for heap initialization.
+ *
+ * Two Gaussian modes fitted to lobsters benchmark object populations:
+ *   Mode 1: IMEMO/string peak at pool 0 (sigma=0.7)
+ *   Mode 2: class/hash peak at pool 2 (sigma=0.4, weight=0.65)
+ *
+ * Raw: G(i,0,0.7) + 0.65*G(i,2,0.4), scaled by 10000 and rounded.
+ * The shape encodes the bimodal object population of a typical Ruby app:
+ *   Pool 0 (40B):  IMEMOs — call caches, method entries, cref chains
+ *   Pool 2 (160B): CLASSes, HASHes, ICLASSes — framework infrastructure
+ *   Pool 1 (80B):  Valley — short strings, too large for IMEMOs, too small for classes
+ */
+static const unsigned int gc_heap_init_weights[HEAP_COUNT] = {
+    10000, 3890, 6669, 287, 0
+};
+#define GC_HEAP_INIT_WEIGHT_SUM 20846
+
+#ifndef GC_HEAP_INIT_TOTAL_PAGES
+#define GC_HEAP_INIT_TOTAL_PAGES 195  /* ~3.0 MiB at 64 KiB/page */
+#endif
+#ifndef GC_HEAP_INIT_FLOOR_PAGES
+#define GC_HEAP_INIT_FLOOR_PAGES 6
+#endif
+
 typedef struct {
     size_t heap_init_slots[HEAP_COUNT];
     size_t heap_free_slots;
