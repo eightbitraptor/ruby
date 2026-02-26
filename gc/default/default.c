@@ -1608,13 +1608,17 @@ rb_gc_impl_get_measure_total_time(void *objspace_ptr)
 static void
 gc_heap_compute_init_slots(size_t *init_slots, size_t total_pages, size_t floor_pages)
 {
-    size_t budget = total_pages - floor_pages * HEAP_COUNT;
+    size_t floor_total = floor_pages * HEAP_COUNT;
+    if (floor_total > total_pages) floor_total = total_pages;
+    size_t budget = total_pages - floor_total;
 
     for (int i = 0; i < HEAP_COUNT; i++) {
         size_t pages = floor_pages
             + (budget * gc_heap_init_weights[i] + GC_HEAP_INIT_WEIGHT_SUM / 2)
             / GC_HEAP_INIT_WEIGHT_SUM;
         size_t slot_size = (size_t)((1 << i) * BASE_SLOT_SIZE);
+        /* Intentionally ignores page header alignment overhead; see heap_add_page.
+         * A slight overcount means at most one extra page allocated per pool. */
         init_slots[i] = pages * (HEAP_PAGE_SIZE / slot_size);
     }
 }
