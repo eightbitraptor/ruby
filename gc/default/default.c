@@ -2125,13 +2125,6 @@ heap_prepare(rb_objspace_t *objspace, rb_heap_t *heap)
 {
     GC_ASSERT(heap->free_pages == NULL);
 
-    if (heap->total_slots < gc_params.heap_init_slots[heap - heaps] &&
-            heap->sweeping_page == NULL) {
-        heap_page_allocate_and_initialize_force(objspace, heap);
-        GC_ASSERT(heap->free_pages != NULL);
-        return;
-    }
-
     /* Continue incremental marking or lazy sweeping, if in any of those steps. */
     gc_continue(objspace, heap);
 
@@ -8016,6 +8009,12 @@ rb_gc_impl_set_params(void *objspace_ptr)
         get_envparam_size(env_key, &gc_params.heap_init_slots[i], 0);
     }
 
+    /* Re-seed allocation budget from (possibly overridden) init_slots. */
+    objspace->heap_pages.allocatable_slots = 0;
+    for (int i = 0; i < HEAP_COUNT; i++) {
+        objspace->heap_pages.allocatable_slots += gc_params.heap_init_slots[i];
+    }
+
     get_envparam_double("RUBY_GC_HEAP_GROWTH_FACTOR", &gc_params.growth_factor, 1.0, 0.0, FALSE);
     get_envparam_size  ("RUBY_GC_HEAP_GROWTH_MAX_SLOTS", &gc_params.growth_max_slots, 0);
     get_envparam_double("RUBY_GC_HEAP_FREE_SLOTS_MIN_RATIO", &gc_params.heap_free_slots_min_ratio,
@@ -9604,6 +9603,12 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
     gc_heap_compute_init_slots(gc_params.heap_init_slots,
                                GC_HEAP_INIT_TOTAL_PAGES,
                                GC_HEAP_INIT_FLOOR_PAGES);
+
+    /* Seed the allocation budget so heaps can grow to their init_slots
+     * targets through normal page allocation. */
+    for (int i = 0; i < HEAP_COUNT; i++) {
+        objspace->heap_pages.allocatable_slots += gc_params.heap_init_slots[i];
+    }
 
     init_mark_stack(&objspace->mark_stack);
 
