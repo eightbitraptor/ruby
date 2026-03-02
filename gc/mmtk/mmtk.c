@@ -16,6 +16,37 @@
 #include <sys/sysctl.h>
 #endif
 
+#ifndef VM_CHECK_MODE
+# define VM_CHECK_MODE RUBY_DEBUG
+#endif
+
+#ifndef RACTOR_CHECK_MODE
+# define RACTOR_CHECK_MODE (VM_CHECK_MODE || RUBY_DEBUG) && (SIZEOF_UINT64_T == SIZEOF_VALUE)
+#endif
+
+#if RACTOR_CHECK_MODE || GC_DEBUG
+struct rvalue_overhead {
+# if RACTOR_CHECK_MODE
+    uint32_t _ractor_belonging_id;
+# endif
+# if GC_DEBUG
+    const char *file;
+    int line;
+# endif
+};
+
+# define RVALUE_OVERHEAD (sizeof(struct { \
+    union { \
+        struct rvalue_overhead overhead; \
+        VALUE value; \
+    }; \
+}))
+#else
+# define RVALUE_OVERHEAD 0
+#endif
+
+static inline size_t mmtk_obj_full_slot_size(VALUE obj);
+
 struct objspace {
     bool measure_gc_time;
     bool gc_stress;
@@ -334,7 +365,7 @@ rb_mmtk_call_obj_free(MMTk_ObjectReference object)
     rb_gc_obj_free(objspace, obj);
 
 #ifdef MMTK_DEBUG
-    memset((void *)obj, 0, rb_gc_impl_obj_slot_size(obj));
+    memset((void *)obj, 0, mmtk_obj_full_slot_size(obj));
 #endif
 }
 
@@ -635,10 +666,10 @@ rb_gc_impl_init(void)
 {
     VALUE gc_constants = rb_hash_new();
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("BASE_SLOT_SIZE")), SIZET2NUM(SIZEOF_VALUE >= 8 ? 32 : 16));
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_SIZE")), SIZET2NUM(SIZEOF_VALUE >= 8 ? 64 : 32));
+    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_SIZE")), SIZET2NUM((SIZEOF_VALUE >= 8 ? 64 : 32) - RVALUE_OVERHEAD));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("RBASIC_SIZE")), SIZET2NUM(sizeof(struct RBasic)));
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_OVERHEAD")), INT2NUM(0));
-    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVARGC_MAX_ALLOCATE_SIZE")), LONG2FIX(MMTK_MAX_OBJ_SIZE));
+    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_OVERHEAD")), SIZET2NUM(RVALUE_OVERHEAD));
+    rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVARGC_MAX_ALLOCATE_SIZE")), LONG2FIX(MMTK_MAX_OBJ_SIZE - RVALUE_OVERHEAD));
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("HEAP_COUNT")), LONG2FIX(MMTK_HEAP_COUNT));
     // TODO: correctly set RVALUE_OLD_AGE when we have generational GC support
     rb_hash_aset(gc_constants, ID2SYM(rb_intern("RVALUE_OLD_AGE")), INT2FIX(0));
@@ -655,10 +686,18 @@ rb_gc_impl_init(void)
     rb_define_singleton_method(rb_mGC, "verify_compaction_references", rb_f_notimplement, -1);
 }
 
+static size_t heap_usable_sizes[MMTK_HEAP_COUNT + 1] = { 0 };
+
 size_t *
 rb_gc_impl_heap_sizes(void *objspace_ptr)
 {
-    return heap_sizes;
+    if (heap_usable_sizes[0] == 0) {
+        for (int i = 0; i < MMTK_HEAP_COUNT; i++) {
+            heap_usable_sizes[i] = heap_sizes[i] - RVALUE_OVERHEAD;
+        }
+    }
+
+    return heap_usable_sizes;
 }
 
 int
@@ -814,10 +853,11 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
     struct objspace *objspace = objspace_ptr;
     struct MMTk_ractor_cache *ractor_cache = cache_ptr;
 
+    alloc_size += RVALUE_OVERHEAD;
+
     if (alloc_size > MMTK_MAX_OBJ_SIZE) rb_bug("too big");
     for (int i = 0; i < MMTK_HEAP_COUNT; i++) {
-        if (alloc_size == heap_sizes[i]) break;
-        if (alloc_size < heap_sizes[i]) {
+        if (alloc_size <= heap_sizes[i]) {
             alloc_size = heap_sizes[i];
             break;
         }
@@ -845,23 +885,35 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
     // TODO: only add when object needs obj_free to be called
     mmtk_add_obj_free_candidate(alloc_obj, obj_can_parallel_free_p((VALUE)alloc_obj));
 
+#if RACTOR_CHECK_MODE
+    void rb_ractor_setup_belonging(VALUE obj);
+    rb_ractor_setup_belonging((VALUE)alloc_obj);
+#endif
+
     objspace->total_allocated_objects++;
 
     return (VALUE)alloc_obj;
 }
 
-size_t
-rb_gc_impl_obj_slot_size(VALUE obj)
+static inline size_t
+mmtk_obj_full_slot_size(VALUE obj)
 {
     return ((VALUE *)obj)[-1];
 }
 
 size_t
+rb_gc_impl_obj_slot_size(VALUE obj)
+{
+    return mmtk_obj_full_slot_size(obj) - RVALUE_OVERHEAD;
+}
+
+size_t
 rb_gc_impl_heap_id_for_size(void *objspace_ptr, size_t size)
 {
+    size += RVALUE_OVERHEAD;
+
     for (int i = 0; i < MMTK_HEAP_COUNT; i++) {
-        if (size == heap_sizes[i]) return i;
-        if (size < heap_sizes[i])  return i;
+        if (size <= heap_sizes[i]) return i;
     }
 
     rb_bug("size too big");
@@ -870,7 +922,7 @@ rb_gc_impl_heap_id_for_size(void *objspace_ptr, size_t size)
 bool
 rb_gc_impl_size_allocatable_p(size_t size)
 {
-    return size <= MMTK_MAX_OBJ_SIZE;
+    return size <= MMTK_MAX_OBJ_SIZE - RVALUE_OVERHEAD;
 }
 
 // Malloc
@@ -1073,7 +1125,7 @@ rb_gc_impl_each_objects_i(VALUE obj, void *d)
 {
     struct rb_gc_impl_each_objects_data *data = d;
 
-    size_t slot_size = rb_gc_impl_obj_slot_size(obj);
+    size_t slot_size = mmtk_obj_full_slot_size(obj);
 
     return data->func((void *)obj, (void *)(obj + slot_size), slot_size, data->data);
 }
