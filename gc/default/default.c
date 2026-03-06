@@ -109,9 +109,6 @@
 # define RUBY_DEBUG_LOG(...)
 #endif
 
-#ifndef GC_HEAP_INIT_SLOTS
-#define GC_HEAP_INIT_SLOTS 10000
-#endif
 #ifndef GC_HEAP_FREE_SLOTS
 #define GC_HEAP_FREE_SLOTS  4096
 #endif
@@ -201,6 +198,31 @@ typedef struct ractor_newobj_cache {
     rb_ractor_newobj_heap_cache_t heap_caches[HEAP_COUNT];
 } rb_ractor_newobj_cache_t;
 
+/*
+ * Bimodal page distribution weights for heap initialization.
+ *
+ * Two Gaussian modes fitted to lobsters benchmark object populations:
+ *   Mode 1: IMEMO/string peak at pool 0 (sigma=0.7)
+ *   Mode 2: class/hash peak at pool 2 (sigma=0.4, weight=0.65)
+ *
+ * Raw: G(i,0,0.7) + 0.65*G(i,2,0.4), scaled by 10000 and rounded.
+ * The shape encodes the bimodal object population of a typical Ruby app:
+ *   Pool 0 (40B):  IMEMOs — call caches, method entries, cref chains
+ *   Pool 2 (160B): CLASSes, HASHes, ICLASSes — framework infrastructure
+ *   Pool 1 (80B):  Valley — short strings, too large for IMEMOs, too small for classes
+ */
+static const unsigned int gc_heap_init_weights[HEAP_COUNT] = {
+    10000, 3890, 6669, 287, 0
+};
+#define GC_HEAP_INIT_WEIGHT_SUM 20846
+
+#ifndef GC_HEAP_INIT_TOTAL_PAGES
+#define GC_HEAP_INIT_TOTAL_PAGES 195
+#endif
+#ifndef GC_HEAP_INIT_FLOOR_PAGES
+#define GC_HEAP_INIT_FLOOR_PAGES 6
+#endif
+
 typedef struct {
     size_t heap_init_slots[HEAP_COUNT];
     size_t heap_free_slots;
@@ -223,7 +245,7 @@ typedef struct {
 } ruby_gc_params_t;
 
 static ruby_gc_params_t gc_params = {
-    { GC_HEAP_INIT_SLOTS },
+    { 0 }, /* set by gc_heap_compute_init_slots in rb_gc_impl_objspace_init */
     GC_HEAP_FREE_SLOTS,
     GC_HEAP_GROWTH_FACTOR,
     GC_HEAP_GROWTH_MAX_SLOTS,
@@ -1580,6 +1602,24 @@ rb_gc_impl_get_measure_total_time(void *objspace_ptr)
     return objspace->flags.measure_gc;
 }
 
+static void
+gc_heap_compute_init_slots(size_t *init_slots, size_t total_pages, size_t floor_pages)
+{
+    size_t floor_total = floor_pages * HEAP_COUNT;
+    if (floor_total > total_pages) floor_total = total_pages;
+    size_t budget = total_pages - floor_total;
+
+    for (int i = 0; i < HEAP_COUNT; i++) {
+        size_t pages = floor_pages
+            + (budget * gc_heap_init_weights[i] + GC_HEAP_INIT_WEIGHT_SUM / 2)
+            / GC_HEAP_INIT_WEIGHT_SUM;
+        size_t slot_size = (size_t)((1 << i) * BASE_SLOT_SIZE);
+        /* Intentionally ignores page header alignment overhead; see heap_add_page.
+         * A slight overcount means at most one extra page allocated per pool. */
+        init_slots[i] = pages * (HEAP_PAGE_SIZE / slot_size);
+    }
+}
+
 static size_t
 minimum_slots_for_heap(rb_objspace_t *objspace, rb_heap_t *heap)
 {
@@ -2084,13 +2124,6 @@ static void
 heap_prepare(rb_objspace_t *objspace, rb_heap_t *heap)
 {
     GC_ASSERT(heap->free_pages == NULL);
-
-    if (heap->total_slots < gc_params.heap_init_slots[heap - heaps] &&
-            heap->sweeping_page == NULL) {
-        heap_page_allocate_and_initialize_force(objspace, heap);
-        GC_ASSERT(heap->free_pages != NULL);
-        return;
-    }
 
     /* Continue incremental marking or lazy sweeping, if in any of those steps. */
     gc_continue(objspace, heap);
@@ -7926,6 +7959,14 @@ get_envparam_double(const char *name, double *default_value, double lower_bound,
  *     where R is this factor and
  *           N is the number of old objects just after last full GC.
  *
+ * * RUBY_GC_HEAP_INIT_TOTAL_PAGES (new)
+ *   - Total page budget for initial heap allocation across all pools.
+ *     Pages are distributed proportionally using a bimodal curve.
+ *     Default: 195.
+ * * RUBY_GC_HEAP_INIT_FLOOR_PAGES (new)
+ *   - Minimum pages per pool. Ensures no pool starts empty.
+ *     Default: 6.
+ *
  *  * obsolete
  *    * RUBY_FREE_MIN       -> RUBY_GC_HEAP_FREE_SLOTS (from 2.1)
  *    * RUBY_HEAP_MIN_SLOTS -> RUBY_GC_HEAP_INIT_SLOTS (from 2.1)
@@ -7948,11 +7989,30 @@ rb_gc_impl_set_params(void *objspace_ptr)
         /* ok */
     }
 
+    /* RUBY_GC_HEAP_INIT_TOTAL_PAGES / RUBY_GC_HEAP_INIT_FLOOR_PAGES:
+     * Recompute the bimodal init slot distribution if either is set. */
+    {
+        size_t total_pages = GC_HEAP_INIT_TOTAL_PAGES;
+        size_t floor_pages = GC_HEAP_INIT_FLOOR_PAGES;
+        int recompute = 0;
+        recompute |= get_envparam_size("RUBY_GC_HEAP_INIT_TOTAL_PAGES", &total_pages, 0);
+        recompute |= get_envparam_size("RUBY_GC_HEAP_INIT_FLOOR_PAGES", &floor_pages, 0);
+        if (recompute) {
+            gc_heap_compute_init_slots(gc_params.heap_init_slots, total_pages, floor_pages);
+        }
+    }
+
     for (int i = 0; i < HEAP_COUNT; i++) {
         char env_key[sizeof("RUBY_GC_HEAP_" "_INIT_SLOTS") + DECIMAL_SIZE_OF_BITS(sizeof(int) * CHAR_BIT)];
         snprintf(env_key, sizeof(env_key), "RUBY_GC_HEAP_%d_INIT_SLOTS", i);
 
         get_envparam_size(env_key, &gc_params.heap_init_slots[i], 0);
+    }
+
+    /* Re-seed allocation budget from (possibly overridden) init_slots. */
+    objspace->heap_pages.allocatable_slots = 0;
+    for (int i = 0; i < HEAP_COUNT; i++) {
+        objspace->heap_pages.allocatable_slots += gc_params.heap_init_slots[i];
     }
 
     get_envparam_double("RUBY_GC_HEAP_GROWTH_FACTOR", &gc_params.growth_factor, 1.0, 0.0, FALSE);
@@ -9539,10 +9599,15 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
 #if RGENGC_ESTIMATE_OLDMALLOC
     objspace->rgengc.oldmalloc_increase_limit = gc_params.oldmalloc_limit_min;
 #endif
-    /* Set size pools allocatable pages. */
+    /* Compute per-pool init slots from the bimodal page distribution. */
+    gc_heap_compute_init_slots(gc_params.heap_init_slots,
+                               GC_HEAP_INIT_TOTAL_PAGES,
+                               GC_HEAP_INIT_FLOOR_PAGES);
+
+    /* Seed the allocation budget so heaps can grow to their init_slots
+     * targets through normal page allocation. */
     for (int i = 0; i < HEAP_COUNT; i++) {
-        /* Set the default value of heap_init_slots. */
-        gc_params.heap_init_slots[i] = GC_HEAP_INIT_SLOTS;
+        objspace->heap_pages.allocatable_slots += gc_params.heap_init_slots[i];
     }
 
     init_mark_stack(&objspace->mark_stack);

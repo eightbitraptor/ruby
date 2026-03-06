@@ -553,6 +553,64 @@ class TestGc < Test::Unit::TestCase
     RUBY
   end
 
+  def test_bimodal_heap_init_distribution
+    # The bimodal distribution gives pool 0 ~139k init slots (vs old uniform 10k).
+    # Prove it by filling pool 0 to 50k without triggering GC.
+    assert_separately([{}, "-W0"], __FILE__, __LINE__, <<~RUBY, timeout: 60)
+      gc_count = GC.stat(:count)
+
+      # Fill pool 0 to 50,000 slots. Under the old uniform 10k default this
+      # would trigger GC; under the bimodal distribution (init_slots ~139k)
+      # it should not.
+      capa = (GC.stat_heap(0, :slot_size) - GC::INTERNAL_CONSTANTS[:RVALUE_OVERHEAD] - (2 * RbConfig::SIZEOF["void*"])) / RbConfig::SIZEOF["void*"]
+      while GC.stat_heap(0, :heap_eden_slots) < 50_000
+        Array.new(capa)
+      end
+
+      assert_equal gc_count, GC.stat(:count),
+        "Filling pool 0 to 50k should not trigger GC (bimodal init_slots ~139k)"
+    RUBY
+  end
+
+  def test_heap_init_total_pages_env
+    # RUBY_GC_HEAP_INIT_TOTAL_PAGES=400 raises pool 0 init_slots from ~139k to ~301k.
+    # Prove it by filling pool 0 to 200k without triggering GC.
+    env = { "RUBY_GC_HEAP_INIT_TOTAL_PAGES" => "400" }
+
+    assert_separately([env, "-W0"], __FILE__, __LINE__, <<~RUBY, timeout: 60)
+      gc_count = GC.stat(:count)
+
+      # Target 200k is above the default (~139k) but below the scaled (~301k).
+      # This should pass only because the env var raised the init_slots target.
+      capa = (GC.stat_heap(0, :slot_size) - GC::INTERNAL_CONSTANTS[:RVALUE_OVERHEAD] - (2 * RbConfig::SIZEOF["void*"])) / RbConfig::SIZEOF["void*"]
+      while GC.stat_heap(0, :heap_eden_slots) < 200_000
+        Array.new(capa)
+      end
+
+      assert_equal gc_count, GC.stat(:count),
+        "Filling pool 0 to 200k should not trigger GC with total_pages=400"
+    RUBY
+  end
+
+  def test_per_pool_init_slots_overrides_bimodal
+    # Per-pool env vars should override the bimodal defaults
+    env = { "RUBY_GC_HEAP_4_INIT_SLOTS" => "50000" }
+
+    assert_separately([env, "-W0"], __FILE__, __LINE__, <<~RUBY, timeout: 60)
+      # Pool 4 normally gets very few init slots (~600).
+      # With override to 50000, it should have at least that many.
+      gc_count = GC.stat(:count)
+
+      capa = (GC.stat_heap(4, :slot_size) - GC::INTERNAL_CONSTANTS[:RVALUE_OVERHEAD] - (2 * RbConfig::SIZEOF["void*"])) / RbConfig::SIZEOF["void*"]
+      while GC.stat_heap(4, :heap_eden_slots) < 50000
+        Array.new(capa)
+      end
+
+      assert_equal gc_count, GC.stat(:count),
+        "Filling pool 4 to 50000 should not trigger GC when RUBY_GC_HEAP_4_INIT_SLOTS=50000"
+    RUBY
+  end
+
   def test_profiler_enabled
     GC::Profiler.enable
     assert_equal(true, GC::Profiler.enabled?)

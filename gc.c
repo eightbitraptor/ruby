@@ -1693,6 +1693,48 @@ struct os_each_struct {
     VALUE of;
 };
 
+struct os_obj_contains_internal_ref_data {
+    bool found;
+};
+
+static int
+os_obj_hash_contains_internal_ref_i(VALUE key, VALUE value, VALUE arg)
+{
+    struct os_obj_contains_internal_ref_data *data = (void *)arg;
+
+    if ((!SPECIAL_CONST_P(key) && internal_object_p(key)) ||
+        (!SPECIAL_CONST_P(value) && internal_object_p(value))) {
+        data->found = true;
+        return ST_STOP;
+    }
+
+    return ST_CONTINUE;
+}
+
+static bool
+os_obj_contains_internal_ref_p(VALUE obj)
+{
+    switch (BUILTIN_TYPE(obj)) {
+      case T_ARRAY:
+        for (long i = 0; i < RARRAY_LEN(obj); i++) {
+            VALUE e = RARRAY_AREF(obj, i);
+            if (!SPECIAL_CONST_P(e) && internal_object_p(e)) {
+                return true;
+            }
+        }
+        return false;
+
+      case T_HASH: {
+        struct os_obj_contains_internal_ref_data data = { false };
+        rb_hash_foreach(obj, os_obj_hash_contains_internal_ref_i, (VALUE)&data);
+        return data.found;
+      }
+
+      default:
+        return false;
+    }
+}
+
 static int
 os_obj_of_i(void *vstart, void *vend, size_t stride, void *data)
 {
@@ -1700,13 +1742,12 @@ os_obj_of_i(void *vstart, void *vend, size_t stride, void *data)
 
     VALUE v = (VALUE)vstart;
     for (; v != (VALUE)vend; v += stride) {
-        if (!internal_object_p(v)) {
-            if (!oes->of || rb_obj_is_kind_of(v, oes->of)) {
-                if (!rb_multi_ractor_p() || rb_ractor_shareable_p(v)) {
-                    rb_yield(v);
-                    oes->num++;
-                }
-            }
+        if (internal_object_p(v)) continue;
+        if (oes->of && !rb_obj_is_kind_of(v, oes->of)) continue;
+        if (os_obj_contains_internal_ref_p(v)) continue;
+        if (!rb_multi_ractor_p() || rb_ractor_shareable_p(v)) {
+            rb_yield(v);
+            oes->num++;
         }
     }
 
