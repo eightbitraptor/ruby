@@ -455,6 +455,7 @@ count_imemo_objects(int argc, VALUE *argv, VALUE self)
         INIT_IMEMO_TYPE_ID(imemo_callcache);
         INIT_IMEMO_TYPE_ID(imemo_constcache);
         INIT_IMEMO_TYPE_ID(imemo_fields);
+        INIT_IMEMO_TYPE_ID(imemo_method_def);
 #undef INIT_IMEMO_TYPE_ID
     }
 

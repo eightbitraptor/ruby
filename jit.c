@@ -149,32 +149,32 @@ rb_get_cme_def_type(const rb_callable_method_entry_t *cme)
         return VM_METHOD_TYPE_UNDEF;
     }
     else {
-        return cme->def->type;
+        return METHOD_ENTRY_DEF(cme)->type;
     }
 }
 
 ID
 rb_get_cme_def_body_attr_id(const rb_callable_method_entry_t *cme)
 {
-    return cme->def->body.attr.id;
+    return METHOD_ENTRY_DEF(cme)->body.attr.id;
 }
 
 enum method_optimized_type
 rb_get_cme_def_body_optimized_type(const rb_callable_method_entry_t *cme)
 {
-    return cme->def->body.optimized.type;
+    return METHOD_ENTRY_DEF(cme)->body.optimized.type;
 }
 
 unsigned int
 rb_get_cme_def_body_optimized_index(const rb_callable_method_entry_t *cme)
 {
-    return cme->def->body.optimized.index;
+    return METHOD_ENTRY_DEF(cme)->body.optimized.index;
 }
 
 rb_method_cfunc_t *
 rb_get_cme_def_body_cfunc(const rb_callable_method_entry_t *cme)
 {
-    return UNALIGNED_MEMBER_PTR(cme->def, body.cfunc);
+    return UNALIGNED_MEMBER_PTR(METHOD_ENTRY_DEF(cme), body.cfunc);
 }
 
 uintptr_t

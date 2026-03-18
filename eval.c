@@ -999,7 +999,7 @@ rb_raise_jump(VALUE mesg, VALUE cause)
     ID mid = me->called_id;
 
     rb_vm_pop_frame(ec);
-    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_RETURN, self, me->def->original_id, mid, klass, Qnil);
+    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_RETURN, self, METHOD_ENTRY_DEF(me)->original_id, mid, klass, Qnil);
 
     rb_longjmp(ec, TAG_RAISE, mesg, cause);
 }
@@ -1176,7 +1176,7 @@ frame_func_id(const rb_control_frame_t *cfp)
     const rb_callable_method_entry_t *me = rb_vm_frame_method_entry(cfp);
 
     if (me) {
-        return me->def->original_id;
+        return METHOD_ENTRY_DEF(me)->original_id;
     }
     else {
         return 0;
@@ -1813,12 +1813,12 @@ refinement_import_methods_i(ID key, VALUE value, void *data)
     const rb_method_entry_t *me = (const rb_method_entry_t *)value;
     struct refinement_import_methods_arg *arg = (struct refinement_import_methods_arg *)data;
 
-    if (me->def->type != VM_METHOD_TYPE_ISEQ) {
+    if (METHOD_ENTRY_DEF(me)->type != VM_METHOD_TYPE_ISEQ) {
         rb_raise(rb_eArgError, "Can't import method which is not defined with Ruby code: %"PRIsVALUE"#%"PRIsVALUE, rb_class_path(arg->module), rb_id2str(key));
     }
-    rb_cref_t *new_cref = rb_vm_cref_dup_without_refinements(me->def->body.iseq.cref);
+    rb_cref_t *new_cref = rb_vm_cref_dup_without_refinements(METHOD_ENTRY_DEF(me)->body.iseq.cref);
     CREF_REFINEMENTS_SET(new_cref, CREF_REFINEMENTS(arg->cref));
-    rb_add_method_iseq(arg->refinement, key, me->def->body.iseq.iseqptr, new_cref, METHOD_ENTRY_VISI(me));
+    rb_add_method_iseq(arg->refinement, key, METHOD_ENTRY_DEF(me)->body.iseq.iseqptr, new_cref, METHOD_ENTRY_VISI(me));
     return ID_TABLE_CONTINUE;
 }
 

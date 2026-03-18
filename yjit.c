@@ -174,18 +174,18 @@ rb_full_cfunc_return(rb_execution_context_t *ec, VALUE return_value)
     const rb_callable_method_entry_t *me = rb_vm_frame_method_entry(cfp);
 
     RUBY_ASSERT_ALWAYS(RUBYVM_CFUNC_FRAME_P(cfp));
-    RUBY_ASSERT_ALWAYS(me->def->type == VM_METHOD_TYPE_CFUNC);
+    RUBY_ASSERT_ALWAYS(METHOD_ENTRY_DEF(me)->type == VM_METHOD_TYPE_CFUNC);
 
     // CHECK_CFP_CONSISTENCY("full_cfunc_return"); TODO revive this
 
     // Pop the C func's frame and fire the c_return TracePoint event
     // Note that this is the same order as vm_call_cfunc_with_frame().
     rb_vm_pop_frame(ec);
-    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_RETURN, cfp->self, me->def->original_id, me->called_id, me->owner, return_value);
+    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_RETURN, cfp->self, METHOD_ENTRY_DEF(me)->original_id, me->called_id, me->owner, return_value);
     // Note, this deviates from the interpreter in that users need to enable
     // a c_return TracePoint for this DTrace hook to work. A reasonable change
     // since the Ruby return event works this way as well.
-    RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec, me->owner, me->def->original_id);
+    RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec, me->owner, METHOD_ENTRY_DEF(me)->original_id);
 
     // Push return value into the caller's stack. We know that it's a frame that
     // uses cfp->sp because we are patching a call done with gen_send_cfunc().
@@ -468,7 +468,7 @@ rb_yjit_invokeblock_sp_pops(const struct rb_callinfo *ci)
 rb_serial_t
 rb_yjit_cme_ractor_serial(const rb_callable_method_entry_t *cme)
 {
-    return cme->def->body.bmethod.defined_ractor_id;
+    return METHOD_ENTRY_DEF(cme)->body.bmethod.defined_ractor_id;
 }
 
 // Setup jit_return to avoid returning a non-Qundef value on a non-FINISH frame.

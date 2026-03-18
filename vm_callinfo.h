@@ -360,7 +360,7 @@ vm_cc_new(VALUE klass,
     }
 
     if (cme) {
-        if (cme->def->type == VM_METHOD_TYPE_ATTRSET || cme->def->type == VM_METHOD_TYPE_IVAR) {
+        if (METHOD_ENTRY_DEF(cme)->type == VM_METHOD_TYPE_ATTRSET || METHOD_ENTRY_DEF(cme)->type == VM_METHOD_TYPE_IVAR) {
             vm_cc_attr_index_initialize(cc, INVALID_SHAPE_ID);
         }
     }
@@ -631,7 +631,7 @@ vm_cc_check_cme(const struct rb_callcache *cc, const rb_callable_method_entry_t 
     bool valid;
     RB_VM_LOCKING_NO_BARRIER() {
         valid = vm_cc_cme(cc) == cme ||
-            (cme->def->iseq_overload && vm_cc_cme(cc) == rb_vm_lookup_overloaded_cme(cme));
+            (METHOD_ENTRY_DEF(cme)->iseq_overload && vm_cc_cme(cc) == rb_vm_lookup_overloaded_cme(cme));
     }
     if (valid) {
         return true;
@@ -639,10 +639,10 @@ vm_cc_check_cme(const struct rb_callcache *cc, const rb_callable_method_entry_t 
 #if 1
         // debug print
 
-        fprintf(stderr, "iseq_overload:%d, cme:%p (def:%p), cm_cc_cme(cc):%p (def:%p)\n",
-                (int)cme->def->iseq_overload,
-                cme, cme->def,
-                vm_cc_cme(cc), vm_cc_cme(cc)->def);
+        fprintf(stderr, "iseq_overload:%d, cme:%p (def:%"PRIxVALUE"), cm_cc_cme(cc):%p (def:%"PRIxVALUE")\n",
+                (int)METHOD_ENTRY_DEF(cme)->iseq_overload,
+                (void *)cme, cme->def,
+                (void *)vm_cc_cme(cc), vm_cc_cme(cc)->def);
         rp(cme);
         rp(vm_cc_cme(cc));
         rp(rb_vm_lookup_overloaded_cme(cme));

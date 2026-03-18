@@ -5960,9 +5960,9 @@ rb_resolve_me_location(const rb_method_entry_t *me, VALUE resolved_location[5])
     if (!me->def) return NULL; // negative cme
 
   retry:
-    switch (me->def->type) {
+    switch (METHOD_ENTRY_DEF(me)->type) {
       case VM_METHOD_TYPE_ISEQ: {
-        const rb_iseq_t *iseq = me->def->body.iseq.iseqptr;
+        const rb_iseq_t *iseq = METHOD_ENTRY_DEF(me)->body.iseq.iseqptr;
         rb_iseq_location_t *loc = &ISEQ_BODY(iseq)->location;
         path = rb_iseq_path(iseq);
         beg_pos_lineno = INT2FIX(loc->code_location.beg_pos.lineno);
@@ -5972,7 +5972,7 @@ rb_resolve_me_location(const rb_method_entry_t *me, VALUE resolved_location[5])
         break;
       }
       case VM_METHOD_TYPE_BMETHOD: {
-        const rb_iseq_t *iseq = rb_proc_get_iseq(me->def->body.bmethod.proc, 0);
+        const rb_iseq_t *iseq = rb_proc_get_iseq(METHOD_ENTRY_DEF(me)->body.bmethod.proc, 0);
         if (iseq) {
             rb_iseq_location_t *loc;
             rb_iseq_check(iseq);
@@ -5987,10 +5987,10 @@ rb_resolve_me_location(const rb_method_entry_t *me, VALUE resolved_location[5])
         return NULL;
       }
       case VM_METHOD_TYPE_ALIAS:
-        me = me->def->body.alias.original_me;
+        me = METHOD_ENTRY_DEF(me)->body.alias.original_me;
         goto retry;
       case VM_METHOD_TYPE_REFINED:
-        me = me->def->body.refined.orig_me;
+        me = METHOD_ENTRY_DEF(me)->body.refined.orig_me;
         if (!me) return NULL;
         goto retry;
       default:

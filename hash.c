@@ -221,7 +221,7 @@ obj_any_hash(VALUE obj)
         const rb_callable_method_entry_t *cme = rb_callable_method_entry(klass, id_hash);
         if (cme && METHOD_ENTRY_BASIC(cme)) {
             // Optimize away the frame push overhead if it's the default Kernel#hash
-            if (cme->def->type == VM_METHOD_TYPE_CFUNC && cme->def->body.cfunc.func == (rb_cfunc_t)rb_obj_hash) {
+            if (METHOD_ENTRY_DEF(cme)->type == VM_METHOD_TYPE_CFUNC && METHOD_ENTRY_DEF(cme)->body.cfunc.func == (rb_cfunc_t)rb_obj_hash) {
                 hval = rb_obj_hash(obj);
             }
             else if (RBASIC_CLASS(cme->defined_class) == rb_mKernel) {

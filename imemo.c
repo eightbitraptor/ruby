@@ -5,6 +5,8 @@
 #include "internal/imemo.h"
 #include "internal/object.h"
 #include "internal/st.h"
+#include "vm_core.h"
+#include "method.h"
 #include "vm_callinfo.h"
 
 size_t rb_iseq_memsize(const rb_iseq_t *iseq);
@@ -30,6 +32,7 @@ rb_imemo_name(enum imemo_type type)
         IMEMO_NAME(throw_data);
         IMEMO_NAME(tmpbuf);
         IMEMO_NAME(fields);
+        IMEMO_NAME(method_def);
 #undef IMEMO_NAME
     }
     rb_bug("unreachable");
@@ -251,8 +254,10 @@ rb_imemo_memsize(VALUE obj)
       case imemo_memo:
         break;
       case imemo_ment:
-        size += sizeof(((rb_method_entry_t *)obj)->def);
-
+        /* def is now a separate imemo, not counted here */
+        break;
+      case imemo_method_def:
+        /* no external allocations */
         break;
       case imemo_svar:
         break;
@@ -290,52 +295,52 @@ moved_or_living_object_strictly_p(VALUE obj)
 }
 
 static void
+mark_and_move_method_definition(rb_method_definition_t *def, bool reference_updating)
+{
+    switch (def->type) {
+      case VM_METHOD_TYPE_ISEQ:
+        if (def->body.iseq.iseqptr) {
+            rb_gc_mark_and_move_ptr(&def->body.iseq.iseqptr);
+        }
+        rb_gc_mark_and_move_ptr(&def->body.iseq.cref);
+        break;
+      case VM_METHOD_TYPE_ATTRSET:
+      case VM_METHOD_TYPE_IVAR:
+        rb_gc_mark_and_move(&def->body.attr.location);
+        break;
+      case VM_METHOD_TYPE_BMETHOD:
+        if (!rb_gc_checking_shareable()) {
+            rb_gc_mark_and_move(&def->body.bmethod.proc);
+        }
+        break;
+      case VM_METHOD_TYPE_ALIAS:
+        rb_gc_mark_and_move_ptr(&def->body.alias.original_me);
+        break;
+      case VM_METHOD_TYPE_REFINED:
+        rb_gc_mark_and_move_ptr(&def->body.refined.orig_me);
+        break;
+      case VM_METHOD_TYPE_CFUNC:
+      case VM_METHOD_TYPE_ZSUPER:
+      case VM_METHOD_TYPE_MISSING:
+      case VM_METHOD_TYPE_OPTIMIZED:
+      case VM_METHOD_TYPE_UNDEF:
+      case VM_METHOD_TYPE_NOTIMPLEMENTED:
+        break;
+    }
+}
+
+static void
 mark_and_move_method_entry(rb_method_entry_t *ment, bool reference_updating)
 {
-    rb_method_definition_t *def = ment->def;
-
     rb_gc_mark_and_move(&ment->owner);
     rb_gc_mark_and_move(&ment->defined_class);
+    rb_gc_mark_and_move((VALUE *)&ment->def);
 
-    if (def) {
-        switch (def->type) {
-          case VM_METHOD_TYPE_ISEQ:
-            if (def->body.iseq.iseqptr) {
-                rb_gc_mark_and_move_ptr(&def->body.iseq.iseqptr);
-            }
-            rb_gc_mark_and_move_ptr(&def->body.iseq.cref);
-
-            if (!reference_updating) {
-                if (def->iseq_overload && ment->defined_class) {
-                    // it can be a key of "overloaded_cme" table
-                    // so it should be pinned.
-                    rb_gc_mark((VALUE)ment);
-                }
-            }
-            break;
-          case VM_METHOD_TYPE_ATTRSET:
-          case VM_METHOD_TYPE_IVAR:
-            rb_gc_mark_and_move(&def->body.attr.location);
-            break;
-          case VM_METHOD_TYPE_BMETHOD:
-            if (!rb_gc_checking_shareable()) {
-                rb_gc_mark_and_move(&def->body.bmethod.proc);
-            }
-            break;
-          case VM_METHOD_TYPE_ALIAS:
-            rb_gc_mark_and_move_ptr(&def->body.alias.original_me);
-            return;
-          case VM_METHOD_TYPE_REFINED:
-            rb_gc_mark_and_move_ptr(&def->body.refined.orig_me);
-            break;
-          case VM_METHOD_TYPE_CFUNC:
-          case VM_METHOD_TYPE_ZSUPER:
-          case VM_METHOD_TYPE_MISSING:
-          case VM_METHOD_TYPE_OPTIMIZED:
-          case VM_METHOD_TYPE_UNDEF:
-          case VM_METHOD_TYPE_NOTIMPLEMENTED:
-            break;
-        }
+    rb_method_definition_t *def = METHOD_ENTRY_DEF(ment);
+    if (!reference_updating && def && def->iseq_overload && ment->defined_class) {
+        // it can be a key of "overloaded_cme" table
+        // so it should be pinned.
+        rb_gc_mark((VALUE)ment);
     }
 }
 
@@ -535,6 +540,11 @@ rb_imemo_mark_and_move(VALUE obj, bool reference_updating)
         }
         break;
       }
+      case imemo_method_def: {
+        rb_method_definition_imemo_t *def_imemo = (rb_method_definition_imemo_t *)obj;
+        mark_and_move_method_definition(&def_imemo->def, reference_updating);
+        break;
+      }
       default:
         rb_bug("unreachable");
     }
@@ -644,6 +654,13 @@ rb_imemo_free(VALUE obj)
       case imemo_fields:
         imemo_fields_free(IMEMO_OBJ_FIELDS(obj));
         RB_DEBUG_COUNTER_INC(obj_imemo_fields);
+        break;
+      case imemo_method_def:
+        {
+            rb_method_definition_t *def = &((rb_method_definition_imemo_t *)obj)->def;
+            RUBY_ASSERT_ALWAYS(def->reference_count == 0);
+        }
+        RB_DEBUG_COUNTER_INC(obj_imemo_method_def);
         break;
       default:
         rb_bug("unreachable");

@@ -281,7 +281,7 @@ method_coverage_i(void *vstart, void *vend, size_t stride, void *data)
             methods = rb_hash_aref(ncoverage, methods_id);
 
             {
-                VALUE method_id = ID2SYM(me->def->original_id);
+                VALUE method_id = ID2SYM(METHOD_ENTRY_DEF(me)->original_id);
                 VALUE rcount = rb_hash_aref(me2counter, (VALUE) me);
                 VALUE key = rb_ary_new_from_args(6, klass, method_id, first_lineno, first_column, last_lineno, last_column);
                 VALUE rcount2 = rb_hash_aref(methods, key);

@@ -77,7 +77,7 @@ control_frame_dump(const rb_execution_context_t *ec, const rb_control_frame_t *c
       case VM_FRAME_MAGIC_METHOD:
         magic = "METHOD";
         if (me) {
-            box = me->def->box;
+            box = METHOD_ENTRY_DEF(me)->box;
         }
         break;
       case VM_FRAME_MAGIC_CLASS:
@@ -147,7 +147,7 @@ control_frame_dump(const rb_execution_context_t *ec, const rb_control_frame_t *c
         }
     }
     else if (me != NULL && IMEMO_TYPE_P(me, imemo_ment)) {
-        iseq_name = rb_id2name(me->def->original_id);
+        iseq_name = rb_id2name(METHOD_ENTRY_DEF(me)->original_id);
         snprintf(posbuf, MAX_POSBUF, ":%s", iseq_name);
         line = -1;
     }
@@ -191,7 +191,7 @@ control_frame_dump(const rb_execution_context_t *ec, const rb_control_frame_t *c
         if (me) {
             if (IMEMO_TYPE_P(me, imemo_ment)) {
                 kprintf("  me:\n");
-                kprintf("    called_id: %s, type: %s\n", rb_id2name(me->called_id), rb_method_type_name(me->def->type));
+                kprintf("    called_id: %s, type: %s\n", rb_id2name(me->called_id), rb_method_type_name(METHOD_ENTRY_DEF(me)->type));
                 kprintf("    owner class: %s\n", rb_raw_obj_info(buff, 0x100, me->owner));
                 if (me->owner != me->defined_class) {
                     kprintf("    defined_class: %s\n", rb_raw_obj_info(buff, 0x100, me->defined_class));
@@ -303,7 +303,7 @@ box_env_dump(const rb_execution_context_t *ec, const VALUE *env, const rb_contro
     case VM_FRAME_MAGIC_METHOD:
         magic = "METHOD";
         if (me) {
-            box = me->def->box;
+            box = METHOD_ENTRY_DEF(me)->box;
         }
         break;
     case VM_FRAME_MAGIC_CLASS:
@@ -316,7 +316,7 @@ box_env_dump(const rb_execution_context_t *ec, const VALUE *env, const rb_contro
     case VM_FRAME_MAGIC_CFUNC:
         magic = "CFUNC";
         if (me) {
-            box = me->def->box;
+            box = METHOD_ENTRY_DEF(me)->box;
         }
         break;
     case VM_FRAME_MAGIC_IFUNC:
@@ -368,7 +368,7 @@ box_env_dump(const rb_execution_context_t *ec, const VALUE *env, const rb_contro
         }
     }
     else if (me != NULL && IMEMO_TYPE_P(me, imemo_ment)) {
-        iseq_name = rb_id2name(me->def->original_id);
+        iseq_name = rb_id2name(METHOD_ENTRY_DEF(me)->original_id);
         snprintf(posbuf, MAX_POSBUF, ":%s", iseq_name);
         line = -1;
     }

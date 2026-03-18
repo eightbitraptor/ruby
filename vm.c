@@ -980,8 +980,8 @@ rb_vm_pop_cfunc_frame(void)
     rb_control_frame_t *cfp = ec->cfp;
     const rb_callable_method_entry_t *me = rb_vm_frame_method_entry(cfp);
 
-    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_RETURN, cfp->self, me->def->original_id, me->called_id, me->owner, Qnil);
-    RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec, me->owner, me->def->original_id);
+    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_RETURN, cfp->self, METHOD_ENTRY_DEF(me)->original_id, me->called_id, me->owner, Qnil);
+    RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec, me->owner, METHOD_ENTRY_DEF(me)->original_id);
     vm_pop_frame(ec, cfp, cfp->ep);
 }
 
@@ -1755,7 +1755,7 @@ invoke_bmethod(rb_execution_context_t *ec, const rb_iseq_t *iseq, VALUE self, co
     /* bmethod call from outside the VM */
     int arg_size = ISEQ_BODY(iseq)->param.size;
 
-    VM_ASSERT(me->def->type == VM_METHOD_TYPE_BMETHOD);
+    VM_ASSERT(METHOD_ENTRY_DEF(me)->type == VM_METHOD_TYPE_BMETHOD);
 
     vm_push_frame(ec, iseq, type | VM_FRAME_FLAG_BMETHOD, self,
                   VM_GUARDED_PREV_EP(captured->ep),
@@ -2335,13 +2335,13 @@ rb_vm_check_optimizable_mid(VALUE mid)
 static int
 vm_redefinition_check_method_type(const rb_method_entry_t *me)
 {
-    if (me->called_id != me->def->original_id) {
+    if (me->called_id != METHOD_ENTRY_DEF(me)->original_id) {
         return FALSE;
     }
 
     if (METHOD_ENTRY_BASIC(me)) return TRUE;
 
-    const rb_method_definition_t *def = me->def;
+    const rb_method_definition_t *def = METHOD_ENTRY_DEF(me);
     switch (def->type) {
       case VM_METHOD_TYPE_CFUNC:
       case VM_METHOD_TYPE_OPTIMIZED:
@@ -2619,18 +2619,18 @@ hook_before_rewind(rb_execution_context_t *ec, bool cfp_returning_with_value, in
                 const rb_callable_method_entry_t *me = rb_vm_frame_method_entry(ec->cfp);
 
                 EXEC_EVENT_HOOK_AND_POP_FRAME(ec, RUBY_EVENT_RETURN, ec->cfp->self,
-                                              rb_vm_frame_method_entry(ec->cfp)->def->original_id,
+                                              METHOD_ENTRY_DEF(rb_vm_frame_method_entry(ec->cfp))->original_id,
                                               rb_vm_frame_method_entry(ec->cfp)->called_id,
                                               rb_vm_frame_method_entry(ec->cfp)->owner,
                                               bmethod_return_value);
 
-                VM_ASSERT(me->def->type == VM_METHOD_TYPE_BMETHOD);
-                unsigned int local_hooks_cnt = me->def->body.bmethod.local_hooks_cnt;
+                VM_ASSERT(METHOD_ENTRY_DEF(me)->type == VM_METHOD_TYPE_BMETHOD);
+                unsigned int local_hooks_cnt = METHOD_ENTRY_DEF(me)->body.bmethod.local_hooks_cnt;
                 if (UNLIKELY(local_hooks_cnt > 0)) {
-                    local_hooks = rb_method_def_local_hooks(me->def, rb_ec_ractor_ptr(ec), false);
+                    local_hooks = rb_method_def_local_hooks(METHOD_ENTRY_DEF(me), rb_ec_ractor_ptr(ec), false);
                     if (local_hooks && local_hooks->events & RUBY_EVENT_RETURN) {
                         rb_exec_event_hook_orig(ec, local_hooks, RUBY_EVENT_RETURN, ec->cfp->self,
-                                                rb_vm_frame_method_entry(ec->cfp)->def->original_id,
+                                                METHOD_ENTRY_DEF(rb_vm_frame_method_entry(ec->cfp))->original_id,
                                                 rb_vm_frame_method_entry(ec->cfp)->called_id,
                                                 rb_vm_frame_method_entry(ec->cfp)->owner,
                                                 bmethod_return_value, TRUE);
@@ -2855,12 +2855,12 @@ vm_exec_handle_exception(rb_execution_context_t *ec, enum ruby_tag_type state, V
         while (ec->cfp->pc == 0 || ec->cfp->iseq == 0) {
             if (UNLIKELY(VM_FRAME_TYPE(ec->cfp) == VM_FRAME_MAGIC_CFUNC)) {
                 EXEC_EVENT_HOOK_AND_POP_FRAME(ec, RUBY_EVENT_C_RETURN, ec->cfp->self,
-                                              rb_vm_frame_method_entry(ec->cfp)->def->original_id,
+                                              METHOD_ENTRY_DEF(rb_vm_frame_method_entry(ec->cfp))->original_id,
                                               rb_vm_frame_method_entry(ec->cfp)->called_id,
                                               rb_vm_frame_method_entry(ec->cfp)->owner, Qnil);
                 RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec,
                                                 rb_vm_frame_method_entry(ec->cfp)->owner,
-                                                rb_vm_frame_method_entry(ec->cfp)->def->original_id);
+                                                METHOD_ENTRY_DEF(rb_vm_frame_method_entry(ec->cfp))->original_id);
             }
             rb_vm_pop_frame(ec);
         }
@@ -3072,7 +3072,7 @@ rb_vm_control_frame_id_and_class(const rb_control_frame_t *cfp, ID *idp, ID *cal
     const rb_callable_method_entry_t *me = rb_vm_frame_method_entry(cfp);
 
     if (me) {
-        if (idp) *idp = me->def->original_id;
+        if (idp) *idp = METHOD_ENTRY_DEF(me)->original_id;
         if (called_idp) *called_idp = me->called_id;
         if (klassp) *klassp = me->owner;
         return TRUE;
@@ -3157,7 +3157,7 @@ current_box_on_cfp(const rb_execution_context_t *ec, const rb_control_frame_t *c
         cme = check_method_entry(lep[VM_ENV_DATA_INDEX_ME_CREF], TRUE);
         VM_BOX_ASSERT(cme, "cme should be valid");
         VM_BOX_ASSERT(cme->def, "cme->def shold be valid");
-        return cme->def->box;
+        return METHOD_ENTRY_DEF(cme)->box;
     }
     else if (VM_ENV_FRAME_TYPE_P(lep, VM_FRAME_MAGIC_TOP) || VM_ENV_FRAME_TYPE_P(lep, VM_FRAME_MAGIC_CLASS)) {
         VM_BOX_ASSERT(VM_ENV_LOCAL_P(lep), "lep should be local on MAGIC_TOP or MAGIC_CLASS frames");

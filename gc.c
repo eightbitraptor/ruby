@@ -5036,16 +5036,16 @@ rb_raw_obj_info_buitin_type(char *const buff, const size_t buff_size, const VALU
                              METHOD_ENTRY_COMPLEMENTED(me) ? ",cmp" : "",
                              METHOD_ENTRY_CACHED(me) ? ",cc" : "",
                              METHOD_ENTRY_INVALIDATED(me) ? ",inv" : "",
-                             me->def ? rb_method_type_name(me->def->type) : "NULL",
-                             me->def ? me->def->aliased : -1,
+                             me->def ? rb_method_type_name(METHOD_ENTRY_DEF(me)->type) : "NULL",
+                             me->def ? METHOD_ENTRY_DEF(me)->aliased : -1,
                              (void *)me->owner, // obj_info(me->owner),
                              (void *)me->defined_class); //obj_info(me->defined_class)));
 
                     if (me->def) {
-                        switch (me->def->type) {
+                        switch (METHOD_ENTRY_DEF(me)->type) {
                           case VM_METHOD_TYPE_ISEQ:
                             APPEND_S(" (iseq:");
-                            rb_raw_obj_info(BUFF_ARGS, (VALUE)me->def->body.iseq.iseqptr);
+                            rb_raw_obj_info(BUFF_ARGS, (VALUE)METHOD_ENTRY_DEF(me)->body.iseq.iseqptr);
                             APPEND_S(")");
                             break;
                           default:

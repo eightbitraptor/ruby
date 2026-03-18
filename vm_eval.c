@@ -82,7 +82,7 @@ vm_call0_cc(rb_execution_context_t *ec, VALUE recv, ID id, int argc, const VALUE
     VALUE *use_argv = (VALUE *)argv;
     VALUE av[2];
 
-    if (UNLIKELY(vm_cc_cme(cc)->def->type == VM_METHOD_TYPE_ISEQ && argc > VM_ARGC_STACK_MAX)) {
+    if (UNLIKELY(METHOD_ENTRY_DEF(vm_cc_cme(cc))->type == VM_METHOD_TYPE_ISEQ && argc > VM_ARGC_STACK_MAX)) {
         use_argv = vm_argv_ruby_array(av, argv, &flags, &argc, kw_splat);
     }
 
@@ -133,7 +133,7 @@ vm_call0_cfunc_with_frame(rb_execution_context_t* ec, struct rb_calling_info *ca
     const struct rb_callinfo *ci = calling->cd->ci;
     VALUE val;
     const rb_callable_method_entry_t *me = vm_cc_cme(calling->cc);
-    const rb_method_cfunc_t *cfunc = UNALIGNED_MEMBER_PTR(me->def, body.cfunc);
+    const rb_method_cfunc_t *cfunc = UNALIGNED_MEMBER_PTR(METHOD_ENTRY_DEF(me), body.cfunc);
     int len = cfunc->argc;
     VALUE recv = calling->recv;
     int argc = calling->argc;
@@ -150,8 +150,8 @@ vm_call0_cfunc_with_frame(rb_execution_context_t* ec, struct rb_calling_info *ca
         }
     }
 
-    RUBY_DTRACE_CMETHOD_ENTRY_HOOK(ec, me->owner, me->def->original_id);
-    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_CALL, recv, me->def->original_id, mid, me->owner, Qnil);
+    RUBY_DTRACE_CMETHOD_ENTRY_HOOK(ec, me->owner, METHOD_ENTRY_DEF(me)->original_id);
+    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_CALL, recv, METHOD_ENTRY_DEF(me)->original_id, mid, me->owner, Qnil);
     {
         rb_control_frame_t *reg_cfp = ec->cfp;
 
@@ -166,8 +166,8 @@ vm_call0_cfunc_with_frame(rb_execution_context_t* ec, struct rb_calling_info *ca
         CHECK_CFP_CONSISTENCY("vm_call0_cfunc_with_frame");
         rb_vm_pop_frame(ec);
     }
-    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_RETURN, recv, me->def->original_id, mid, me->owner, val);
-    RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec, me->owner, me->def->original_id);
+    EXEC_EVENT_HOOK(ec, RUBY_EVENT_C_RETURN, recv, METHOD_ENTRY_DEF(me)->original_id, mid, me->owner, val);
+    RUBY_DTRACE_CMETHOD_RETURN_HOOK(ec, me->owner, METHOD_ENTRY_DEF(me)->original_id);
 
     return val;
 }
@@ -201,7 +201,7 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
 
   retry:
 
-    switch (vm_cc_cme(cc)->def->type) {
+    switch (METHOD_ENTRY_DEF(vm_cc_cme(cc))->type) {
       case VM_METHOD_TYPE_ISEQ:
         {
             rb_control_frame_t *reg_cfp = ec->cfp;
@@ -215,7 +215,7 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
                 *reg_cfp->sp++ = argv[i];
             }
 
-            if (ISEQ_BODY(def_iseq_ptr(vm_cc_cme(cc)->def))->param.flags.forwardable) {
+            if (ISEQ_BODY(def_iseq_ptr(METHOD_ENTRY_DEF(vm_cc_cme(cc))))->param.flags.forwardable) {
                 vm_call_iseq_fwd_setup(ec, reg_cfp, calling);
             }
             else {
@@ -231,13 +231,13 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
       case VM_METHOD_TYPE_ATTRSET:
         vm_call_check_arity(calling, 1, argv);
         VM_CALL_METHOD_ATTR(ret,
-                            rb_ivar_set(calling->recv, vm_cc_cme(cc)->def->body.attr.id, argv[0]),
+                            rb_ivar_set(calling->recv, METHOD_ENTRY_DEF(vm_cc_cme(cc))->body.attr.id, argv[0]),
                             (void)0);
         goto success;
       case VM_METHOD_TYPE_IVAR:
         vm_call_check_arity(calling, 0, argv);
         VM_CALL_METHOD_ATTR(ret,
-                            rb_attr_get(calling->recv, vm_cc_cme(cc)->def->body.attr.id),
+                            rb_attr_get(calling->recv, METHOD_ENTRY_DEF(vm_cc_cme(cc))->body.attr.id),
                             (void)0);
         goto success;
       case VM_METHOD_TYPE_BMETHOD:
@@ -252,7 +252,7 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
         {
             const rb_callable_method_entry_t *cme = vm_cc_cme(cc);
 
-            if (cme->def->body.refined.orig_me) {
+            if (METHOD_ENTRY_DEF(cme)->body.refined.orig_me) {
                 const rb_callable_method_entry_t *orig_cme = refined_method_callable_without_refinement(cme);
                 return vm_call0_cme(ec, calling, argv, orig_cme);
             }
@@ -282,7 +282,7 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
                                   argv, MISSING_NOENTRY, calling->kw_splat);
         }
       case VM_METHOD_TYPE_OPTIMIZED:
-        switch (vm_cc_cme(cc)->def->body.optimized.type) {
+        switch (METHOD_ENTRY_DEF(vm_cc_cme(cc))->body.optimized.type) {
           case OPTIMIZED_METHOD_TYPE_SEND:
             ret = send_internal(calling->argc, argv, calling->recv, calling->kw_splat ? CALL_FCALL_KW : CALL_FCALL);
             goto success;
@@ -306,13 +306,13 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
                                 (void)0);
             goto success;
           default:
-            rb_bug("vm_call0: unsupported optimized method type (%d)", vm_cc_cme(cc)->def->body.optimized.type);
+            rb_bug("vm_call0: unsupported optimized method type (%d)", METHOD_ENTRY_DEF(vm_cc_cme(cc))->body.optimized.type);
         }
         break;
       case VM_METHOD_TYPE_UNDEF:
         break;
     }
-    rb_bug("vm_call0: unsupported method type (%d)", vm_cc_cme(cc)->def->type);
+    rb_bug("vm_call0: unsupported method type (%d)", METHOD_ENTRY_DEF(vm_cc_cme(cc))->type);
     return Qundef;
 
   success:
@@ -341,7 +341,7 @@ vm_call_super(rb_execution_context_t *ec, int argc, const VALUE *argv, int kw_sp
 
     klass = RCLASS_ORIGIN(me->defined_class);
     klass = RCLASS_SUPER(klass);
-    id = me->def->original_id;
+    id = METHOD_ENTRY_DEF(me)->original_id;
     me = rb_callable_method_entry(klass, id);
 
     if (!me) {
@@ -838,7 +838,7 @@ rb_method_call_status(rb_execution_context_t *ec, const rb_callable_method_entry
     if (UNLIKELY(UNDEFINED_METHOD_ENTRY_P(me))) {
         goto undefined;
     }
-    else if (UNLIKELY(me->def->type == VM_METHOD_TYPE_REFINED)) {
+    else if (UNLIKELY(METHOD_ENTRY_DEF(me)->type == VM_METHOD_TYPE_REFINED)) {
         me = rb_resolve_refined_method_callable(Qnil, me);
         if (UNDEFINED_METHOD_ENTRY_P(me)) goto undefined;
     }
@@ -847,7 +847,7 @@ rb_method_call_status(rb_execution_context_t *ec, const rb_callable_method_entry
 
     /* receiver specified form for private method */
     if (UNLIKELY(visi != METHOD_VISI_PUBLIC)) {
-        if (me->def->original_id == idMethodMissing) {
+        if (METHOD_ENTRY_DEF(me)->original_id == idMethodMissing) {
             return MISSING_NONE;
         }
         else if (visi == METHOD_VISI_PRIVATE &&

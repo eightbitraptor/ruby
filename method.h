@@ -55,7 +55,7 @@ typedef struct rb_cref_struct {
 typedef struct rb_method_entry_struct {
     VALUE flags;
     VALUE defined_class;
-    struct rb_method_definition_struct * const def;
+    const VALUE def;  /* imemo_method_def VALUE */
     ID called_id;
     VALUE owner;
 } rb_method_entry_t;
@@ -63,7 +63,7 @@ typedef struct rb_method_entry_struct {
 typedef struct rb_callable_method_entry_struct { /* same fields with rb_method_entry_t */
     VALUE flags;
     const VALUE defined_class;
-    struct rb_method_definition_struct * const def;
+    const VALUE def;  /* imemo_method_def VALUE */
     ID called_id;
     const VALUE owner;
 } rb_callable_method_entry_t;
@@ -214,10 +214,27 @@ struct rb_hook_list_struct;
 typedef struct rb_method_definition_struct rb_method_definition_t;
 STATIC_ASSERT(sizeof_method_def, offsetof(rb_method_definition_t, body) <= 8);
 
-#define UNDEFINED_METHOD_ENTRY_P(me) (!(me) || !(me)->def || (me)->def->type == VM_METHOD_TYPE_UNDEF)
-#define UNDEFINED_REFINED_METHOD_P(def) \
-    ((def)->type == VM_METHOD_TYPE_REFINED && \
-     UNDEFINED_METHOD_ENTRY_P((def)->body.refined.orig_me))
+typedef struct rb_method_definition_imemo {
+    VALUE flags;
+    VALUE _unused;
+    rb_method_definition_t def;
+} rb_method_definition_imemo_t;
+
+/* me->def is an imemo VALUE; this extracts the embedded rb_method_definition_t */
+static inline rb_method_definition_t *
+rb_method_entry_def(const rb_method_entry_t *me) {
+    return me->def ? &((rb_method_definition_imemo_t *)(me->def))->def : NULL;
+}
+#define METHOD_ENTRY_DEF(me) rb_method_entry_def((const rb_method_entry_t *)(me))
+
+/* Get imemo VALUE from def pointer (inverse of METHOD_ENTRY_DEF) */
+#define METHOD_DEF_IMEMO(def) \
+    ((VALUE)((char *)(def) - offsetof(rb_method_definition_imemo_t, def)))
+
+#define UNDEFINED_METHOD_ENTRY_P(me) (!(me) || !(me)->def || METHOD_ENTRY_DEF(me)->type == VM_METHOD_TYPE_UNDEF)
+#define UNDEFINED_REFINED_METHOD_P(defptr) \
+    ((defptr)->type == VM_METHOD_TYPE_REFINED && \
+     UNDEFINED_METHOD_ENTRY_P((defptr)->body.refined.orig_me))
 
 void rb_add_method(VALUE klass, ID mid, rb_method_type_t type, void *option, rb_method_visibility_t visi);
 void rb_add_method_cfunc(VALUE klass, ID mid, VALUE (*func)(ANYARGS), int argc, rb_method_visibility_t visi);

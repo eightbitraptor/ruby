@@ -1884,15 +1884,15 @@ mnew_internal(const rb_method_entry_t *me, VALUE klass, VALUE iclass,
             rb_print_inaccessible(klass, id, visi);
         }
     }
-    if (me->def->type == VM_METHOD_TYPE_ZSUPER) {
+    if (METHOD_ENTRY_DEF(me)->type == VM_METHOD_TYPE_ZSUPER) {
         if (me->defined_class) {
             VALUE klass = RCLASS_SUPER(RCLASS_ORIGIN(me->defined_class));
-            id = me->def->original_id;
+            id = METHOD_ENTRY_DEF(me)->original_id;
             me = (rb_method_entry_t *)rb_callable_method_entry_with_refinements(klass, id, &iclass);
         }
         else {
             VALUE klass = RCLASS_SUPER(RCLASS_ORIGIN(me->owner));
-            id = me->def->original_id;
+            id = METHOD_ENTRY_DEF(me)->original_id;
             me = rb_method_entry_without_refinements(klass, id, &iclass);
         }
         goto again;
@@ -2136,7 +2136,7 @@ method_original_name(VALUE obj)
     struct METHOD *data;
 
     TypedData_Get_Struct(obj, struct METHOD, &method_data_type, data);
-    return ID2SYM(data->me->def->original_id);
+    return ID2SYM(METHOD_ENTRY_DEF(data->me)->original_id);
 }
 
 /*
@@ -2178,7 +2178,7 @@ method_box(VALUE obj)
     const rb_box_t *box;
 
     TypedData_Get_Struct(obj, struct METHOD, &method_data_type, data);
-    box = data->me->def->box;
+    box = METHOD_ENTRY_DEF(data->me)->box;
     if (!box) return Qnil;
     if (box->box_object) return box->box_object;
     rb_bug("Unexpected box on the method definition: %p", (void*) box);
@@ -2956,7 +2956,7 @@ method_def_min_max_arity(const rb_method_definition_t *def, int *max)
       case VM_METHOD_TYPE_IVAR:
         return *max = 0;
       case VM_METHOD_TYPE_ALIAS:
-        def = def->body.alias.original_me->def;
+        def = METHOD_ENTRY_DEF(def->body.alias.original_me);
         goto again;
       case VM_METHOD_TYPE_BMETHOD:
         return rb_proc_min_max_arity(def->body.bmethod.proc, max);
@@ -3008,7 +3008,7 @@ method_def_arity(const rb_method_definition_t *def)
 int
 rb_method_entry_arity(const rb_method_entry_t *me)
 {
-    return method_def_arity(me->def);
+    return method_def_arity(METHOD_ENTRY_DEF(me));
 }
 
 /*
@@ -3076,7 +3076,7 @@ original_method_entry(VALUE mod, ID id)
     const rb_method_entry_t *me;
 
     while ((me = rb_method_entry(mod, id)) != 0) {
-        const rb_method_definition_t *def = me->def;
+        const rb_method_definition_t *def = METHOD_ENTRY_DEF(me);
         if (def->type != VM_METHOD_TYPE_ZSUPER) break;
         mod = RCLASS_SUPER(me->owner);
         id = def->original_id;
@@ -3090,7 +3090,7 @@ method_min_max_arity(VALUE method, int *max)
     const struct METHOD *data;
 
     TypedData_Get_Struct(method, struct METHOD, &method_data_type, data);
-    return method_def_min_max_arity(data->me->def, max);
+    return method_def_min_max_arity(METHOD_ENTRY_DEF(data->me), max);
 }
 
 int
@@ -3128,7 +3128,7 @@ rb_method_def(VALUE method)
     const struct METHOD *data;
 
     TypedData_Get_Struct(method, struct METHOD, &method_data_type, data);
-    return data->me->def;
+    return METHOD_ENTRY_DEF(data->me);
 }
 
 static const rb_iseq_t *
@@ -3140,7 +3140,7 @@ method_def_iseq(const rb_method_definition_t *def)
       case VM_METHOD_TYPE_BMETHOD:
         return rb_proc_get_iseq(def->body.bmethod.proc, 0);
       case VM_METHOD_TYPE_ALIAS:
-        return method_def_iseq(def->body.alias.original_me->def);
+        return method_def_iseq(METHOD_ENTRY_DEF(def->body.alias.original_me));
       case VM_METHOD_TYPE_CFUNC:
       case VM_METHOD_TYPE_ATTRSET:
       case VM_METHOD_TYPE_IVAR:
@@ -3171,7 +3171,7 @@ method_cref(VALUE method)
       case VM_METHOD_TYPE_ISEQ:
         return def->body.iseq.cref;
       case VM_METHOD_TYPE_ALIAS:
-        def = def->body.alias.original_me->def;
+        def = METHOD_ENTRY_DEF(def->body.alias.original_me);
         goto again;
       default:
         return NULL;
@@ -3193,7 +3193,7 @@ VALUE
 rb_method_entry_location(const rb_method_entry_t *me)
 {
     if (!me) return Qnil;
-    return method_def_location(me->def);
+    return method_def_location(METHOD_ENTRY_DEF(me));
 }
 
 /*
@@ -3256,7 +3256,7 @@ method_def_parameters(const rb_method_definition_t *def)
         break;
 
       case VM_METHOD_TYPE_ALIAS:
-        return method_def_parameters(def->body.alias.original_me->def);
+        return method_def_parameters(METHOD_ENTRY_DEF(def->body.alias.original_me));
 
       case VM_METHOD_TYPE_OPTIMIZED:
         if (def->body.optimized.type == OPTIMIZED_METHOD_TYPE_STRUCT_ASET) {
@@ -3361,8 +3361,8 @@ method_inspect(VALUE method)
         mklass = RBASIC_CLASS(mklass);
     }
 
-    if (data->me->def->type == VM_METHOD_TYPE_ALIAS) {
-        defined_class = data->me->def->body.alias.original_me->owner;
+    if (METHOD_ENTRY_DEF(data->me)->type == VM_METHOD_TYPE_ALIAS) {
+        defined_class = METHOD_ENTRY_DEF(data->me)->body.alias.original_me->owner;
     }
     else {
         defined_class = method_entry_defined_class(data->me);
@@ -3411,11 +3411,11 @@ method_inspect(VALUE method)
     }
     rb_str_buf_cat2(str, sharp);
     rb_str_append(str, rb_id2str(data->me->called_id));
-    if (data->me->called_id != data->me->def->original_id) {
+    if (data->me->called_id != METHOD_ENTRY_DEF(data->me)->original_id) {
         rb_str_catf(str, "(%"PRIsVALUE")",
-                    rb_id2str(data->me->def->original_id));
+                    rb_id2str(METHOD_ENTRY_DEF(data->me)->original_id));
     }
-    if (data->me->def->type == VM_METHOD_TYPE_NOTIMPLEMENTED) {
+    if (METHOD_ENTRY_DEF(data->me)->type == VM_METHOD_TYPE_NOTIMPLEMENTED) {
         rb_str_buf_cat2(str, " (not-implemented)");
     }
 
@@ -3609,14 +3609,14 @@ method_super_method(VALUE method)
     TypedData_Get_Struct(method, struct METHOD, &method_data_type, data);
     iclass = data->iclass;
     if (!iclass) return Qnil;
-    if (data->me->def->type == VM_METHOD_TYPE_ALIAS && data->me->defined_class) {
+    if (METHOD_ENTRY_DEF(data->me)->type == VM_METHOD_TYPE_ALIAS && data->me->defined_class) {
         super_class = RCLASS_SUPER(rb_find_defined_class_by_owner(data->me->defined_class,
-            data->me->def->body.alias.original_me->owner));
-        mid = data->me->def->body.alias.original_me->def->original_id;
+            METHOD_ENTRY_DEF(data->me)->body.alias.original_me->owner));
+        mid = METHOD_ENTRY_DEF(METHOD_ENTRY_DEF(data->me)->body.alias.original_me)->original_id;
     }
     else {
         super_class = RCLASS_SUPER(RCLASS_ORIGIN(iclass));
-        mid = data->me->def->original_id;
+        mid = METHOD_ENTRY_DEF(data->me)->original_id;
     }
     if (!super_class) return Qnil;
     me = (rb_method_entry_t *)rb_callable_method_entry_with_refinements(super_class, mid, &iclass);

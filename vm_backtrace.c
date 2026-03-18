@@ -277,11 +277,11 @@ location_cfunc_p(rb_backtrace_location_t *loc)
 {
     if (!loc->cme) return false;
 
-    switch (loc->cme->def->type) {
+    switch (METHOD_ENTRY_DEF(loc->cme)->type) {
       case VM_METHOD_TYPE_CFUNC:
         return true;
       case VM_METHOD_TYPE_ISEQ:
-        return is_internal_location(loc->cme->def->body.iseq.iseqptr);
+        return is_internal_location(METHOD_ENTRY_DEF(loc->cme)->body.iseq.iseqptr);
       default:
         return false;
     }
@@ -291,7 +291,7 @@ static VALUE
 location_label(rb_backtrace_location_t *loc)
 {
     if (location_cfunc_p(loc)) {
-        return rb_gen_method_name(loc->cme->owner, rb_id2str(loc->cme->def->original_id));
+        return rb_gen_method_name(loc->cme->owner, rb_id2str(METHOD_ENTRY_DEF(loc->cme)->original_id));
     }
     else {
         VALUE owner = Qnil;
@@ -337,7 +337,7 @@ static VALUE
 location_base_label(rb_backtrace_location_t *loc)
 {
     if (location_cfunc_p(loc)) {
-        return rb_id2str(loc->cme->def->original_id);
+        return rb_id2str(METHOD_ENTRY_DEF(loc->cme)->original_id);
     }
 
     return ISEQ_BODY(loc->iseq)->location.base_label;
@@ -480,7 +480,7 @@ location_to_str(rb_backtrace_location_t *loc)
             file = GET_VM()->progname;
             lineno = 0;
         }
-        name = rb_gen_method_name(loc->cme->owner, rb_id2str(loc->cme->def->original_id));
+        name = rb_gen_method_name(loc->cme->owner, rb_id2str(METHOD_ENTRY_DEF(loc->cme)->original_id));
     }
     else {
         file = rb_iseq_path(loc->iseq);
@@ -1027,7 +1027,7 @@ backtrace_each(const rb_execution_context_t *ec,
         else {
             VM_ASSERT(RUBYVM_CFUNC_FRAME_P(cfp));
             const rb_callable_method_entry_t *me = rb_vm_frame_method_entry(cfp);
-            ID mid = me->def->original_id;
+            ID mid = METHOD_ENTRY_DEF(me)->original_id;
 
             iter_cfunc(arg, cfp, mid);
         }
@@ -1753,7 +1753,7 @@ thread_profile_frames(rb_execution_context_t *ec, int start, int limit, VALUE *b
 
             /* record frame info */
             cme = rb_vm_frame_method_entry_unchecked(cfp);
-            if (cme && cme->def->type == VM_METHOD_TYPE_ISEQ) {
+            if (cme && METHOD_ENTRY_DEF(cme)->type == VM_METHOD_TYPE_ISEQ) {
                 buff[i] = (VALUE)cme;
             }
             else {
@@ -1786,7 +1786,7 @@ thread_profile_frames(rb_execution_context_t *ec, int start, int limit, VALUE *b
         }
         else {
             cme = rb_vm_frame_method_entry_unchecked(cfp);
-            if (cme && cme->def->type == VM_METHOD_TYPE_CFUNC) {
+            if (cme && METHOD_ENTRY_DEF(cme)->type == VM_METHOD_TYPE_CFUNC) {
                 if (start > 0) {
                     start--;
                     continue;
@@ -1834,9 +1834,9 @@ frame2iseq(VALUE frame)
           case imemo_ment:
             {
                 const rb_callable_method_entry_t *cme = (rb_callable_method_entry_t *)frame;
-                switch (cme->def->type) {
+                switch (METHOD_ENTRY_DEF(cme)->type) {
                   case VM_METHOD_TYPE_ISEQ:
-                    return cme->def->body.iseq.iseqptr;
+                    return METHOD_ENTRY_DEF(cme)->body.iseq.iseqptr;
                   default:
                     return NULL;
                 }
@@ -1865,7 +1865,7 @@ cframe(VALUE frame)
           case imemo_ment:
             {
                 const rb_callable_method_entry_t *cme = (rb_callable_method_entry_t *)frame;
-                switch (cme->def->type) {
+                switch (METHOD_ENTRY_DEF(cme)->type) {
                   case VM_METHOD_TYPE_CFUNC:
                     return cme;
                   default:
@@ -1965,7 +1965,7 @@ rb_profile_frame_method_name(VALUE frame)
 {
     const rb_callable_method_entry_t *cme = cframe(frame);
     if (cme) {
-        ID mid = cme->def->original_id;
+        ID mid = METHOD_ENTRY_DEF(cme)->original_id;
         return id2str(mid);
     }
     const rb_iseq_t *iseq = frame2iseq(frame);
@@ -2005,7 +2005,7 @@ rb_profile_frame_full_label(VALUE frame)
 {
     const rb_callable_method_entry_t *cme = cframe(frame);
     if (cme) {
-        ID mid = cme->def->original_id;
+        ID mid = METHOD_ENTRY_DEF(cme)->original_id;
         VALUE method_name = id2str(mid);
         return qualified_method_name(frame, method_name);
     }
