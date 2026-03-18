@@ -7007,7 +7007,7 @@ fn gen_send_cfunc(
             flags & VM_CALL_ARGS_BLOCKARG == 0 &&
             (cfunc_argc == -1 || argc == cfunc_argc) {
         let expected_stack_after = asm.ctx.get_stack_size() as i32 - argc;
-        if let Some(known_cfunc_codegen) = lookup_cfunc_codegen(unsafe { (*cme).def }) {
+        if let Some(known_cfunc_codegen) = lookup_cfunc_codegen(unsafe { get_cme_def(cme) }) {
             // We don't push a frame for specialized cfunc codegen, so the generated code must be leaf.
             // However, the interpreter doesn't push a frame on opt_* instruction either, so we allow
             // non-sendish instructions to break this rule as an exception.
@@ -7284,7 +7284,7 @@ fn gen_send_cfunc(
     // We also do this after the C call to minimize the impact of spill_temps() on asm.ccall().
     if get_option!(gen_stats) {
         // Assemble the method name string
-        let mid = unsafe { rb_get_def_original_id((*cme).def) };
+        let mid = unsafe { rb_get_def_original_id(get_cme_def(cme)) };
         let name_str = get_method_name(Some(unsafe { (*cme).owner }), mid);
 
         // Get an index for this cfunc name
@@ -7461,7 +7461,7 @@ fn gen_send_bmethod(
     flags: u32,
     argc: i32,
 ) -> Option<CodegenStatus> {
-    let procv = unsafe { rb_get_def_bmethod_proc((*cme).def) };
+    let procv = unsafe { rb_get_def_bmethod_proc(get_cme_def(cme)) };
 
     let proc = unsafe { rb_jit_get_proc_ptr(procv) };
     let proc_block = unsafe { &(*proc).block };
@@ -9245,7 +9245,7 @@ fn gen_send_general(
 
         match def_type {
             VM_METHOD_TYPE_ISEQ => {
-                let iseq = unsafe { get_def_iseq_ptr((*cme).def) };
+                let iseq = unsafe { get_def_iseq_ptr(get_cme_def(cme)) };
                 let frame_type = VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL;
                 return perf_call! { gen_send_iseq(jit, asm, iseq, ci, frame_type, None, cme, block, flags, argc, None) };
             }
@@ -9920,7 +9920,7 @@ fn gen_invokesuper_specialized(
 
     // FIXME: We should track and invalidate this block when this cme is invalidated
     let current_defined_class = unsafe { (*me).defined_class };
-    let mid = unsafe { get_def_original_id((*me).def) };
+    let mid = unsafe { get_def_original_id(get_cme_def(me.cast())) };
 
     // vm_search_normal_superclass
     let rbasic_ptr: *const RBasic = current_defined_class.as_ptr();
@@ -10001,7 +10001,7 @@ fn gen_invokesuper_specialized(
 
     match cme_def_type {
         VM_METHOD_TYPE_ISEQ => {
-            let iseq = unsafe { get_def_iseq_ptr((*cme).def) };
+            let iseq = unsafe { get_def_iseq_ptr(get_cme_def(cme)) };
             let frame_type = VM_FRAME_MAGIC_METHOD | VM_ENV_FLAG_LOCAL;
             perf_call! { gen_send_iseq(jit, asm, iseq, ci, frame_type, None, cme, Some(block), ci_flags, argc, None) }
         }
@@ -10993,7 +10993,7 @@ fn reg_method_codegen(klass: VALUE, method_name: &str, gen_fn: MethodGenFn) {
     debug_assert_eq!(VM_METHOD_TYPE_CFUNC, unsafe { get_cme_def_type(me.cast()) });
 
     let method_serial = unsafe {
-        let def = (*me).def;
+        let def = get_cme_def(me.cast());
         get_def_method_serial(def)
     };
 

@@ -3604,7 +3604,7 @@ impl Function {
                             // TODO(max): Allow non-iseq; cache cme
                             // Only specialize positional-positional calls
                             // TODO(max): Handle other kinds of parameter passing
-                            let iseq = unsafe { get_def_iseq_ptr((*cme).def) };
+                            let iseq = unsafe { get_def_iseq_ptr(get_cme_def(cme)) };
                             if !can_direct_send(self, block, iseq, ci, insn_id, args.as_slice()) {
                                 self.push_insn_id(block, insn_id); continue;
                             }
@@ -3632,7 +3632,7 @@ impl Function {
                             let send_direct = self.push_insn(block, Insn::SendDirect { recv, cd, cme, iseq, args: processed_args, kw_bits, state: send_state, blockiseq });
                             self.make_equal_to(insn_id, send_direct);
                         } else if !has_block && def_type == VM_METHOD_TYPE_BMETHOD {
-                            let procv = unsafe { rb_get_def_bmethod_proc((*cme).def) };
+                            let procv = unsafe { rb_get_def_bmethod_proc(get_cme_def(cme)) };
                             let proc = unsafe { rb_jit_get_proc_ptr(procv) };
                             let proc_block = unsafe { &(*proc).block };
                             // Target ISEQ bmethods. Can't handle for example, `define_method(:foo, &:foo)`
@@ -3982,7 +3982,7 @@ impl Function {
 
                         // Get defined_class and method ID from the profiled CME.
                         let current_defined_class = unsafe { (*current_cme).defined_class };
-                        let mid = unsafe { get_def_original_id((*current_cme).def) };
+                        let mid = unsafe { get_def_original_id(get_cme_def(current_cme)) };
 
                         // Compute superclass: RCLASS_SUPER(RCLASS_ORIGIN(defined_class))
                         let superclass = unsafe { rb_class_get_superclass(RCLASS_ORIGIN(current_defined_class)) };
@@ -4009,7 +4009,7 @@ impl Function {
                         if def_type == VM_METHOD_TYPE_ISEQ {
                             // Check if the super method's parameters support direct send.
                             // If not, we can't do direct dispatch.
-                            let super_iseq = unsafe { get_def_iseq_ptr((*super_cme).def) };
+                            let super_iseq = unsafe { get_def_iseq_ptr(get_cme_def(super_cme)) };
                             // TODO: pass Option<blockiseq> to can_direct_send when we start specializing `super { ... }`.
                             if !can_direct_send(self, block, super_iseq, ci, insn_id, args.as_slice()) {
                                 self.push_insn_id(block, insn_id);

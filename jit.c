@@ -142,6 +142,12 @@ rb_METHOD_ENTRY_VISI(const rb_callable_method_entry_t *me)
     return METHOD_ENTRY_VISI(me);
 }
 
+rb_method_definition_t *
+rb_get_cme_def(const rb_callable_method_entry_t *cme)
+{
+    return METHOD_ENTRY_DEF(cme);
+}
+
 rb_method_type_t
 rb_get_cme_def_type(const rb_callable_method_entry_t *cme)
 {

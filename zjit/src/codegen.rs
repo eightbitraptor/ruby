@@ -1529,7 +1529,7 @@ fn gen_send_iseq_direct(
 
     let (frame_type, specval) = if callee_is_bmethod {
         // Extract EP from the Proc instance
-        let procv = unsafe { rb_get_def_bmethod_proc((*cme).def) };
+        let procv = unsafe { rb_get_def_bmethod_proc(get_cme_def(cme)) };
         let proc = unsafe { rb_jit_get_proc_ptr(procv) };
         let proc_block = unsafe { &(*proc).block };
         let capture = unsafe { proc_block.as_.captured.as_ref() };

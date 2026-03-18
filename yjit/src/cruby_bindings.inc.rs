@@ -385,7 +385,7 @@ pub type rb_method_visibility_t = u32;
 pub struct rb_method_entry_struct {
     pub flags: VALUE,
     pub defined_class: VALUE,
-    pub def: *mut rb_method_definition_struct,
+    pub def: VALUE, // imemo_method_def VALUE, use rb_get_cme_def() to get *mut rb_method_definition_t
     pub called_id: ID,
     pub owner: VALUE,
 }
@@ -394,7 +394,7 @@ pub type rb_method_entry_t = rb_method_entry_struct;
 pub struct rb_callable_method_entry_struct {
     pub flags: VALUE,
     pub defined_class: VALUE,
-    pub def: *mut rb_method_definition_struct,
+    pub def: VALUE, // imemo_method_def VALUE, use rb_get_cme_def() to get *mut rb_method_definition_t
     pub called_id: ID,
     pub owner: VALUE,
 }
@@ -1230,6 +1230,7 @@ extern "C" {
         idx: ::std::os::raw::c_int,
     ) -> VALUE;
     pub fn rb_METHOD_ENTRY_VISI(me: *const rb_callable_method_entry_t) -> rb_method_visibility_t;
+    pub fn rb_get_cme_def(cme: *const rb_callable_method_entry_t) -> *mut rb_method_definition_t;
     pub fn rb_get_cme_def_type(cme: *const rb_callable_method_entry_t) -> rb_method_type_t;
     pub fn rb_get_cme_def_body_attr_id(cme: *const rb_callable_method_entry_t) -> ID;
     pub fn rb_get_cme_def_body_optimized_type(

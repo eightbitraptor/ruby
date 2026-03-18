@@ -110,7 +110,7 @@ fn annotate_builtin_method(props_map: &mut HashMap<*mut c_void, FnProperties>, c
         }
 
         // Get the ISEQ from the method definition
-        let iseq = get_def_iseq_ptr((*cme).def);
+        let iseq = get_def_iseq_ptr(get_cme_def(cme));
         if iseq.is_null() {
             panic!("Failed to get ISEQ for {}#{}",
                 std::ffi::CStr::from_ptr(rb_class2name(class)).to_str().unwrap_or("?"),
