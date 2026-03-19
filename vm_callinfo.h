@@ -631,7 +631,7 @@ vm_cc_check_cme(const struct rb_callcache *cc, const rb_callable_method_entry_t 
     bool valid;
     RB_VM_LOCKING_NO_BARRIER() {
         valid = vm_cc_cme(cc) == cme ||
-            (METHOD_ENTRY_DEF(cme)->iseq_overload && vm_cc_cme(cc) == rb_vm_lookup_overloaded_cme(cme));
+            (METHOD_ENTRY_ISEQ_OVERLOAD(cme) && vm_cc_cme(cc) == rb_vm_lookup_overloaded_cme(cme));
     }
     if (valid) {
         return true;
@@ -640,7 +640,7 @@ vm_cc_check_cme(const struct rb_callcache *cc, const rb_callable_method_entry_t 
         // debug print
 
         fprintf(stderr, "iseq_overload:%d, cme:%p (def:%"PRIxVALUE"), cm_cc_cme(cc):%p (def:%"PRIxVALUE")\n",
-                (int)METHOD_ENTRY_DEF(cme)->iseq_overload,
+                (int)!!METHOD_ENTRY_ISEQ_OVERLOAD(cme),
                 (void *)cme, cme->def,
                 (void *)vm_cc_cme(cc), vm_cc_cme(cc)->def);
         rp(cme);

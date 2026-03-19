@@ -75,6 +75,8 @@ typedef struct rb_callable_method_entry_struct { /* same fields with rb_method_e
 #define METHOD_ENTRY_CACHED(me)              ((me)->flags & IMEMO_FL_USER4)
 #define METHOD_ENTRY_INVALIDATED(me)         ((me)->flags & IMEMO_FL_USER5)
 #define METHOD_ENTRY_INVALIDATED_SET(me)     ((me)->flags |= IMEMO_FL_USER5)
+#define METHOD_ENTRY_ISEQ_OVERLOAD(me)       ((me)->flags & IMEMO_FL_USER6)
+#define METHOD_ENTRY_ISEQ_OVERLOAD_SET(me)   ((me)->flags |= IMEMO_FL_USER6)
 
 static inline void
 METHOD_ENTRY_CACHED_SET(rb_callable_method_entry_t *me)
@@ -110,8 +112,8 @@ METHOD_ENTRY_FLAGS_COPY(rb_method_entry_t *dst, const rb_method_entry_t *src)
 {
     dst->flags =
       (dst->flags & ~(IMEMO_FL_USER0|IMEMO_FL_USER1|IMEMO_FL_USER2
-      |IMEMO_FL_USER3)) |
-        (src->flags & (IMEMO_FL_USER0|IMEMO_FL_USER1|IMEMO_FL_USER2|IMEMO_FL_USER3));
+      |IMEMO_FL_USER3|IMEMO_FL_USER6)) |
+        (src->flags & (IMEMO_FL_USER0|IMEMO_FL_USER1|IMEMO_FL_USER2|IMEMO_FL_USER3|IMEMO_FL_USER6));
 }
 
 typedef enum {

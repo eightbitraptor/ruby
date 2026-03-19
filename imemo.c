@@ -342,8 +342,7 @@ mark_and_move_method_entry(rb_method_entry_t *ment, bool reference_updating)
         rb_gc_mark_and_move((VALUE *)&ment->def);
     }
 
-    rb_method_definition_t *def = METHOD_ENTRY_DEF(ment);
-    if (!reference_updating && def && def->iseq_overload && ment->defined_class) {
+    if (!reference_updating && METHOD_ENTRY_ISEQ_OVERLOAD(ment) && ment->defined_class) {
         // it can be a key of "overloaded_cme" table
         // so it should be pinned.
         rb_gc_mark((VALUE)ment);

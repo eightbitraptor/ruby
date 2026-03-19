@@ -498,7 +498,7 @@ clear_method_cache_by_id_in_class(VALUE klass, ID mid)
                         vm_cme_invalidate((rb_callable_method_entry_t *)METHOD_ENTRY_DEF(cme)->body.refined.orig_me);
                     }
 
-                    if (METHOD_ENTRY_DEF(cme)->iseq_overload) {
+                    if (METHOD_ENTRY_ISEQ_OVERLOAD(cme)) {
                         rb_callable_method_entry_t *monly_cme = (rb_callable_method_entry_t *)lookup_overloaded_cme(cme);
                         if (monly_cme) {
                             vm_cme_invalidate(monly_cme);
@@ -924,8 +924,7 @@ static void delete_overloaded_cme(const rb_callable_method_entry_t *cme);
 void
 rb_free_method_entry_vm_weak_references(const rb_method_entry_t *me)
 {
-    rb_method_definition_t *def = METHOD_ENTRY_DEF(me);
-    if (def && def->iseq_overload) {
+    if (METHOD_ENTRY_ISEQ_OVERLOAD(me)) {
         delete_overloaded_cme((const rb_callable_method_entry_t *)me);
     }
 }
@@ -1055,7 +1054,10 @@ rb_method_definition_set(const rb_method_entry_t *me, rb_method_definition_t *de
                     METHOD_ENTRY_BASIC_SET((rb_method_entry_t *)me, TRUE);
                 }
 
-                if (ISEQ_BODY(iseq)->mandatory_only_iseq) def->iseq_overload = 1;
+                if (ISEQ_BODY(iseq)->mandatory_only_iseq) {
+                    def->iseq_overload = 1;
+                    METHOD_ENTRY_ISEQ_OVERLOAD_SET((rb_method_entry_t *)me);
+                }
 
                 if (0) vm_cref_dump("rb_method_definition_create", cref);
 
@@ -1169,7 +1171,6 @@ rb_method_definition_create(rb_method_type_t type, ID mid)
     def->type = type;
     def->original_id = mid;
     def->method_serial = (uintptr_t)RUBY_ATOMIC_FETCH_ADD(method_serial, 1);
-    def->box = rb_current_box();
     return def;
 }
 
@@ -1190,6 +1191,7 @@ rb_method_entry_alloc(ID called_id, VALUE owner, VALUE defined_class, rb_method_
     if (def) {
         VALUE def_imemo = METHOD_DEF_IMEMO(def);
         RB_OBJ_WRITE(me, &me->def, def_imemo);
+        if (def->iseq_overload) METHOD_ENTRY_ISEQ_OVERLOAD_SET(me);
     }
     me->called_id = called_id;
     me->owner = owner;
@@ -1630,11 +1632,11 @@ get_overloaded_cme(const rb_callable_method_entry_t *cme)
 const rb_callable_method_entry_t *
 rb_check_overloaded_cme(const rb_callable_method_entry_t *cme, const struct rb_callinfo * const ci)
 {
-    if (UNLIKELY(METHOD_ENTRY_DEF(cme)->iseq_overload) &&
+    if (UNLIKELY(METHOD_ENTRY_ISEQ_OVERLOAD(cme)) &&
         (vm_ci_flag(ci) & (VM_CALL_ARGS_SIMPLE)) &&
         (!(vm_ci_flag(ci) & VM_CALL_FORWARDING)) &&
         (int)vm_ci_argc(ci) == ISEQ_BODY(method_entry_iseqptr(cme))->param.lead_num) {
-        VM_ASSERT(METHOD_ENTRY_DEF(cme)->type == VM_METHOD_TYPE_ISEQ, "type: %d", METHOD_ENTRY_DEF(cme)->type); // iseq_overload is marked only on ISEQ methods
+        VM_ASSERT(METHOD_ENTRY_DEF(cme)->type == VM_METHOD_TYPE_ISEQ, "type: %d", METHOD_ENTRY_DEF(cme)->type);
 
         cme = get_overloaded_cme(cme);
 
