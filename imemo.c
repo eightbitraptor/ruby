@@ -334,7 +334,13 @@ mark_and_move_method_entry(rb_method_entry_t *ment, bool reference_updating)
 {
     rb_gc_mark_and_move(&ment->owner);
     rb_gc_mark_and_move(&ment->defined_class);
-    rb_gc_mark_and_move((VALUE *)&ment->def);
+
+    if (!reference_updating && ment->def) {
+        rb_gc_mark((VALUE)ment->def);
+    }
+    else {
+        rb_gc_mark_and_move((VALUE *)&ment->def);
+    }
 
     rb_method_definition_t *def = METHOD_ENTRY_DEF(ment);
     if (!reference_updating && def && def->iseq_overload && ment->defined_class) {
@@ -656,10 +662,6 @@ rb_imemo_free(VALUE obj)
         RB_DEBUG_COUNTER_INC(obj_imemo_fields);
         break;
       case imemo_method_def:
-        {
-            rb_method_definition_t *def = &((rb_method_definition_imemo_t *)obj)->def;
-            RUBY_ASSERT_ALWAYS(def->reference_count == 0);
-        }
         RB_DEBUG_COUNTER_INC(obj_imemo_method_def);
         break;
       default:

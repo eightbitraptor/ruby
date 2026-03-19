@@ -943,10 +943,6 @@ rb_free_method_entry(const rb_method_entry_t *me)
     // YJIT rb_yjit_root_mark() roots CMEs in `Invariants`,
     // to remove from `Invariants` here.
 #endif
-
-    /* def imemo is marked by the ME, GC handles its lifetime.
-     * We still decrement the reference count for semantic tracking. */
-    method_definition_release(METHOD_ENTRY_DEF(me));
 }
 
 static inline rb_method_entry_t *search_method(VALUE klass, ID id, VALUE *defined_class_ptr);
@@ -1167,8 +1163,7 @@ rb_method_definition_t *
 rb_method_definition_create(rb_method_type_t type, ID mid)
 {
     rb_method_definition_imemo_t *imemo;
-    imemo = IMEMO_NEW(rb_method_definition_imemo_t, imemo_method_def, 0);
-
+    imemo = SHAREABLE_IMEMO_NEW(rb_method_definition_imemo_t, imemo_method_def, 0);
     rb_method_definition_t *def = &imemo->def;
     memset(def, 0, sizeof(*def));
     def->type = type;
@@ -1187,6 +1182,7 @@ rb_method_entry_alloc(ID called_id, VALUE owner, VALUE defined_class, rb_method_
         VM_ASSERT_TYPE2(defined_class, T_CLASS, T_ICLASS);
     }
     rb_method_entry_t *me = SHAREABLE_IMEMO_NEW(rb_method_entry_t, imemo_ment, defined_class);
+    *(VALUE *)&me->def = 0;
 
     // mark_and_move_method_entry pins itself when it is in the overloaded_cme table
     rb_gc_register_pinning_obj((VALUE)me);
@@ -1194,11 +1190,6 @@ rb_method_entry_alloc(ID called_id, VALUE owner, VALUE defined_class, rb_method_
     if (def) {
         VALUE def_imemo = METHOD_DEF_IMEMO(def);
         RB_OBJ_WRITE(me, &me->def, def_imemo);
-    }
-    else {
-        /* GC slots are not zeroed on allocation, so explicitly clear def
-         * to avoid leaving garbage from a prior slot occupant. */
-        *(VALUE *)&me->def = 0;
     }
     me->called_id = called_id;
     me->owner = owner;
