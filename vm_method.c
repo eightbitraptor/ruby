@@ -2713,8 +2713,9 @@ rb_method_definition_eq(const rb_method_definition_t *d1, const rb_method_defini
         return (d1->body.optimized.type == d2->body.optimized.type) &&
                (d1->body.optimized.index == d2->body.optimized.index);
       case VM_METHOD_TYPE_REFINED:
+        return d1->body.refined.orig_me == d2->body.refined.orig_me;
       case VM_METHOD_TYPE_ALIAS:
-        break;
+        return d1->body.alias.original_me == d2->body.alias.original_me;
     }
     rb_bug("rb_method_definition_eq: unsupported type: %d", d1->type);
 }
@@ -2748,8 +2749,9 @@ rb_hash_method_definition(st_index_t hash, const rb_method_definition_t *def)
         hash = rb_hash_uint(hash, def->body.optimized.index);
         return rb_hash_uint(hash, def->body.optimized.type);
       case VM_METHOD_TYPE_REFINED:
+        return rb_hash_uint(hash, (st_index_t)def->body.refined.orig_me);
       case VM_METHOD_TYPE_ALIAS:
-        break; /* unreachable */
+        return rb_hash_uint(hash, (st_index_t)def->body.alias.original_me);
     }
     rb_bug("rb_hash_method_definition: unsupported method type (%d)", def->type);
 }
