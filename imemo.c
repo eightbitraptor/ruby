@@ -254,10 +254,6 @@ rb_imemo_memsize(VALUE obj)
       case imemo_memo:
         break;
       case imemo_ment:
-        /* def is now a separate imemo, not counted here */
-        break;
-      case imemo_method_def:
-        /* no external allocations */
         break;
       case imemo_svar:
         break;
@@ -335,11 +331,9 @@ mark_and_move_method_entry(rb_method_entry_t *ment, bool reference_updating)
     rb_gc_mark_and_move(&ment->owner);
     rb_gc_mark_and_move(&ment->defined_class);
 
-    if (!reference_updating && ment->def) {
-        rb_gc_mark((VALUE)ment->def);
-    }
-    else {
-        rb_gc_mark_and_move((VALUE *)&ment->def);
+    rb_method_definition_t *def = METHOD_ENTRY_DEF(ment);
+    if (def) {
+        mark_and_move_method_definition(def, reference_updating);
     }
 
     if (!reference_updating && METHOD_ENTRY_ISEQ_OVERLOAD(ment) && ment->defined_class) {
@@ -545,11 +539,6 @@ rb_imemo_mark_and_move(VALUE obj, bool reference_updating)
         }
         break;
       }
-      case imemo_method_def: {
-        rb_method_definition_imemo_t *def_imemo = (rb_method_definition_imemo_t *)obj;
-        mark_and_move_method_definition(&def_imemo->def, reference_updating);
-        break;
-      }
       default:
         rb_bug("unreachable");
     }
@@ -659,9 +648,6 @@ rb_imemo_free(VALUE obj)
       case imemo_fields:
         imemo_fields_free(IMEMO_OBJ_FIELDS(obj));
         RB_DEBUG_COUNTER_INC(obj_imemo_fields);
-        break;
-      case imemo_method_def:
-        RB_DEBUG_COUNTER_INC(obj_imemo_method_def);
         break;
       default:
         rb_bug("unreachable");

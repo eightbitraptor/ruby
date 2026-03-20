@@ -3153,7 +3153,7 @@ warn_unused_block(const rb_callable_method_entry_t *cme, const rb_iseq_t *iseq, 
     } k1 = {
         .v = (VALUE)pc,
     }, k2 = {
-        .v = (VALUE)cme->def,
+        .v = (VALUE)METHOD_ENTRY_DEF(cme),
     };
 
     // relax check
@@ -3175,7 +3175,7 @@ warn_unused_block(const rb_callable_method_entry_t *cme, const rb_iseq_t *iseq, 
 
     if (0) {
         fprintf(stderr, "SIZEOF_VALUE:%d\n", SIZEOF_VALUE);
-        fprintf(stderr, "pc:%p def:%p\n", pc, (void *)cme->def);
+        fprintf(stderr, "pc:%p def:%p\n", pc, (void *)METHOD_ENTRY_DEF(cme));
         fprintf(stderr, "key:%p\n", (void *)key);
     }
 
@@ -4266,14 +4266,7 @@ aliased_callable_method_entry(const rb_callable_method_entry_t *me)
         VM_ASSERT_TYPE(orig_me->owner, T_MODULE);
         cme = rb_method_entry_complement_defined_class(orig_me, me->called_id, defined_class);
 
-        if (METHOD_ENTRY_DEF(me)->reference_count == 1) {
-            RB_OBJ_WRITE(me->def, &METHOD_ENTRY_DEF(me)->body.alias.original_me, cme);
-        }
-        else {
-            rb_method_definition_t *def =
-                rb_method_definition_create(VM_METHOD_TYPE_ALIAS, METHOD_ENTRY_DEF(me)->original_id);
-            rb_method_definition_set((rb_method_entry_t *)me, def, (void *)cme);
-        }
+        RB_OBJ_WRITE((VALUE)me, &METHOD_ENTRY_DEF(me)->body.alias.original_me, cme);
     }
     else {
         cme = (const rb_callable_method_entry_t *)orig_me;
@@ -4666,7 +4659,7 @@ search_refined_method(rb_execution_context_t *ec, rb_control_frame_t *cfp, struc
             }
 
             if (METHOD_ENTRY_DEF(cme)->type != VM_METHOD_TYPE_REFINED ||
-                cme->def != ref_me->def) {
+                !rb_method_definition_eq(METHOD_ENTRY_DEF(cme), METHOD_ENTRY_DEF(ref_me))) {
                 cme = ref_me;
             }
             if (METHOD_ENTRY_DEF(ref_me)->type != VM_METHOD_TYPE_REFINED) {
@@ -7275,7 +7268,7 @@ vm_trace(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp)
             unsigned int bmethod_hooks_cnt = METHOD_ENTRY_DEF(me)->body.bmethod.local_hooks_cnt;
             if (RB_UNLIKELY(bmethod_hooks_cnt > 0)) {
                 st_data_t val;
-                if (st_lookup(rb_ractor_targeted_hooks(r), (st_data_t)me->def, &val)) {
+                if (st_lookup(rb_ractor_targeted_hooks(r), (st_data_t)METHOD_ENTRY_DEF(me), &val)) {
                     bmethod_local_hooks = (rb_hook_list_t*)val;
                 }
                 if (bmethod_local_hooks) {

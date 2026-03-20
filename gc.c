@@ -1287,7 +1287,6 @@ rb_gc_obj_needs_cleanup_p(VALUE obj)
           case imemo_svar:
           case imemo_callcache:
           case imemo_throw_data:
-          case imemo_method_def:
             return false;
           default:
             return true;
@@ -5037,12 +5036,12 @@ rb_raw_obj_info_buitin_type(char *const buff, const size_t buff_size, const VALU
                              METHOD_ENTRY_COMPLEMENTED(me) ? ",cmp" : "",
                              METHOD_ENTRY_CACHED(me) ? ",cc" : "",
                              METHOD_ENTRY_INVALIDATED(me) ? ",inv" : "",
-                             me->def ? rb_method_type_name(METHOD_ENTRY_DEF(me)->type) : "NULL",
-                             me->def ? METHOD_ENTRY_DEF(me)->aliased : -1,
+                             METHOD_ENTRY_DEF(me) ? rb_method_type_name(METHOD_ENTRY_DEF(me)->type) : "NULL",
+                             METHOD_ENTRY_DEF(me) ? METHOD_ENTRY_DEF(me)->aliased : -1,
                              (void *)me->owner, // obj_info(me->owner),
                              (void *)me->defined_class); //obj_info(me->defined_class)));
 
-                    if (me->def) {
+                    if (METHOD_ENTRY_DEF(me)) {
                         switch (METHOD_ENTRY_DEF(me)->type) {
                           case VM_METHOD_TYPE_ISEQ:
                             APPEND_S(" (iseq:");

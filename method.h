@@ -50,74 +50,10 @@ typedef struct rb_cref_struct {
     const rb_scope_visibility_t scope_visi;
 } rb_cref_t;
 
-/* method data type */
-
-typedef struct rb_method_entry_struct {
-    VALUE flags;
-    VALUE defined_class;
-    const VALUE def;  /* imemo_method_def VALUE */
-    ID called_id;
-    VALUE owner;
-} rb_method_entry_t;
-
-typedef struct rb_callable_method_entry_struct { /* same fields with rb_method_entry_t */
-    VALUE flags;
-    const VALUE defined_class;
-    const VALUE def;  /* imemo_method_def VALUE */
-    ID called_id;
-    const VALUE owner;
-} rb_callable_method_entry_t;
-
-#define METHOD_ENTRY_VISI(me)  (rb_method_visibility_t)(((me)->flags & (IMEMO_FL_USER0 | IMEMO_FL_USER1)) >> (IMEMO_FL_USHIFT+0))
-#define METHOD_ENTRY_BASIC(me) (int)                   (((me)->flags & (IMEMO_FL_USER2                 )) >> (IMEMO_FL_USHIFT+2))
-#define METHOD_ENTRY_COMPLEMENTED(me)        ((me)->flags & IMEMO_FL_USER3)
-#define METHOD_ENTRY_COMPLEMENTED_SET(me)    ((me)->flags |= IMEMO_FL_USER3)
-#define METHOD_ENTRY_CACHED(me)              ((me)->flags & IMEMO_FL_USER4)
-#define METHOD_ENTRY_INVALIDATED(me)         ((me)->flags & IMEMO_FL_USER5)
-#define METHOD_ENTRY_INVALIDATED_SET(me)     ((me)->flags |= IMEMO_FL_USER5)
-#define METHOD_ENTRY_ISEQ_OVERLOAD(me)       ((me)->flags & IMEMO_FL_USER6)
-#define METHOD_ENTRY_ISEQ_OVERLOAD_SET(me)   ((me)->flags |= IMEMO_FL_USER6)
-
-static inline void
-METHOD_ENTRY_CACHED_SET(rb_callable_method_entry_t *me)
-{
-    if (!METHOD_ENTRY_CACHED(me)) {
-        me->flags |= IMEMO_FL_USER4;
-    }
-}
-
-static inline void
-METHOD_ENTRY_VISI_SET(rb_method_entry_t *me, rb_method_visibility_t visi)
-{
-    VM_ASSERT((int)visi >= 0 && visi <= 3);
-    me->flags = (me->flags & ~(IMEMO_FL_USER0 | IMEMO_FL_USER1)) | (visi << (IMEMO_FL_USHIFT+0));
-}
-static inline void
-METHOD_ENTRY_BASIC_SET(rb_method_entry_t *me, unsigned int basic)
-{
-    VM_ASSERT(basic <= 1);
-    me->flags = (me->flags & ~(IMEMO_FL_USER2                 )) | (basic << (IMEMO_FL_USHIFT+2));
-}
-static inline void
-METHOD_ENTRY_FLAGS_SET(rb_method_entry_t *me, rb_method_visibility_t visi, unsigned int basic)
-{
-    VM_ASSERT((int)visi >= 0 && visi <= 3);
-    VM_ASSERT(basic <= 1);
-    me->flags =
-      (me->flags & ~(IMEMO_FL_USER0|IMEMO_FL_USER1|IMEMO_FL_USER2)) |
-        ((visi << (IMEMO_FL_USHIFT+0)) | (basic << (IMEMO_FL_USHIFT+2)));
-}
-static inline void
-METHOD_ENTRY_FLAGS_COPY(rb_method_entry_t *dst, const rb_method_entry_t *src)
-{
-    dst->flags =
-      (dst->flags & ~(IMEMO_FL_USER0|IMEMO_FL_USER1|IMEMO_FL_USER2
-      |IMEMO_FL_USER3|IMEMO_FL_USER6)) |
-        (src->flags & (IMEMO_FL_USER0|IMEMO_FL_USER1|IMEMO_FL_USER2|IMEMO_FL_USER3|IMEMO_FL_USER6));
-}
+/* method definition types and body structs — must be defined before rb_method_entry_t */
 
 typedef enum {
-    VM_METHOD_TYPE_ISEQ,      /*!< Ruby method */
+    VM_METHOD_TYPE_ISEQ = 1,  /*!< Ruby method */
     VM_METHOD_TYPE_CFUNC,     /*!< C method */
     VM_METHOD_TYPE_ATTRSET,   /*!< attr_writer or attr_accessor */
     VM_METHOD_TYPE_IVAR,      /*!< attr_reader or attr_accessor */
@@ -215,24 +151,80 @@ struct rb_hook_list_struct;
 typedef struct rb_method_definition_struct rb_method_definition_t;
 STATIC_ASSERT(sizeof_method_def, offsetof(rb_method_definition_t, body) <= 8);
 
-typedef struct rb_method_definition_imemo {
-    VALUE flags;
-    VALUE _unused;
-    rb_method_definition_t def;
-} rb_method_definition_imemo_t;
+/* method entry — definition is embedded inline */
 
-/* me->def is an imemo VALUE; this extracts the embedded rb_method_definition_t */
+typedef struct rb_method_entry_struct {
+    VALUE flags;
+    VALUE defined_class;
+    ID called_id;
+    VALUE owner;
+    rb_method_definition_t def;
+} rb_method_entry_t;
+
+typedef struct rb_callable_method_entry_struct { /* same fields with rb_method_entry_t */
+    VALUE flags;
+    const VALUE defined_class;
+    ID called_id;
+    const VALUE owner;
+    rb_method_definition_t def;
+} rb_callable_method_entry_t;
+
+#define METHOD_ENTRY_VISI(me)  (rb_method_visibility_t)(((me)->flags & (IMEMO_FL_USER0 | IMEMO_FL_USER1)) >> (IMEMO_FL_USHIFT+0))
+#define METHOD_ENTRY_BASIC(me) (int)                   (((me)->flags & (IMEMO_FL_USER2                 )) >> (IMEMO_FL_USHIFT+2))
+#define METHOD_ENTRY_COMPLEMENTED(me)        ((me)->flags & IMEMO_FL_USER3)
+#define METHOD_ENTRY_COMPLEMENTED_SET(me)    ((me)->flags |= IMEMO_FL_USER3)
+#define METHOD_ENTRY_CACHED(me)              ((me)->flags & IMEMO_FL_USER4)
+#define METHOD_ENTRY_INVALIDATED(me)         ((me)->flags & IMEMO_FL_USER5)
+#define METHOD_ENTRY_INVALIDATED_SET(me)     ((me)->flags |= IMEMO_FL_USER5)
+#define METHOD_ENTRY_ISEQ_OVERLOAD(me)       ((me)->flags & IMEMO_FL_USER6)
+#define METHOD_ENTRY_ISEQ_OVERLOAD_SET(me)   ((me)->flags |= IMEMO_FL_USER6)
+
+static inline void
+METHOD_ENTRY_CACHED_SET(rb_callable_method_entry_t *me)
+{
+    if (!METHOD_ENTRY_CACHED(me)) {
+        me->flags |= IMEMO_FL_USER4;
+    }
+}
+
+static inline void
+METHOD_ENTRY_VISI_SET(rb_method_entry_t *me, rb_method_visibility_t visi)
+{
+    VM_ASSERT((int)visi >= 0 && visi <= 3);
+    me->flags = (me->flags & ~(IMEMO_FL_USER0 | IMEMO_FL_USER1)) | (visi << (IMEMO_FL_USHIFT+0));
+}
+static inline void
+METHOD_ENTRY_BASIC_SET(rb_method_entry_t *me, unsigned int basic)
+{
+    VM_ASSERT(basic <= 1);
+    me->flags = (me->flags & ~(IMEMO_FL_USER2                 )) | (basic << (IMEMO_FL_USHIFT+2));
+}
+static inline void
+METHOD_ENTRY_FLAGS_SET(rb_method_entry_t *me, rb_method_visibility_t visi, unsigned int basic)
+{
+    VM_ASSERT((int)visi >= 0 && visi <= 3);
+    VM_ASSERT(basic <= 1);
+    me->flags =
+      (me->flags & ~(IMEMO_FL_USER0|IMEMO_FL_USER1|IMEMO_FL_USER2)) |
+        ((visi << (IMEMO_FL_USHIFT+0)) | (basic << (IMEMO_FL_USHIFT+2)));
+}
+static inline void
+METHOD_ENTRY_FLAGS_COPY(rb_method_entry_t *dst, const rb_method_entry_t *src)
+{
+    dst->flags =
+      (dst->flags & ~(IMEMO_FL_USER0|IMEMO_FL_USER1|IMEMO_FL_USER2
+      |IMEMO_FL_USER3|IMEMO_FL_USER6)) |
+        (src->flags & (IMEMO_FL_USER0|IMEMO_FL_USER1|IMEMO_FL_USER2|IMEMO_FL_USER3|IMEMO_FL_USER6));
+}
+
+/* def.type == 0 means no definition (negative cache) */
 static inline rb_method_definition_t *
 rb_method_entry_def(const rb_method_entry_t *me) {
-    return me->def ? &((rb_method_definition_imemo_t *)(me->def))->def : NULL;
+    return me->def.type ? (rb_method_definition_t *)&me->def : NULL;
 }
 #define METHOD_ENTRY_DEF(me) rb_method_entry_def((const rb_method_entry_t *)(me))
 
-/* Get imemo VALUE from def pointer (inverse of METHOD_ENTRY_DEF) */
-#define METHOD_DEF_IMEMO(def) \
-    ((VALUE)((char *)(def) - offsetof(rb_method_definition_imemo_t, def)))
-
-#define UNDEFINED_METHOD_ENTRY_P(me) (!(me) || !(me)->def || METHOD_ENTRY_DEF(me)->type == VM_METHOD_TYPE_UNDEF)
+#define UNDEFINED_METHOD_ENTRY_P(me) (!(me) || !METHOD_ENTRY_DEF(me) || METHOD_ENTRY_DEF(me)->type == VM_METHOD_TYPE_UNDEF)
 #define UNDEFINED_REFINED_METHOD_P(defptr) \
     ((defptr)->type == VM_METHOD_TYPE_REFINED && \
      UNDEFINED_METHOD_ENTRY_P((defptr)->body.refined.orig_me))
@@ -244,8 +236,7 @@ void rb_add_method_optimized(VALUE klass, ID mid, enum method_optimized_type, un
 void rb_add_refined_method_entry(VALUE refined_class, ID mid);
 
 rb_method_entry_t *rb_method_entry_set(VALUE klass, ID mid, const rb_method_entry_t *, rb_method_visibility_t noex);
-rb_method_entry_t *rb_method_entry_create(ID called_id, VALUE klass, rb_method_visibility_t visi, rb_method_definition_t *def);
-rb_method_definition_t *rb_method_definition_create(rb_method_type_t type, ID mid);
+rb_method_entry_t *rb_method_entry_create(ID called_id, VALUE klass, rb_method_visibility_t visi, rb_method_type_t type);
 
 const rb_method_entry_t *rb_method_entry_at(VALUE obj, ID id);
 

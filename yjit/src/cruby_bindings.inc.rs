@@ -399,18 +399,18 @@ pub struct rb_callable_method_entry_struct {
     pub owner: VALUE,
 }
 pub type rb_callable_method_entry_t = rb_callable_method_entry_struct;
-pub const VM_METHOD_TYPE_ISEQ: rb_method_type_t = 0;
-pub const VM_METHOD_TYPE_CFUNC: rb_method_type_t = 1;
-pub const VM_METHOD_TYPE_ATTRSET: rb_method_type_t = 2;
-pub const VM_METHOD_TYPE_IVAR: rb_method_type_t = 3;
-pub const VM_METHOD_TYPE_BMETHOD: rb_method_type_t = 4;
-pub const VM_METHOD_TYPE_ZSUPER: rb_method_type_t = 5;
-pub const VM_METHOD_TYPE_ALIAS: rb_method_type_t = 6;
-pub const VM_METHOD_TYPE_UNDEF: rb_method_type_t = 7;
-pub const VM_METHOD_TYPE_NOTIMPLEMENTED: rb_method_type_t = 8;
-pub const VM_METHOD_TYPE_OPTIMIZED: rb_method_type_t = 9;
-pub const VM_METHOD_TYPE_MISSING: rb_method_type_t = 10;
-pub const VM_METHOD_TYPE_REFINED: rb_method_type_t = 11;
+pub const VM_METHOD_TYPE_ISEQ: rb_method_type_t = 1;
+pub const VM_METHOD_TYPE_CFUNC: rb_method_type_t = 2;
+pub const VM_METHOD_TYPE_ATTRSET: rb_method_type_t = 3;
+pub const VM_METHOD_TYPE_IVAR: rb_method_type_t = 4;
+pub const VM_METHOD_TYPE_BMETHOD: rb_method_type_t = 5;
+pub const VM_METHOD_TYPE_ZSUPER: rb_method_type_t = 6;
+pub const VM_METHOD_TYPE_ALIAS: rb_method_type_t = 7;
+pub const VM_METHOD_TYPE_UNDEF: rb_method_type_t = 8;
+pub const VM_METHOD_TYPE_NOTIMPLEMENTED: rb_method_type_t = 9;
+pub const VM_METHOD_TYPE_OPTIMIZED: rb_method_type_t = 10;
+pub const VM_METHOD_TYPE_MISSING: rb_method_type_t = 11;
+pub const VM_METHOD_TYPE_REFINED: rb_method_type_t = 12;
 pub type rb_method_type_t = u32;
 pub type rb_cfunc_t = ::std::option::Option<unsafe extern "C" fn() -> VALUE>;
 #[repr(C)]

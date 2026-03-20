@@ -2360,7 +2360,7 @@ rb_vm_check_redefinition_opt_method(const rb_method_entry_t *me, VALUE klass)
        klass = RBASIC_CLASS(klass);
     }
     if (vm_redefinition_check_method_type(me)) {
-        if (st_lookup(vm_opt_method_def_table, (st_data_t)me->def, &bop)) {
+        if (st_lookup(vm_opt_method_def_table, (st_data_t)METHOD_ENTRY_DEF(me), &bop)) {
             int flag = vm_redefinition_check_flag(klass);
             if (flag != 0) {
                 rb_category_warn(
@@ -2399,7 +2399,7 @@ rb_vm_check_redefinition_by_prepend(VALUE klass)
 static void
 add_opt_method_entry_bop(const rb_method_entry_t *me, ID mid, enum ruby_basic_operators bop)
 {
-    st_insert(vm_opt_method_def_table, (st_data_t)me->def, (st_data_t)bop);
+    st_insert(vm_opt_method_def_table, (st_data_t)METHOD_ENTRY_DEF(me), (st_data_t)bop);
     st_insert(vm_opt_mid_table, (st_data_t)mid, (st_data_t)Qtrue);
 }
 
