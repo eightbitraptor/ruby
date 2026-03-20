@@ -299,6 +299,7 @@ pub struct rb_method_definition_t {
     _data: [u8; 0],
     _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
 }
+#[allow(dead_code)]
 type rb_method_definition_struct = rb_method_definition_t;
 
 /// Opaque cfunc type from method.h

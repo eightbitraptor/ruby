@@ -3156,7 +3156,7 @@ current_box_on_cfp(const rb_execution_context_t *ec, const rb_control_frame_t *c
     if (VM_ENV_FRAME_TYPE_P(lep, VM_FRAME_MAGIC_METHOD) || VM_ENV_FRAME_TYPE_P(lep, VM_FRAME_MAGIC_CFUNC)) {
         cme = check_method_entry(lep[VM_ENV_DATA_INDEX_ME_CREF], TRUE);
         VM_BOX_ASSERT(cme, "cme should be valid");
-        VM_BOX_ASSERT(cme->def, "cme->def shold be valid");
+        VM_BOX_ASSERT(METHOD_ENTRY_DEF(cme), "cme->def should be valid");
         return METHOD_ENTRY_DEF(cme)->box;
     }
     else if (VM_ENV_FRAME_TYPE_P(lep, VM_FRAME_MAGIC_TOP) || VM_ENV_FRAME_TYPE_P(lep, VM_FRAME_MAGIC_CLASS)) {

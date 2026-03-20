@@ -1226,11 +1226,11 @@ rb_method_entry_clone(const rb_method_entry_t *src_me)
         const rb_method_entry_t *orig_me = src_def->body.refined.orig_me;
         VM_ASSERT(METHOD_ENTRY_DEF(orig_me)->type != VM_METHOD_TYPE_REFINED);
 
-        rb_method_entry_t *orig_clone = rb_method_entry_clone(orig_me);
-        METHOD_ENTRY_FLAGS_COPY(orig_clone, orig_me);
+        const rb_method_entry_t *orig_clone = rb_method_entry_clone(orig_me);
+        METHOD_ENTRY_FLAGS_COPY((rb_method_entry_t *)orig_clone, orig_me);
 
         method_definition_init(&me->def, VM_METHOD_TYPE_REFINED, src_me->called_id);
-        rb_method_definition_set(me, &me->def, orig_clone);
+        rb_method_definition_set(me, &me->def, (void *)orig_clone);
     }
     return me;
 }
@@ -1291,11 +1291,11 @@ make_method_entry_refined(VALUE owner, rb_method_entry_t *me)
     else {
         rb_vm_check_redefinition_opt_method(me, me->owner);
 
-        struct rb_method_entry_struct *orig_me =
+        const rb_method_entry_t *orig_me =
             rb_method_entry_clone(me);
 
         method_definition_init(&me->def, VM_METHOD_TYPE_REFINED, me->called_id);
-        rb_method_definition_set(me, &me->def, orig_me);
+        rb_method_definition_set(me, &me->def, (void *)orig_me);
         METHOD_ENTRY_VISI_SET(me, METHOD_VISI_PUBLIC);
     }
 }
@@ -1507,7 +1507,7 @@ rb_method_entry_make(VALUE klass, ID mid, VALUE defined_class, rb_method_visibil
 
     rb_method_table_insert(klass, mtbl, mid, me);
 
-    VM_ASSERT(me->def != 0);
+    VM_ASSERT(METHOD_ENTRY_DEF(me));
 
     /* check optimized method override by a prepended module */
     if (RB_TYPE_P(orig_klass, T_MODULE)) {

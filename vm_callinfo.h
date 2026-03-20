@@ -636,13 +636,12 @@ vm_cc_check_cme(const struct rb_callcache *cc, const rb_callable_method_entry_t 
     if (valid) {
         return true;
     }
-#if 1
+#if 0
         // debug print
-
-        fprintf(stderr, "iseq_overload:%d, cme:%p (def:%"PRIxVALUE"), cm_cc_cme(cc):%p (def:%"PRIxVALUE")\n",
+        fprintf(stderr, "iseq_overload:%d, cme:%p def_type:%d, cc_cme:%p def_type:%d\n",
                 (int)!!METHOD_ENTRY_ISEQ_OVERLOAD(cme),
-                (void *)cme, cme->def,
-                (void *)vm_cc_cme(cc), vm_cc_cme(cc)->def);
+                (void *)cme, METHOD_ENTRY_DEF(cme) ? METHOD_ENTRY_DEF(cme)->type : -1,
+                (void *)vm_cc_cme(cc), METHOD_ENTRY_DEF(vm_cc_cme(cc)) ? METHOD_ENTRY_DEF(vm_cc_cme(cc))->type : -1);
         rp(cme);
         rp(vm_cc_cme(cc));
         rp(rb_vm_lookup_overloaded_cme(cme));

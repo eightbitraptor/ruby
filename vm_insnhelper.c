@@ -2432,7 +2432,7 @@ check_cfunc(const rb_callable_method_entry_t *me, cfunc_type func)
     else {
         VM_ASSERT(IMEMO_TYPE_P(me, imemo_ment));
         VM_ASSERT(callable_method_entry_p(me));
-        VM_ASSERT(me->def);
+        VM_ASSERT(METHOD_ENTRY_DEF(me));
         if (METHOD_ENTRY_DEF(me)->type != VM_METHOD_TYPE_CFUNC) {
             return false;
         }
