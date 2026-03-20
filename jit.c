@@ -186,7 +186,7 @@ rb_get_cme_def_body_cfunc(const rb_callable_method_entry_t *cme)
 uintptr_t
 rb_get_def_method_serial(const rb_method_definition_t *def)
 {
-    return def->method_serial;
+    return (uintptr_t)def;
 }
 
 ID
