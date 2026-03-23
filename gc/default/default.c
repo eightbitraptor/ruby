@@ -109,8 +109,8 @@
 # define RUBY_DEBUG_LOG(...)
 #endif
 
-#ifndef GC_HEAP_INIT_SLOTS
-#define GC_HEAP_INIT_SLOTS 10000
+#ifndef GC_HEAP_INIT_BYTES
+#define GC_HEAP_INIT_BYTES (400 * 1024)
 #endif
 #ifndef GC_HEAP_FREE_SLOTS
 #define GC_HEAP_FREE_SLOTS  4096
@@ -202,7 +202,7 @@ typedef struct ractor_newobj_cache {
 } rb_ractor_newobj_cache_t;
 
 typedef struct {
-    size_t heap_init_slots[HEAP_COUNT];
+    size_t heap_init_bytes;
     size_t heap_free_slots;
     double growth_factor;
     size_t growth_max_slots;
@@ -223,7 +223,7 @@ typedef struct {
 } ruby_gc_params_t;
 
 static ruby_gc_params_t gc_params = {
-    { GC_HEAP_INIT_SLOTS },
+    GC_HEAP_INIT_BYTES,
     GC_HEAP_FREE_SLOTS,
     GC_HEAP_GROWTH_FACTOR,
     GC_HEAP_GROWTH_MAX_SLOTS,
@@ -1593,8 +1593,7 @@ rb_gc_impl_get_measure_total_time(void *objspace_ptr)
 static size_t
 minimum_slots_for_heap(rb_objspace_t *objspace, rb_heap_t *heap)
 {
-    size_t heap_idx = heap - heaps;
-    return gc_params.heap_init_slots[heap_idx];
+    return gc_params.heap_init_bytes / heap->slot_size;
 }
 
 /* garbage objects will be collected soon. */
@@ -7931,7 +7930,7 @@ get_envparam_double(const char *name, double *default_value, double lower_bound,
  *
  *  * obsolete
  *    * RUBY_FREE_MIN       -> RUBY_GC_HEAP_FREE_SLOTS (from 2.1)
- *    * RUBY_HEAP_MIN_SLOTS -> RUBY_GC_HEAP_INIT_SLOTS (from 2.1)
+ *    * RUBY_HEAP_MIN_SLOTS -> RUBY_GC_HEAP_INIT_SLOTS (from 2.1) -> RUBY_GC_HEAP_INIT_BYTES
  *
  * * RUBY_GC_MALLOC_LIMIT
  * * RUBY_GC_MALLOC_LIMIT_MAX (new from 2.1)
@@ -7951,12 +7950,7 @@ rb_gc_impl_set_params(void *objspace_ptr)
         /* ok */
     }
 
-    for (int i = 0; i < HEAP_COUNT; i++) {
-        char env_key[sizeof("RUBY_GC_HEAP_" "_INIT_SLOTS") + DECIMAL_SIZE_OF_BITS(sizeof(int) * CHAR_BIT)];
-        snprintf(env_key, sizeof(env_key), "RUBY_GC_HEAP_%d_INIT_SLOTS", i);
-
-        get_envparam_size(env_key, &gc_params.heap_init_slots[i], 0);
-    }
+    get_envparam_size("RUBY_GC_HEAP_INIT_BYTES", &gc_params.heap_init_bytes, 0);
 
     get_envparam_double("RUBY_GC_HEAP_GROWTH_FACTOR", &gc_params.growth_factor, 1.0, 0.0, FALSE);
     get_envparam_size  ("RUBY_GC_HEAP_GROWTH_MAX_SLOTS", &gc_params.growth_max_slots, 0);
@@ -9539,11 +9533,7 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
 #if RGENGC_ESTIMATE_OLDMALLOC
     objspace->rgengc.oldmalloc_increase_limit = gc_params.oldmalloc_limit_min;
 #endif
-    /* Set size pools allocatable pages. */
-    for (int i = 0; i < HEAP_COUNT; i++) {
-        /* Set the default value of heap_init_slots. */
-        gc_params.heap_init_slots[i] = GC_HEAP_INIT_SLOTS;
-    }
+    gc_params.heap_init_bytes = GC_HEAP_INIT_BYTES;
 
     init_mark_stack(&objspace->mark_stack);
 
