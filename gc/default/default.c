@@ -7439,7 +7439,7 @@ enum gc_stat_sym {
     gc_stat_sym_sweeping_time,
     gc_stat_sym_heap_allocated_pages,
     gc_stat_sym_heap_empty_pages,
-    gc_stat_sym_heap_allocatable_slots,
+    gc_stat_sym_heap_allocatable_bytes,
     gc_stat_sym_heap_available_slots,
     gc_stat_sym_heap_live_slots,
     gc_stat_sym_heap_free_slots,
@@ -7489,7 +7489,7 @@ setup_gc_stat_symbols(void)
         S(sweeping_time),
         S(heap_allocated_pages);
         S(heap_empty_pages);
-        S(heap_allocatable_slots);
+        S(heap_allocatable_bytes);
         S(heap_available_slots);
         S(heap_live_slots);
         S(heap_free_slots);
@@ -7570,7 +7570,7 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     /* implementation dependent counters */
     SET(heap_allocated_pages, rb_darray_size(objspace->heap_pages.sorted));
     SET(heap_empty_pages, objspace->empty_pages_count)
-    SET(heap_allocatable_slots, objspace->heap_pages.allocatable_slots);
+    SET(heap_allocatable_bytes, objspace->heap_pages.allocatable_bytes);
     SET(heap_available_slots, objspace_available_slots(objspace));
     SET(heap_live_slots, objspace_live_slots(objspace));
     SET(heap_free_slots, objspace_free_slots(objspace));
