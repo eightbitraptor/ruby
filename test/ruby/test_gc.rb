@@ -511,7 +511,7 @@ class TestGc < Test::Unit::TestCase
     omit "[Bug #21203] This test is flaky and intermittently failing now"
 
     assert_separately([], __FILE__, __LINE__, <<~RUBY, timeout: 60)
-      GC_HEAP_INIT_BYTES = 400 * 1024
+      GC_HEAP_INIT_BYTES = 2560 * 1024
 
       gc_count = GC.stat(:count)
       # Fill up all heaps to the byte-derived init slot count

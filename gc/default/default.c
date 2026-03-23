@@ -110,7 +110,7 @@
 #endif
 
 #ifndef GC_HEAP_INIT_BYTES
-#define GC_HEAP_INIT_BYTES (400 * 1024)
+#define GC_HEAP_INIT_BYTES (2560 * 1024)
 #endif
 #ifndef GC_HEAP_FREE_SLOTS
 #define GC_HEAP_FREE_SLOTS  4096
