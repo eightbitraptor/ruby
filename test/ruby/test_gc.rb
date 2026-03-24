@@ -318,7 +318,7 @@ class TestGc < Test::Unit::TestCase
   def test_latest_gc_info
     omit 'stress' if GC.stress
 
-    assert_separately([], __FILE__, __LINE__, <<-'RUBY')
+    assert_separately([{"RUBY_GC_HEAP_INIT_BYTES" => "409600"}, "-W0"], __FILE__, __LINE__, <<-'RUBY')
       GC.start
       count = GC.stat(:heap_free_slots) + GC.stat(:heap_allocatable_bytes) / GC.stat_heap(0, :slot_size)
       count.times{ "a" + "b" }
