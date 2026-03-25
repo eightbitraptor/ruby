@@ -194,27 +194,6 @@ static RB_THREAD_LOCAL_SPECIFIER int malloc_increase_local;
 # endif
 #endif
 
-static const size_t heap_init_slots_table[HEAP_COUNT] = {
-#if SIZEOF_VALUE >= 8
-    /* [0]  32B   */ 2000,
-    /* [1]  40B   */ GC_HEAP_INIT_SLOTS,
-    /* [2]  64B   */ GC_HEAP_INIT_SLOTS / 2,
-    /* [3]  80B   */ GC_HEAP_INIT_SLOTS / 3,
-    /* [4]  96B   */ GC_HEAP_INIT_SLOTS / 3,
-    /* [5]  128B  */ GC_HEAP_INIT_SLOTS / 4,
-    /* [6]  160B  */ GC_HEAP_INIT_SLOTS / 5,
-    /* [7]  256B  */ GC_HEAP_INIT_SLOTS / 8,
-    /* [8]  512B  */ GC_HEAP_INIT_SLOTS / 16,
-    /* [9]  640B  */ GC_HEAP_INIT_SLOTS / 20,
-    /* [10] 768B  */ GC_HEAP_INIT_SLOTS / 24,
-    /* [11] 1024B */ GC_HEAP_INIT_SLOTS / 32,
-#else
-    GC_HEAP_INIT_SLOTS,
-    GC_HEAP_INIT_SLOTS / 2, GC_HEAP_INIT_SLOTS / 4,
-    GC_HEAP_INIT_SLOTS / 8, GC_HEAP_INIT_SLOTS / 16,
-#endif
-};
-
 /* Precomputed reciprocals for fast slot index calculation.
  * For slot size d: reciprocal = ceil(2^48 / d).
  * Then offset / d == (uint32_t)((offset * reciprocal) >> 48)
@@ -7982,7 +7961,7 @@ get_envparam_double(const char *name, double *default_value, double lower_bound,
  *
  *  * obsolete
  *    * RUBY_FREE_MIN       -> RUBY_GC_HEAP_FREE_SLOTS (from 2.1)
- *    * RUBY_HEAP_MIN_SLOTS -> RUBY_GC_HEAP_INIT_SLOTS (from 2.1) -> RUBY_GC_HEAP_INIT_BYTES
+ *    * RUBY_HEAP_MIN_SLOTS -> RUBY_GC_HEAP_INIT_BYTES (from 2.1)
  *
  * * RUBY_GC_MALLOC_LIMIT
  * * RUBY_GC_MALLOC_LIMIT_MAX (new from 2.1)

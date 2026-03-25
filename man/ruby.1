@@ -601,15 +601,11 @@ Reaching the old malloc limit.
 .Pp
 There are currently 4 possible areas where the GC may be tuned by
 the following environment variables:
-.Bl -hang -compact -width "RUBY_GC_HEAP_n_INIT_SLOTS"
+.Bl -hang -compact -width "RUBY_GC_HEAP_GROWTH_MAX_BYTES"
 .Pp
-.It Ev RUBY_GC_HEAP_ Ns Ar n Ns Ev _INIT_SLOTS
-Initial allocation of slots in a specific heap.
-The available heaps can be found in the keys of
-.Li GC.stat_heap .
-.Ar n
-is a decimal number between 0 and 4.
-Introduced in Ruby 3.3.
+.It Ev RUBY_GC_HEAP_INIT_BYTES
+Initial heap size in bytes, shared across all heaps.
+Default: 2621440 (2.5 MiB).
 .Pp
 .It Ev RUBY_GC_HEAP_FREE_SLOTS
 Prepare at least this amount of slots after GC.
@@ -620,10 +616,10 @@ Introduced in Ruby 2.1, default: 4096
 Increase allocation rate of heap slots by this factor.
 Introduced in Ruby 2.1, default: 1.8, minimum: 1.0 (no growth)
 .Pp
-.It Ev RUBY_GC_HEAP_GROWTH_MAX_SLOTS
-Allocation rate is limited to this number of slots,
+.It Ev RUBY_GC_HEAP_GROWTH_MAX_BYTES
+Allocation rate is limited to this number of bytes,
 preventing excessive allocation due to RUBY_GC_HEAP_GROWTH_FACTOR.
-Introduced in Ruby 2.1, default: 0 (no limit)
+Introduced in Ruby 2.1 (as RUBY_GC_HEAP_GROWTH_MAX_SLOTS), default: 0 (no limit)
 .Pp
 .It Ev RUBY_GC_HEAP_OLDOBJECT_LIMIT_FACTOR
 Perform a full GC when the number of old objects is more than R * N,

@@ -198,8 +198,8 @@ module GC
   #   The number of pages with no live objects, and that could be released to the system.
   # - +:heap_sorted_length+:
   #   The number of pages that can fit into the buffer that holds references to  all pages.
-  # - +:heap_allocatable_pages+:
-  #   The total number of pages the application could allocate without additional \GC.
+  # - +:heap_allocatable_bytes+:
+  #   The total number of bytes the application could allocate without additional \GC.
   # - +:heap_available_slots+:
   #   The total number of slots in all +:heap_allocated_pages+.
   # - +:heap_live_slots+:
@@ -376,9 +376,9 @@ module GC
   #
   # - +:slot_size+:
   #   The slot size of the heap in bytes.
-  # - +:heap_allocatable_pages+:
-  #   The number of pages that can be allocated without triggering a new
-  #   garbage collection cycle.
+  # - +:heap_allocatable_slots+:
+  #   The number of slots that can be allocated in this heap without
+  #   triggering a new garbage collection cycle.
   # - +:heap_eden_pages+:
   #   The number of pages in the eden heap.
   # - +:heap_eden_slots+:
