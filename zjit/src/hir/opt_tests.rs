@@ -5517,7 +5517,10 @@ mod hir_opt_tests {
           v14:HeapBasicObject = RefineType v6, HeapBasicObject
           v17:Fixnum[2] = Const Value(2)
           PatchPoint SingleRactorMode
-          SetIvar v14, :@bar, v17
+          StoreField v14, :@bar@0x1004, v17
+          WriteBarrier v14, v17
+          v40:CShape[0x1005] = Const CShape(0x1005)
+          StoreField v14, :_shape_id@0x1000, v40
           CheckInterrupts
           Return v17
         ");
@@ -7791,23 +7794,22 @@ mod hir_opt_tests {
           v26:CInt64 = IntAnd v12, v23
           v27:CBool = IsBitEqual v26, v25
           IfTrue v27, bb6()
-          v32:BasicObject = GetIvar v11, :@foo
-          Jump bb4(v32)
+          v31:BasicObject = GetIvar v11, :@foo
+          Jump bb4(v31)
         bb5():
           v20:CPtr = LoadField v11, :_as_heap@0x1003
           v21:BasicObject = LoadField v20, :@foo@0x1004
           Jump bb4(v21)
         bb6():
-          v29:CPtr = LoadField v11, :_as_heap@0x1003
-          v30:BasicObject = LoadField v29, :@foo@0x1000
-          Jump bb4(v30)
+          v29:BasicObject = LoadField v11, :@foo@0x1003
+          Jump bb4(v29)
         bb4(v13:BasicObject):
-          v35:Fixnum[1] = Const Value(1)
+          v34:Fixnum[1] = Const Value(1)
           PatchPoint MethodRedefined(Integer@0x1008, +@0x1010, cme:0x1018)
-          v46:Fixnum = GuardType v13, Fixnum
-          v47:Fixnum = FixnumAdd v46, v35
+          v45:Fixnum = GuardType v13, Fixnum
+          v46:Fixnum = FixnumAdd v45, v34
           CheckInterrupts
-          Return v47
+          Return v46
         ");
     }
 
@@ -7862,32 +7864,30 @@ mod hir_opt_tests {
           v17:CInt64 = IntAnd v12, v14
           v18:CBool = IsBitEqual v17, v16
           IfTrue v18, bb5()
-          v23:CUInt64[0xffffffff0000001f] = Const CUInt64(0xffffffff0000001f)
-          v24:CPtr[CPtr(0x1002)] = Const CPtr(0x1002)
-          v25 = RefineType v24, CUInt64
-          v26:CInt64 = IntAnd v12, v23
-          v27:CBool = IsBitEqual v26, v25
-          IfTrue v27, bb6()
-          v45:CShape = LoadField v11, :_shape_id@0x1003
-          v46:CShape[0x1004] = GuardBitEquals v45, CShape(0x1004)
-          v47:CPtr = LoadField v11, :_as_heap@0x1005
-          v48:BasicObject = LoadField v47, :@foo@0x1000
-          Jump bb4(v48)
+          v22:CUInt64[0xffffffff0000001f] = Const CUInt64(0xffffffff0000001f)
+          v23:CPtr[CPtr(0x1002)] = Const CPtr(0x1002)
+          v24 = RefineType v23, CUInt64
+          v25:CInt64 = IntAnd v12, v22
+          v26:CBool = IsBitEqual v25, v24
+          IfTrue v26, bb6()
+          v44:CShape = LoadField v11, :_shape_id@0x1003
+          v45:CShape[0x1004] = GuardBitEquals v44, CShape(0x1004)
+          v46:BasicObject = LoadField v11, :@foo@0x1005
+          Jump bb4(v46)
         bb5():
-          v20:CPtr = LoadField v11, :_as_heap@0x1005
-          v21:BasicObject = LoadField v20, :@foo@0x1000
-          Jump bb4(v21)
+          v20:BasicObject = LoadField v11, :@foo@0x1005
+          Jump bb4(v20)
         bb6():
-          v29:CPtr = LoadField v11, :_as_heap@0x1005
-          v30:BasicObject = LoadField v29, :@foo@0x1006
-          Jump bb4(v30)
+          v28:CPtr = LoadField v11, :_as_heap@0x1005
+          v29:BasicObject = LoadField v28, :@foo@0x1006
+          Jump bb4(v29)
         bb4(v13:BasicObject):
-          v35:Fixnum[1] = Const Value(1)
+          v34:Fixnum[1] = Const Value(1)
           PatchPoint MethodRedefined(Integer@0x1008, +@0x1010, cme:0x1018)
-          v51:Fixnum = GuardType v13, Fixnum
-          v52:Fixnum = FixnumAdd v51, v35
+          v49:Fixnum = GuardType v13, Fixnum
+          v50:Fixnum = FixnumAdd v49, v34
           CheckInterrupts
-          Return v52
+          Return v50
         ");
     }
 
@@ -14975,7 +14975,10 @@ mod hir_opt_tests {
           v14:HeapBasicObject = RefineType v6, HeapBasicObject
           v17:Fixnum[2] = Const Value(2)
           PatchPoint SingleRactorMode
-          SetIvar v14, :@b, v17
+          StoreField v14, :@b@0x1004, v17
+          WriteBarrier v14, v17
+          v54:CShape[0x1005] = Const CShape(0x1005)
+          StoreField v14, :_shape_id@0x1000, v54
           v21:HeapBasicObject = RefineType v14, HeapBasicObject
           v24:Fixnum[3] = Const Value(3)
           PatchPoint SingleRactorMode
@@ -14983,13 +14986,13 @@ mod hir_opt_tests {
           v28:HeapBasicObject = RefineType v21, HeapBasicObject
           v31:Fixnum[4] = Const Value(4)
           PatchPoint SingleRactorMode
-          v50:CShape = LoadField v28, :_shape_id@0x1000
-          v51:CShape[0x1004] = GuardBitEquals v50, CShape(0x1004)
-          v52:CPtr = LoadField v28, :_as_heap@0x1002
-          StoreField v52, :@d@0x1005, v31
+          v57:CShape = LoadField v28, :_shape_id@0x1000
+          v58:CShape[0x1006] = GuardBitEquals v57, CShape(0x1006)
+          v59:CPtr = LoadField v28, :_as_heap@0x1002
+          StoreField v59, :@d@0x1004, v31
           WriteBarrier v28, v31
-          v55:CShape[0x1006] = Const CShape(0x1006)
-          StoreField v28, :_shape_id@0x1000, v55
+          v62:CShape[0x1007] = Const CShape(0x1007)
+          StoreField v28, :_shape_id@0x1000, v62
           CheckInterrupts
           Return v31
         ");

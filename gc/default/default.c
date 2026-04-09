@@ -188,7 +188,7 @@ static RB_THREAD_LOCAL_SPECIFIER int malloc_increase_local;
 
 #ifndef HEAP_COUNT
 # if SIZEOF_VALUE >= 8
-#  define HEAP_COUNT 12
+#  define HEAP_COUNT 5
 # else
 #  define HEAP_COUNT 5
 # endif
@@ -198,8 +198,7 @@ static RB_THREAD_LOCAL_SPECIFIER int malloc_increase_local;
  * single definition, so they can never get out of sync. */
 #if SIZEOF_VALUE >= 8
 # define EACH_POOL_SLOT_SIZE(SLOT) \
-    SLOT(32) SLOT(40) SLOT(64) SLOT(80) SLOT(96) SLOT(128) \
-    SLOT(160) SLOT(256) SLOT(512) SLOT(640) SLOT(768) SLOT(1024)
+    SLOT(40) SLOT(80) SLOT(160) SLOT(320) SLOT(640)
 #else
 # define EACH_POOL_SLOT_SIZE(SLOT) \
     SLOT(32) SLOT(64) SLOT(128) SLOT(256) SLOT(512)
