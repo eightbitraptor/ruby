@@ -5199,6 +5199,10 @@ gc_verify_internal_consistency_(rb_objspace_t *objspace)
     data.objspace = objspace;
     gc_report(5, objspace, "gc_verify_internal_consistency: start\n");
 
+    /* per-heap walk counts for diagnostics */
+    size_t walk_live_per_heap[HEAP_COUNT] = {0};
+    size_t walk_zombie_per_heap[HEAP_COUNT] = {0};
+
     /* check relations */
     for (size_t i = 0; i < rb_darray_size(objspace->heap_pages.sorted); i++) {
         struct heap_page *page = rb_darray_get(objspace->heap_pages.sorted, i);
@@ -5207,7 +5211,17 @@ gc_verify_internal_consistency_(rb_objspace_t *objspace)
         uintptr_t start = (uintptr_t)page->start;
         uintptr_t end = start + page->total_slots * slot_size;
 
+        size_t prev_live = data.live_object_count;
+        size_t prev_zombie = data.zombie_object_count;
+
         verify_internal_consistency_i((void *)start, (void *)end, slot_size, &data);
+
+        /* attribute this page's objects to its heap */
+        int heap_idx = (int)(page->heap - &heaps[0]);
+        if (heap_idx >= 0 && heap_idx < HEAP_COUNT) {
+            walk_live_per_heap[heap_idx] += data.live_object_count - prev_live;
+            walk_zombie_per_heap[heap_idx] += data.zombie_object_count - prev_zombie;
+        }
     }
 
     if (data.err_count != 0) {
@@ -5232,6 +5246,66 @@ gc_verify_internal_consistency_(rb_objspace_t *objspace)
         if (objspace_live_slots(objspace) != data.live_object_count) {
             fprintf(stderr, "heap_pages_final_slots: %"PRIdSIZE", total_freed_objects: %"PRIdSIZE"\n",
                     total_final_slots_count(objspace), total_freed_objects(objspace));
+
+            /* per-heap diagnostic dump */
+            fprintf(stderr, "\n=== PER-HEAP DIAGNOSTIC ===\n");
+            fprintf(stderr, "gc_mode: %d, is_marking: %d, is_lazy_sweeping: %d\n",
+                    (int)objspace->flags.mode, is_marking(objspace), is_lazy_sweeping(objspace));
+
+            size_t total_counter_live = 0;
+            size_t total_walk_live = 0;
+            for (int i = 0; i < HEAP_COUNT; i++) {
+                rb_heap_t *heap = &heaps[i];
+                size_t counter_live = heap->total_allocated_objects
+                                    - heap->total_freed_objects
+                                    - heap->final_slots_count;
+                total_counter_live += counter_live;
+                total_walk_live += walk_live_per_heap[i];
+
+                long diff = (long)counter_live - (long)walk_live_per_heap[i];
+                fprintf(stderr,
+                    "  heap[%d] slot_size=%-4zu: "
+                    "alloc=%"PRIuSIZE" freed=%"PRIuSIZE" final=%"PRIuSIZE" "
+                    "=> counter_live=%"PRIuSIZE" walk_live=%"PRIuSIZE" walk_zombie=%"PRIuSIZE" "
+                    "diff=%ld"
+                    "%s\n",
+                    i, (size_t)heap->slot_size,
+                    heap->total_allocated_objects,
+                    heap->total_freed_objects,
+                    heap->final_slots_count,
+                    counter_live,
+                    walk_live_per_heap[i],
+                    walk_zombie_per_heap[i],
+                    diff,
+                    diff != 0 ? " <== MISMATCH" : "");
+            }
+            fprintf(stderr,
+                "  TOTAL: counter_live=%"PRIuSIZE" walk_live=%"PRIuSIZE" diff=%ld\n",
+                total_counter_live, total_walk_live,
+                (long)total_counter_live - (long)total_walk_live);
+
+            /* also dump ractor cache state */
+            rb_ractor_newobj_cache_t *cache = rb_gc_get_ractor_newobj_cache();
+            fprintf(stderr, "\n=== RACTOR CACHE STATE (post-flush) ===\n");
+            for (int i = 0; i < HEAP_COUNT; i++) {
+                rb_ractor_newobj_heap_cache_t *hc = &cache->heap_caches[i];
+                int freelist_len = 0;
+                struct free_slot *p = hc->freelist;
+                while (p) {
+                    freelist_len++;
+                    rb_asan_unpoison_object((VALUE)p, false);
+                    struct free_slot *next = p->next;
+                    rb_asan_poison_object((VALUE)p);
+                    p = next;
+                }
+                if (hc->using_page || hc->freelist || hc->allocated_objects_count) {
+                    fprintf(stderr,
+                        "  cache[%d]: using_page=%p freelist_len=%d pending_count=%"PRIuSIZE"\n",
+                        i, (void *)hc->using_page, freelist_len, hc->allocated_objects_count);
+                }
+            }
+            fprintf(stderr, "=== END DIAGNOSTIC ===\n\n");
+
             rb_bug("inconsistent live slot number: expect %"PRIuSIZE", but %"PRIuSIZE".",
                    objspace_live_slots(objspace), data.live_object_count);
         }
