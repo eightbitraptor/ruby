@@ -5645,15 +5645,38 @@ mod hir_opt_tests {
 
     #[test]
     fn test_specialize_multiple_monomorphic_setivar_with_shape_transition() {
-        eval("
-            def test
-              @foo = 1
-              @bar = 2
+        // Compute the embedded-capacity boundary for this build so @foo stays
+        // in-capacity while @bar reliably crosses it in both dev and stats modes.
+        // See gc/default/default.c for GC::INTERNAL_CONSTANTS and
+        // shape.c::Init_default_shapes for the embedded-capacity calculation
+        // that backs shape capacities.
+        eval(r#"
+            word_size = [0].pack("J").bytesize
+            embed_cap = (GC::INTERNAL_CONSTANTS[:RVALUE_SIZE] - GC::INTERNAL_CONSTANTS[:RBASIC_SIZE]) / word_size
+
+            klass = Class.new do
+              define_method(:initialize) do
+                # Leave one embedded slot free so @foo stays in-capacity.
+                (embed_cap - 1).times { |i| instance_variable_set(:"@v#{i}", i) }
+              end
+
+              def test
+                @foo = 1
+                @bar = 2
+              end
             end
-            test
-        ");
-        assert_snapshot!(hir_string("test"), @"
-        fn test@<compiled>:3:
+
+            # Grow class max_iv_count so fresh instances start with embed_cap slots.
+            # See gc.c::rb_class_allocate_instance
+            warm = klass.new
+            warm.instance_variable_set(:"@warm#{embed_cap}", embed_cap)
+
+            obj = klass.new
+            obj.test
+            TEST = klass.instance_method(:test)
+        "#);
+        assert_snapshot!(hir_string_proc("TEST"), @"
+        fn test@<compiled>:12:
         bb1():
           EntryPoint interpreter
           v1:BasicObject = LoadSelf
@@ -15113,17 +15136,33 @@ mod hir_opt_tests {
 
     #[test]
     fn upgrade_self_type_to_heap_after_setivar() {
-        eval("
-        def test
-          @a = 1
-          @b = 2
-          @c = 3
-          @d = 4
-        end
-        test
-        ");
-        assert_snapshot!(hir_string("test"), @"
-        fn test@<compiled>:3:
+        // Fill the receiver to the embedded-capacity boundary in initialize so
+        // the first write overflows into the heap and the next write can use
+        // the upgraded heap-backed self type.
+        // See gc/default/default.c for GC::INTERNAL_CONSTANTS and
+        // shape.c::Init_default_shapes for the embedded-capacity calculation
+        // that backs shape capacities.
+        eval(r#"
+            word_size = [0].pack("J").bytesize
+            embed_cap = (GC::INTERNAL_CONSTANTS[:RVALUE_SIZE] - GC::INTERNAL_CONSTANTS[:RBASIC_SIZE]) / word_size
+
+            klass = Class.new do
+              define_method(:initialize) do
+                embed_cap.times { |i| instance_variable_set(:"@v#{i}", i) }
+              end
+
+              def test
+                @overflow = 1
+                @after = 2
+              end
+            end
+
+            obj = klass.new
+            obj.test
+            TEST = klass.instance_method(:test)
+        "#);
+        assert_snapshot!(hir_string_proc("TEST"), @"
+        fn test@<compiled>:11:
         bb1():
           EntryPoint interpreter
           v1:BasicObject = LoadSelf
@@ -15135,33 +15174,19 @@ mod hir_opt_tests {
         bb3(v6:BasicObject):
           v10:Fixnum[1] = Const Value(1)
           PatchPoint SingleRactorMode
-          v42:HeapBasicObject = GuardType v6, HeapBasicObject
-          v43:CShape = LoadField v42, :_shape_id@0x1000
-          v44:CShape[0x1001] = GuardBitEquals v43, CShape(0x1001)
-          StoreField v42, :@a@0x1002, v10
-          WriteBarrier v42, v10
-          v47:CShape[0x1003] = Const CShape(0x1003)
-          StoreField v42, :_shape_id@0x1000, v47
+          SetIvar v6, :@overflow, v10
           v14:HeapBasicObject = RefineType v6, HeapBasicObject
           v17:Fixnum[2] = Const Value(2)
           PatchPoint SingleRactorMode
-          SetIvar v14, :@b, v17
-          v21:HeapBasicObject = RefineType v14, HeapBasicObject
-          v24:Fixnum[3] = Const Value(3)
-          PatchPoint SingleRactorMode
-          SetIvar v21, :@c, v24
-          v28:HeapBasicObject = RefineType v21, HeapBasicObject
-          v31:Fixnum[4] = Const Value(4)
-          PatchPoint SingleRactorMode
-          v50:CShape = LoadField v28, :_shape_id@0x1000
-          v51:CShape[0x1004] = GuardBitEquals v50, CShape(0x1004)
-          v52:CPtr = LoadField v28, :_as_heap@0x1002
-          StoreField v52, :@d@0x1005, v31
-          WriteBarrier v28, v31
-          v55:CShape[0x1006] = Const CShape(0x1006)
-          StoreField v28, :_shape_id@0x1000, v55
+          v29:CShape = LoadField v14, :_shape_id@0x1000
+          v30:CShape[0x1001] = GuardBitEquals v29, CShape(0x1001)
+          v31:CPtr = LoadField v14, :_as_heap@0x1002
+          StoreField v31, :@after@0x1003, v17
+          WriteBarrier v14, v17
+          v34:CShape[0x1004] = Const CShape(0x1004)
+          StoreField v14, :_shape_id@0x1000, v34
           CheckInterrupts
-          Return v31
+          Return v17
         ");
     }
 
