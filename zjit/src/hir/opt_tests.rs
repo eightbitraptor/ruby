@@ -5645,38 +5645,26 @@ mod hir_opt_tests {
 
     #[test]
     fn test_specialize_multiple_monomorphic_setivar_with_shape_transition() {
-        // Compute the embedded-capacity boundary for this build so @foo stays
-        // in-capacity while @bar reliably crosses it in both dev and stats modes.
-        // See gc/default/default.c for GC::INTERNAL_CONSTANTS and
-        // shape.c::Init_default_shapes for the embedded-capacity calculation
-        // that backs shape capacities.
         eval(r#"
-            word_size = [0].pack("J").bytesize
-            embed_cap = (GC::INTERNAL_CONSTANTS[:RVALUE_SIZE] - GC::INTERNAL_CONSTANTS[:RBASIC_SIZE]) / word_size
-
             klass = Class.new do
-              define_method(:initialize) do
-                # Leave one embedded slot free so @foo stays in-capacity.
-                (embed_cap - 1).times { |i| instance_variable_set(:"@v#{i}", i) }
-              end
-
               def test
                 @foo = 1
                 @bar = 2
               end
             end
 
-            # Grow class max_iv_count so fresh instances start with embed_cap slots.
-            # See gc.c::rb_class_allocate_instance
+            # Grow class max_iv_count so fresh instances can keep both writes
+            # on the embedded fast path.
             warm = klass.new
-            warm.instance_variable_set(:"@warm#{embed_cap}", embed_cap)
+            warm.instance_variable_set(:@warm1, 1)
+            warm.instance_variable_set(:@warm2, 2)
 
             obj = klass.new
             obj.test
             TEST = klass.instance_method(:test)
         "#);
         assert_snapshot!(hir_string_proc("TEST"), @"
-        fn test@<compiled>:12:
+        fn test@<compiled>:4:
         bb1():
           EntryPoint interpreter
           v1:BasicObject = LoadSelf
@@ -5698,7 +5686,10 @@ mod hir_opt_tests {
           v14:HeapBasicObject = RefineType v6, HeapBasicObject
           v17:Fixnum[2] = Const Value(2)
           PatchPoint SingleRactorMode
-          SetIvar v14, :@bar, v17
+          StoreField v14, :@bar@0x1004, v17
+          WriteBarrier v14, v17
+          v40:CShape[0x1005] = Const CShape(0x1005)
+          StoreField v14, :_shape_id@0x1000, v40
           CheckInterrupts
           Return v17
         ");
