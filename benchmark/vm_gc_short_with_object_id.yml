@@ -1,0 +1,16 @@
+prelude: |
+  require "objspace"
+  long_lived = Array.new(100_000){ Object.new }
+  long_lived.each{|o| o.object_id}
+  ObjectSpace._id2ref(long_lived[0].object_id)
+  GC.start
+  GC.start
+benchmark:
+  vm_gc_short_with_object_id: |
+    a = '' # short-lived String
+    b = ''
+    c = ''
+    d = ''
+    e = ''
+    f = ''
+loop_count: 30000000
