@@ -1,0 +1,16 @@
+# Same shape as vm_gc_short_with_geniv but with a larger long-lived
+# gen_iv population, to observe how per-GC cost scales with table size.
+prelude: |
+  long_lived = Array.new(1_000_000){ String.new("x") }
+  long_lived.each{|s| s.instance_variable_set(:@html_safe, true)}
+  GC.start
+  GC.start
+benchmark:
+  vm_gc_short_with_geniv_large: |
+    a = '' # short-lived String
+    b = ''
+    c = ''
+    d = ''
+    e = ''
+    f = ''
+loop_count: 30000000

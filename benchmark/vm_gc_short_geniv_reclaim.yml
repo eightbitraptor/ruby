@@ -1,0 +1,10 @@
+# Exercises reclamation of gen_iv table entries for dying objects:
+# each iteration allocates a short-lived String, attaches a gen-iv, then
+# drops it, so the GC must continually create and free gen_iv entries.
+prelude: |
+  # no long-lived population: the point is churn on the table itself
+benchmark:
+  vm_gc_short_geniv_reclaim: |
+    s = String.new("x")
+    s.instance_variable_set(:@html_safe, true)
+loop_count: 30000000
