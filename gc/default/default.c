@@ -572,6 +572,16 @@ typedef struct rb_objspace {
 
         size_t allocatable_bytes;
 
+        /* Byte-budget minor trigger. allocated_slot_bytes is monotonic (bytes of
+         * slots handed out, accumulated at the ractor-cache flush boundary).
+         * A GC is requested once (allocated_slot_bytes - alloc_bytes_at_last_gc)
+         * exceeds alloc_bytes_budget, which is set to the live byte size at the
+         * start of each GC (~live at the end of the previous cycle). */
+        size_t allocated_slot_bytes;
+        size_t alloc_bytes_at_last_gc;
+        size_t alloc_bytes_budget;
+        int over_budget;
+
         /* final */
         VALUE deferred_final;
     } heap_pages;
@@ -2305,7 +2315,15 @@ heap_prepare(rb_objspace_t *objspace, rb_heap_t *heap)
              * gc_sweep_finish_heap should allow us to create a new page. */
             if (heap->free_pages == NULL && !heap_page_allocate_and_initialize(objspace, heap)) {
                 if (gc_needs_major_flags == GPR_FLAG_NONE) {
-                    rb_bug("cannot create a new page after GC");
+                    /* No major is scheduled (OLDGEN is the sole major trigger), but
+                     * the heap is starved. Grow it to guarantee forward progress
+                     * rather than escalating to a major. */
+                    heap_allocatable_bytes_expand(objspace, heap,
+                            heap->freed_slots + heap->empty_slots,
+                            heap->total_slots, heap->slot_size);
+                    if (!heap_page_allocate_and_initialize(objspace, heap)) {
+                        rb_bug("cannot create a new page after growing heap");
+                    }
                 }
                 else { // Major GC is required, which will allow us to create new page
                     if (gc_start(objspace, GPR_FLAG_NEWOBJ) == FALSE) {
@@ -2431,6 +2449,8 @@ ractor_cache_flush_count(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cach
 
         rb_heap_t *heap = &heaps[heap_idx];
         RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, heap_cache->allocated_objects_count);
+        RUBY_ATOMIC_SIZE_ADD(objspace->heap_pages.allocated_slot_bytes,
+                             (size_t)heap_cache->allocated_objects_count * heap->slot_size);
         heap_cache->allocated_objects_count = 0;
     }
 }
@@ -2484,7 +2504,15 @@ ractor_cache_allocate_slot(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *ca
     rb_heap_t *heap = &heaps[heap_idx];
     if (heap_cache->allocated_objects_count >= ALLOCATED_COUNT_STEP) {
         RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, heap_cache->allocated_objects_count);
+        RUBY_ATOMIC_SIZE_ADD(objspace->heap_pages.allocated_slot_bytes,
+                             (size_t)heap_cache->allocated_objects_count * heap->slot_size);
         heap_cache->allocated_objects_count = 0;
+
+        size_t budget = objspace->heap_pages.alloc_bytes_budget;
+        if (budget &&
+                objspace->heap_pages.allocated_slot_bytes - objspace->heap_pages.alloc_bytes_at_last_gc > budget) {
+            objspace->heap_pages.over_budget = TRUE;
+        }
     }
 
 #if RGENGC_CHECK_MODE
@@ -2655,7 +2683,7 @@ newobj_slowpath(VALUE klass, VALUE flags, rb_objspace_t *objspace, rb_ractor_new
 
     lev = RB_GC_CR_LOCK();
     {
-        if (RB_UNLIKELY(during_gc || ruby_gc_stressful)) {
+        if (RB_UNLIKELY(during_gc || ruby_gc_stressful || objspace->heap_pages.over_budget)) {
             if (during_gc) {
                 dont_gc_on();
                 during_gc = 0;
@@ -2669,6 +2697,10 @@ newobj_slowpath(VALUE klass, VALUE flags, rb_objspace_t *objspace, rb_ractor_new
                 if (!garbage_collect(objspace, GPR_FLAG_NEWOBJ)) {
                     rb_memerror();
                 }
+            }
+            else if (objspace->heap_pages.over_budget) {
+                objspace->heap_pages.over_budget = FALSE;
+                garbage_collect(objspace, GPR_FLAG_NEWOBJ);
             }
         }
 
@@ -2716,7 +2748,7 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
 
     rb_ractor_newobj_cache_t *cache = (rb_ractor_newobj_cache_t *)cache_ptr;
 
-    if (!RB_UNLIKELY(during_gc || ruby_gc_stressful) &&
+    if (!RB_UNLIKELY(during_gc || ruby_gc_stressful || objspace->heap_pages.over_budget) &&
             wb_protected) {
         obj = newobj_alloc(objspace, cache, heap_idx, false);
         newobj_init(klass, flags, wb_protected, objspace, obj);
@@ -3354,6 +3386,18 @@ static size_t
 objspace_free_slots(rb_objspace_t *objspace)
 {
     return objspace_available_slots(objspace) - objspace_live_slots(objspace) - total_final_slots_count(objspace);
+}
+
+static size_t
+objspace_live_bytes(rb_objspace_t *objspace)
+{
+    size_t bytes = 0;
+    for (int i = 0; i < HEAP_COUNT; i++) {
+        rb_heap_t *heap = &heaps[i];
+        size_t live = heap->total_allocated_objects - heap->total_freed_objects - heap->final_slots_count;
+        bytes += live * heap->slot_size;
+    }
+    return bytes;
 }
 
 static void
@@ -6829,6 +6873,14 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
     objspace->profile.heap_used_at_gc_start = rb_darray_size(objspace->heap_pages.sorted);
     objspace->profile.heap_total_slots_at_gc_start = objspace_available_slots(objspace);
     objspace->profile.weak_references_count = 0;
+
+    objspace->heap_pages.alloc_bytes_at_last_gc = objspace->heap_pages.allocated_slot_bytes;
+    {
+        size_t budget = objspace_live_bytes(objspace);
+        if (budget < gc_params.heap_init_bytes) budget = gc_params.heap_init_bytes;
+        objspace->heap_pages.alloc_bytes_budget = budget;
+    }
+    objspace->heap_pages.over_budget = FALSE;
     gc_prof_setup_new_record(objspace, reason);
     gc_reset_malloc_info(objspace, do_full_mark);
 
