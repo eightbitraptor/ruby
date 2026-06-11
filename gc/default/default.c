@@ -4172,11 +4172,6 @@ gc_sweep_finish_heap(rb_objspace_t *objspace, rb_heap_t *heap)
                     heap_allocatable_bytes_expand(objspace, heap, swept_slots, heap->total_slots, heap->slot_size);
                 }
             }
-            else if (swept_slots < min_free_slots * 7 / 8 &&
-                     objspace->heap_pages.allocatable_bytes < (min_free_slots * 7 / 8 - swept_slots) * heap->slot_size) {
-                gc_needs_major_flags |= GPR_FLAG_MAJOR_BY_NOFREE;
-                heap->force_major_gc_count++;
-            }
         }
     }
 }
@@ -5825,10 +5820,6 @@ gc_marks_finish(rb_objspace_t *objspace)
                 if (objspace->profile.count - objspace->rgengc.last_major_gc < RVALUE_OLD_AGE) {
                     full_marking = TRUE;
                 }
-                else {
-                    gc_report(1, objspace, "gc_marks_finish: next is full GC!!)\n");
-                    gc_needs_major_flags |= GPR_FLAG_MAJOR_BY_NOFREE;
-                }
             }
 
             if (full_marking) {
@@ -5846,9 +5837,6 @@ gc_marks_finish(rb_objspace_t *objspace)
             objspace->rgengc.old_objects_limit = (size_t)(objspace->rgengc.old_objects * r);
         }
 
-        if (objspace->rgengc.uncollectible_wb_unprotected_objects > objspace->rgengc.uncollectible_wb_unprotected_objects_limit) {
-            gc_needs_major_flags |= GPR_FLAG_MAJOR_BY_SHADY;
-        }
         if (objspace->rgengc.old_objects > objspace->rgengc.old_objects_limit) {
             gc_needs_major_flags |= GPR_FLAG_MAJOR_BY_OLDGEN;
         }
@@ -6686,7 +6674,6 @@ gc_reset_malloc_info(rb_objspace_t *objspace, bool full_mark)
         int64_t oldmalloc_increase = gc_malloc_counters_increase(objspace, &objspace->malloc_counters.oldcounters);
         if (oldmalloc_increase > 0 &&
             (uint64_t)oldmalloc_increase > objspace->rgengc.oldmalloc_increase_limit) {
-            gc_needs_major_flags |= GPR_FLAG_MAJOR_BY_OLDMALLOC;
             objspace->rgengc.oldmalloc_increase_limit =
               (size_t)(objspace->rgengc.oldmalloc_increase_limit * gc_params.oldmalloc_limit_growth_factor);
 
