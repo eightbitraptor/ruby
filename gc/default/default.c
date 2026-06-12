@@ -1242,6 +1242,7 @@ static gc_compact_compare_func ruby_autocompact_compare_func;
 
 static void init_mark_stack(mark_stack_t *stack);
 static int garbage_collect(rb_objspace_t *, unsigned int reason);
+static size_t gc_bytes_since_last_gc(rb_objspace_t *objspace);
 
 static int  gc_start(rb_objspace_t *objspace, unsigned int reason);
 static void gc_rest(rb_objspace_t *objspace);
@@ -2509,8 +2510,7 @@ ractor_cache_allocate_slot(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *ca
         heap_cache->allocated_objects_count = 0;
 
         size_t budget = objspace->heap_pages.alloc_bytes_budget;
-        if (budget &&
-                objspace->heap_pages.allocated_slot_bytes - objspace->heap_pages.alloc_bytes_at_last_gc > budget) {
+        if (budget && gc_bytes_since_last_gc(objspace) > budget) {
             objspace->heap_pages.over_budget = TRUE;
         }
     }
@@ -3398,6 +3398,24 @@ objspace_live_bytes(rb_objspace_t *objspace)
         bytes += live * heap->slot_size;
     }
     return bytes;
+}
+
+/* Outstanding (live) bytes held by the malloc heap: cumulative malloc - free. */
+static size_t
+objspace_malloc_live_bytes(rb_objspace_t *objspace)
+{
+    gc_counter_t m = gc_counter_load_relaxed(&objspace->malloc_counters.counters.malloc);
+    gc_counter_t f = gc_counter_load_relaxed(&objspace->malloc_counters.counters.free);
+    return m > f ? (size_t)(m - f) : 0;
+}
+
+/* Bytes allocated since the last GC: slot bytes handed out plus the net malloc
+ * increase. Compared against alloc_bytes_budget to drive the byte-budget trigger. */
+static size_t
+gc_bytes_since_last_gc(rb_objspace_t *objspace)
+{
+    size_t slot = objspace->heap_pages.allocated_slot_bytes - objspace->heap_pages.alloc_bytes_at_last_gc;
+    return slot + malloc_increase;
 }
 
 static void
@@ -6876,7 +6894,7 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
 
     objspace->heap_pages.alloc_bytes_at_last_gc = objspace->heap_pages.allocated_slot_bytes;
     {
-        size_t budget = objspace_live_bytes(objspace);
+        size_t budget = objspace_live_bytes(objspace) + objspace_malloc_live_bytes(objspace);
         if (budget < gc_params.heap_init_bytes) budget = gc_params.heap_init_bytes;
         objspace->heap_pages.alloc_bytes_budget = budget;
     }
@@ -8522,8 +8540,9 @@ objspace_malloc_increase_body(rb_objspace_t *objspace, void *mem, size_t new_siz
 #endif
 
     if (type == MEMOP_TYPE_MALLOC && gc_allowed) {
+        size_t budget = objspace->heap_pages.alloc_bytes_budget;
       retry:
-        if (malloc_increase > malloc_limit && ruby_native_thread_p() && !dont_gc_val()) {
+        if (budget && gc_bytes_since_last_gc(objspace) > budget && ruby_native_thread_p() && !dont_gc_val()) {
             if (ruby_thread_has_gvl_p() && is_lazy_sweeping(objspace)) {
                 gc_rest(objspace); /* gc_rest can reduce malloc_increase */
                 goto retry;
@@ -9929,6 +9948,9 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
 
     objspace->flags.measure_gc = true;
     malloc_limit = gc_params.malloc_limit_min;
+    /* Seed the byte budget so malloc-driven GC works before the first
+     * slot-driven GC has had a chance to set it. */
+    objspace->heap_pages.alloc_bytes_budget = gc_params.heap_init_bytes;
 #ifdef MALLOC_COUNTERS_NEED_LOCK
     rb_native_mutex_initialize(&objspace->malloc_counters.lock);
 #endif
