@@ -653,6 +653,12 @@ typedef struct rb_objspace {
         size_t old_objects;
         size_t old_objects_limit;
 
+        /* Malloc-aware major trigger. A major is requested once the net malloc
+         * growth since the last major exceeds major_bytes_budget (~live
+         * footprint at the last major). Replaces the separately-tuned OLDMALLOC
+         * limit with the single oldobject growth ratio. */
+        size_t major_bytes_budget;
+
 #if RGENGC_ESTIMATE_OLDMALLOC
         size_t oldmalloc_increase_limit;
 #endif
@@ -4273,6 +4279,24 @@ gc_sweep_finish(rb_objspace_t *objspace)
     }
 #endif
 
+    /* Reset the footprint-based major baseline/budget after a major sweep, when
+     * live counts are accurate. malloc-since-major resets via the oldcounters
+     * snapshot above; the slot baseline and budget reset here in lockstep. */
+    if (objspace->profile.latest_gc_info & GPR_FLAG_MAJOR_MASK) {
+        size_t footprint = objspace_live_bytes(objspace) + objspace_malloc_live_bytes(objspace);
+        double mult = gc_params.oldobject_limit_factor - 1.0;
+        size_t major_budget;
+        if (mult <= 0.0) {
+            /* factor <= 1.0 requests a major on essentially every GC. */
+            major_budget = 0;
+        }
+        else {
+            major_budget = (size_t)(footprint * mult);
+            if (major_budget < gc_params.heap_init_bytes) major_budget = gc_params.heap_init_bytes;
+        }
+        objspace->rgengc.major_bytes_budget = major_budget;
+    }
+
     rb_gc_event_hook(0, RUBY_INTERNAL_EVENT_GC_END_SWEEP);
     gc_mode_transition(objspace, gc_mode_none);
 
@@ -6899,6 +6923,18 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
         objspace->heap_pages.alloc_bytes_budget = budget;
     }
     objspace->heap_pages.over_budget = FALSE;
+
+    /* Malloc-aware major trigger: request a major for the next cycle once net
+     * malloc growth since the last major exceeds the major budget. Evaluated on
+     * minors only; the previous cycle is fully swept by now, so the delta is
+     * accurate. The retained-count dimension is handled by OLDGEN in
+     * gc_marks_finish. */
+    if (!do_full_mark) {
+        size_t malloc_since_major = gc_malloc_counters_increase_unsigned(objspace, &objspace->malloc_counters.oldcounters);
+        if (malloc_since_major > objspace->rgengc.major_bytes_budget) {
+            gc_needs_major_flags |= GPR_FLAG_MAJOR_BY_OLDMALLOC;
+        }
+    }
     gc_prof_setup_new_record(objspace, reason);
     gc_reset_malloc_info(objspace, do_full_mark);
 
@@ -9948,9 +9984,10 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
 
     objspace->flags.measure_gc = true;
     malloc_limit = gc_params.malloc_limit_min;
-    /* Seed the byte budget so malloc-driven GC works before the first
-     * slot-driven GC has had a chance to set it. */
+    /* Seed the byte budgets so malloc-driven GC and the first major fire
+     * before a GC has had a chance to compute real budgets. */
     objspace->heap_pages.alloc_bytes_budget = gc_params.heap_init_bytes;
+    objspace->rgengc.major_bytes_budget = gc_params.heap_init_bytes;
 #ifdef MALLOC_COUNTERS_NEED_LOCK
     rb_native_mutex_initialize(&objspace->malloc_counters.lock);
 #endif
