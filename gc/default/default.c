@@ -580,7 +580,7 @@ typedef struct rb_objspace {
         size_t allocated_slot_bytes;
         size_t alloc_bytes_at_last_gc;
         size_t alloc_bytes_budget;
-        int over_budget;
+        rb_atomic_t over_budget;
 
         /* final */
         VALUE deferred_final;
@@ -2476,6 +2476,30 @@ ractor_cache_flush_count_i(void *cache, void *data)
 }
 
 static inline bool
+gc_over_budget_p(rb_objspace_t *objspace)
+{
+    return ATOMIC_LOAD_RELAXED(objspace->heap_pages.over_budget);
+}
+
+static inline void
+gc_set_over_budget(rb_objspace_t *objspace)
+{
+    ATOMIC_SET(objspace->heap_pages.over_budget, TRUE);
+}
+
+static inline void
+gc_clear_over_budget(rb_objspace_t *objspace)
+{
+    ATOMIC_SET(objspace->heap_pages.over_budget, FALSE);
+}
+
+static inline bool
+gc_consume_over_budget(rb_objspace_t *objspace)
+{
+    return ATOMIC_EXCHANGE(objspace->heap_pages.over_budget, FALSE);
+}
+
+static inline bool
 ractor_cache_advance_region(rb_ractor_newobj_heap_cache_t *heap_cache)
 {
     struct free_region *region = heap_cache->next_region;
@@ -2527,7 +2551,7 @@ ractor_cache_allocate_slot(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *ca
 
         size_t budget = objspace->heap_pages.alloc_bytes_budget;
         if (budget && gc_bytes_since_last_gc(objspace) > budget) {
-            objspace->heap_pages.over_budget = TRUE;
+            gc_set_over_budget(objspace);
         }
     }
 
@@ -2699,7 +2723,7 @@ newobj_slowpath(VALUE klass, VALUE flags, rb_objspace_t *objspace, rb_ractor_new
 
     lev = RB_GC_CR_LOCK();
     {
-        if (RB_UNLIKELY(during_gc || ruby_gc_stressful || objspace->heap_pages.over_budget)) {
+        if (RB_UNLIKELY(during_gc || ruby_gc_stressful || gc_over_budget_p(objspace))) {
             if (during_gc) {
                 dont_gc_on();
                 during_gc = 0;
@@ -2714,8 +2738,7 @@ newobj_slowpath(VALUE klass, VALUE flags, rb_objspace_t *objspace, rb_ractor_new
                     rb_memerror();
                 }
             }
-            else if (objspace->heap_pages.over_budget) {
-                objspace->heap_pages.over_budget = FALSE;
+            else if (gc_consume_over_budget(objspace)) {
                 garbage_collect(objspace, GPR_FLAG_NEWOBJ);
             }
         }
@@ -2764,7 +2787,7 @@ rb_gc_impl_new_obj(void *objspace_ptr, void *cache_ptr, VALUE klass, VALUE flags
 
     rb_ractor_newobj_cache_t *cache = (rb_ractor_newobj_cache_t *)cache_ptr;
 
-    if (!RB_UNLIKELY(during_gc || ruby_gc_stressful || objspace->heap_pages.over_budget) &&
+    if (!RB_UNLIKELY(during_gc || ruby_gc_stressful || gc_over_budget_p(objspace)) &&
             wb_protected) {
         obj = newobj_alloc(objspace, cache, heap_idx, false);
         newobj_init(klass, flags, wb_protected, objspace, obj);
@@ -3446,7 +3469,7 @@ gc_reset_alloc_bytes_budget(rb_objspace_t *objspace)
     if (budget < gc_params.heap_init_bytes) budget = gc_params.heap_init_bytes;
 
     objspace->heap_pages.alloc_bytes_budget = budget;
-    objspace->heap_pages.over_budget = FALSE;
+    gc_clear_over_budget(objspace);
 
     return footprint;
 }
@@ -6940,7 +6963,7 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
     objspace->profile.heap_total_slots_at_gc_start = objspace_available_slots(objspace);
     objspace->profile.weak_references_count = 0;
 
-    objspace->heap_pages.over_budget = FALSE;
+    gc_clear_over_budget(objspace);
 
     /* Malloc-aware major trigger: request a major for the next cycle once net
      * malloc growth since the last major exceeds the major budget. Evaluated on
