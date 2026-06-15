@@ -575,8 +575,8 @@ typedef struct rb_objspace {
         /* Byte-budget minor trigger. allocated_slot_bytes is monotonic (bytes of
          * slots handed out, accumulated at the ractor-cache flush boundary).
          * A GC is requested once (allocated_slot_bytes - alloc_bytes_at_last_gc)
-         * exceeds alloc_bytes_budget, which is set to the live byte size at the
-         * start of each GC (~live at the end of the previous cycle). */
+         * exceeds alloc_bytes_budget, which is reset from the post-sweep live
+         * footprint at the end of each GC cycle. */
         size_t allocated_slot_bytes;
         size_t alloc_bytes_at_last_gc;
         size_t alloc_bytes_budget;
@@ -2448,18 +2448,31 @@ rb_gc_impl_size_allocatable_p(size_t size)
 }
 
 static const size_t ALLOCATED_COUNT_STEP = 1024;
+static inline void
+ractor_cache_flush_count_for_heap(rb_objspace_t *objspace, rb_heap_t *heap,
+                                  rb_ractor_newobj_heap_cache_t *heap_cache)
+{
+    size_t count = heap_cache->allocated_objects_count;
+    if (count == 0) return;
+
+    RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, count);
+    RUBY_ATOMIC_SIZE_ADD(objspace->heap_pages.allocated_slot_bytes, count * heap->slot_size);
+    heap_cache->allocated_objects_count = 0;
+}
+
 static void
 ractor_cache_flush_count(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache)
 {
     for (int heap_idx = 0; heap_idx < HEAP_COUNT; heap_idx++) {
-        rb_ractor_newobj_heap_cache_t *heap_cache = &cache->heap_caches[heap_idx];
-
         rb_heap_t *heap = &heaps[heap_idx];
-        RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, heap_cache->allocated_objects_count);
-        RUBY_ATOMIC_SIZE_ADD(objspace->heap_pages.allocated_slot_bytes,
-                             (size_t)heap_cache->allocated_objects_count * heap->slot_size);
-        heap_cache->allocated_objects_count = 0;
+        ractor_cache_flush_count_for_heap(objspace, heap, &cache->heap_caches[heap_idx]);
     }
+}
+
+static void
+ractor_cache_flush_count_i(void *cache, void *data)
+{
+    ractor_cache_flush_count((rb_objspace_t *)data, cache);
 }
 
 static inline bool
@@ -2510,10 +2523,7 @@ ractor_cache_allocate_slot(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *ca
     heap_cache->allocated_objects_count++;
     rb_heap_t *heap = &heaps[heap_idx];
     if (heap_cache->allocated_objects_count >= ALLOCATED_COUNT_STEP) {
-        RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, heap_cache->allocated_objects_count);
-        RUBY_ATOMIC_SIZE_ADD(objspace->heap_pages.allocated_slot_bytes,
-                             (size_t)heap_cache->allocated_objects_count * heap->slot_size);
-        heap_cache->allocated_objects_count = 0;
+        ractor_cache_flush_count_for_heap(objspace, heap, heap_cache);
 
         size_t budget = objspace->heap_pages.alloc_bytes_budget;
         if (budget && gc_bytes_since_last_gc(objspace) > budget) {
@@ -3424,6 +3434,23 @@ gc_bytes_since_last_gc(rb_objspace_t *objspace)
     return slot + malloc_increase;
 }
 
+static size_t
+gc_reset_alloc_bytes_budget(rb_objspace_t *objspace)
+{
+    rb_gc_ractor_newobj_cache_foreach(ractor_cache_flush_count_i, objspace);
+
+    objspace->heap_pages.alloc_bytes_at_last_gc = objspace->heap_pages.allocated_slot_bytes;
+
+    size_t footprint = objspace_live_bytes(objspace) + objspace_malloc_live_bytes(objspace);
+    size_t budget = footprint;
+    if (budget < gc_params.heap_init_bytes) budget = gc_params.heap_init_bytes;
+
+    objspace->heap_pages.alloc_bytes_budget = budget;
+    objspace->heap_pages.over_budget = FALSE;
+
+    return footprint;
+}
+
 static void
 gc_setup_mark_bits(struct heap_page *page)
 {
@@ -4099,8 +4126,7 @@ gc_ractor_newobj_cache_clear(void *c, void *data)
         rb_ractor_newobj_heap_cache_t *cache = &newobj_cache->heap_caches[heap_idx];
 
         rb_heap_t *heap = &heaps[heap_idx];
-        RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, cache->allocated_objects_count);
-        cache->allocated_objects_count = 0;
+        ractor_cache_flush_count_for_heap(objspace, heap, cache);
 
         struct heap_page *page = cache->using_page;
         RUBY_DEBUG_LOG("ractor using_page:%p cursor:%p", (void *)page, (void *)cache->cursor);
@@ -4279,11 +4305,9 @@ gc_sweep_finish(rb_objspace_t *objspace)
     }
 #endif
 
-    /* Reset the footprint-based major baseline/budget after a major sweep, when
-     * live counts are accurate. malloc-since-major resets via the oldcounters
-     * snapshot above; the slot baseline and budget reset here in lockstep. */
+    size_t footprint = gc_reset_alloc_bytes_budget(objspace);
+
     if (objspace->profile.latest_gc_info & GPR_FLAG_MAJOR_MASK) {
-        size_t footprint = objspace_live_bytes(objspace) + objspace_malloc_live_bytes(objspace);
         double mult = gc_params.oldobject_limit_factor - 1.0;
         size_t major_budget;
         if (mult <= 0.0) {
@@ -6916,12 +6940,6 @@ gc_start(rb_objspace_t *objspace, unsigned int reason)
     objspace->profile.heap_total_slots_at_gc_start = objspace_available_slots(objspace);
     objspace->profile.weak_references_count = 0;
 
-    objspace->heap_pages.alloc_bytes_at_last_gc = objspace->heap_pages.allocated_slot_bytes;
-    {
-        size_t budget = objspace_live_bytes(objspace) + objspace_malloc_live_bytes(objspace);
-        if (budget < gc_params.heap_init_bytes) budget = gc_params.heap_init_bytes;
-        objspace->heap_pages.alloc_bytes_budget = budget;
-    }
     objspace->heap_pages.over_budget = FALSE;
 
     /* Malloc-aware major trigger: request a major for the next cycle once net
@@ -8576,14 +8594,16 @@ objspace_malloc_increase_body(rb_objspace_t *objspace, void *mem, size_t new_siz
 #endif
 
     if (type == MEMOP_TYPE_MALLOC && gc_allowed) {
-        size_t budget = objspace->heap_pages.alloc_bytes_budget;
       retry:
-        if (budget && gc_bytes_since_last_gc(objspace) > budget && ruby_native_thread_p() && !dont_gc_val()) {
-            if (ruby_thread_has_gvl_p() && is_lazy_sweeping(objspace)) {
-                gc_rest(objspace); /* gc_rest can reduce malloc_increase */
-                goto retry;
+        {
+            size_t budget = objspace->heap_pages.alloc_bytes_budget;
+            if (budget && gc_bytes_since_last_gc(objspace) > budget && ruby_native_thread_p() && !dont_gc_val()) {
+                if (ruby_thread_has_gvl_p() && is_lazy_sweeping(objspace)) {
+                    gc_rest(objspace); /* gc_rest can reduce malloc_increase */
+                    goto retry;
+                }
+                garbage_collect_with_gvl(objspace, GPR_FLAG_MALLOC);
             }
-            garbage_collect_with_gvl(objspace, GPR_FLAG_MALLOC);
         }
     }
 
