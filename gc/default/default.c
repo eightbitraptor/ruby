@@ -577,6 +577,15 @@ typedef struct rb_objspace {
 
         size_t allocatable_bytes;
 
+        /* Single allocation-budget trigger. allocated_slot_bytes is a running total of
+         * slot bytes handed out (accumulated at the ractor-cache flush boundary). A GC
+         * is requested once (allocated_slot_bytes - alloc_bytes_at_last_gc) + malloc
+         * growth exceeds alloc_bytes_budget, recomputed post-sweep from live footprint. */
+        size_t allocated_slot_bytes;
+        size_t alloc_bytes_at_last_gc;
+        size_t alloc_bytes_budget;
+        size_t budget_gc_count;   /* observability: GCs requested by the budget trigger */
+
         /* final */
         VALUE deferred_final;
     } heap_pages;
@@ -1073,6 +1082,15 @@ gc_malloc_counters_snapshot(rb_objspace_t *objspace, struct gc_malloc_bytes *c)
     else {
         return -(int64_t)(free_delta - malloc_delta);
     }
+}
+
+/* Bytes allocated since the last GC: slot bytes handed out plus net malloc growth.
+ * (malloc_increase macro and the heap_pages fields are both already in scope here.) */
+static inline size_t
+gc_bytes_since_gc(rb_objspace_t *objspace)
+{
+    size_t slot = objspace->heap_pages.allocated_slot_bytes - objspace->heap_pages.alloc_bytes_at_last_gc;
+    return slot + malloc_increase;
 }
 
 #define heap_pages_lomem	objspace->heap_pages.range[0]
@@ -2428,6 +2446,13 @@ rb_gc_impl_size_allocatable_p(size_t size)
 }
 
 static const size_t ALLOCATED_COUNT_STEP = 1024;
+static inline void
+gc_account_allocated_slots(rb_objspace_t *objspace, rb_heap_t *heap, size_t count)
+{
+    RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, count);
+    RUBY_ATOMIC_SIZE_ADD(objspace->heap_pages.allocated_slot_bytes, count * (size_t)heap->slot_size);
+}
+
 static void
 ractor_cache_flush_count(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache)
 {
@@ -2435,7 +2460,7 @@ ractor_cache_flush_count(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cach
         rb_ractor_newobj_heap_cache_t *heap_cache = &cache->heap_caches[heap_idx];
 
         rb_heap_t *heap = &heaps[heap_idx];
-        RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, heap_cache->allocated_objects_count);
+        gc_account_allocated_slots(objspace, heap, heap_cache->allocated_objects_count);
         heap_cache->allocated_objects_count = 0;
     }
 }
@@ -2488,7 +2513,7 @@ ractor_cache_allocate_slot(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *ca
     heap_cache->allocated_objects_count++;
     rb_heap_t *heap = &heaps[heap_idx];
     if (heap_cache->allocated_objects_count >= ALLOCATED_COUNT_STEP) {
-        RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, heap_cache->allocated_objects_count);
+        gc_account_allocated_slots(objspace, heap, heap_cache->allocated_objects_count);
         heap_cache->allocated_objects_count = 0;
     }
 
@@ -3361,6 +3386,42 @@ objspace_free_slots(rb_objspace_t *objspace)
     return objspace_available_slots(objspace) - objspace_live_slots(objspace) - total_final_slots_count(objspace);
 }
 
+static size_t
+objspace_live_bytes(rb_objspace_t *objspace)
+{
+    size_t bytes = 0;
+    for (int i = 0; i < HEAP_COUNT; i++) {
+        rb_heap_t *heap = &heaps[i];
+        size_t live = heap->total_allocated_objects - heap->total_freed_objects - heap->final_slots_count;
+        bytes += live * (size_t)heap->slot_size;
+    }
+    return bytes;
+}
+
+/* Outstanding (live) malloc bytes: cumulative malloc - free, clamped at 0. Distinct
+ * from malloc_increase (delta since last GC). */
+static size_t
+objspace_malloc_live_bytes(rb_objspace_t *objspace)
+{
+    gc_counter_t m = gc_counter_load_relaxed(&objspace->malloc_counters.counters.malloc);
+    gc_counter_t f = gc_counter_load_relaxed(&objspace->malloc_counters.counters.free);
+    return m > f ? (size_t)(m - f) : 0;
+}
+
+static void
+gc_reset_alloc_budget(rb_objspace_t *objspace)
+{
+    objspace->heap_pages.alloc_bytes_at_last_gc = objspace->heap_pages.allocated_slot_bytes;
+
+    size_t footprint = objspace_live_bytes(objspace) + objspace_malloc_live_bytes(objspace);
+    size_t budget = (size_t)(footprint * gc_params.heap_budget_growth_factor);
+    if (budget < gc_params.heap_init_bytes) budget = gc_params.heap_init_bytes;
+    objspace->heap_pages.alloc_bytes_budget = budget;
+
+    if (0) fprintf(stderr, "[%"PRIuSIZE"] budget: footprint=%"PRIuSIZE" -> %"PRIuSIZE" (factor=%g)\n",
+                   rb_gc_count(), footprint, budget, gc_params.heap_budget_growth_factor);
+}
+
 static void
 gc_setup_mark_bits(struct heap_page *page)
 {
@@ -4036,7 +4097,7 @@ gc_ractor_newobj_cache_clear(void *c, void *data)
         rb_ractor_newobj_heap_cache_t *cache = &newobj_cache->heap_caches[heap_idx];
 
         rb_heap_t *heap = &heaps[heap_idx];
-        RUBY_ATOMIC_SIZE_ADD(heap->total_allocated_objects, cache->allocated_objects_count);
+        gc_account_allocated_slots(objspace, heap, cache->allocated_objects_count);
         cache->allocated_objects_count = 0;
 
         struct heap_page *page = cache->using_page;
@@ -4220,6 +4281,8 @@ gc_sweep_finish(rb_objspace_t *objspace)
         (void)gc_malloc_counters_snapshot(objspace, &objspace->malloc_counters.oldcounters);
     }
 #endif
+
+    gc_reset_alloc_budget(objspace);
 
     rb_gc_event_hook(0, RUBY_INTERNAL_EVENT_GC_END_SWEEP);
     gc_mode_transition(objspace, gc_mode_none);
@@ -8309,6 +8372,8 @@ get_envparam_double(const char *name, double *default_value, double lower_bound,
  *   - Do full GC when the number of old objects is more than R * N
  *     where R is this factor and
  *           N is the number of old objects just after last full GC.
+ * * RUBY_GC_HEAP_BUDGET_GROWTH_FACTOR
+ *   - Allocation budget = live footprint * this factor; one GC fires per budget.
  *
  *  * obsolete
  *    * RUBY_FREE_MIN       -> RUBY_GC_HEAP_FREE_SLOTS (from 2.1)
@@ -8333,6 +8398,7 @@ rb_gc_impl_set_params(void *objspace_ptr)
     }
 
     get_envparam_size("RUBY_GC_HEAP_INIT_BYTES", &gc_params.heap_init_bytes, 0);
+    objspace->heap_pages.alloc_bytes_budget = gc_params.heap_init_bytes;
 
     get_envparam_double("RUBY_GC_HEAP_GROWTH_FACTOR", &gc_params.growth_factor, 1.0, 0.0, FALSE);
     get_envparam_size  ("RUBY_GC_HEAP_GROWTH_MAX_BYTES", &gc_params.growth_max_bytes, 0);
@@ -9896,6 +9962,7 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
 
     objspace->flags.measure_gc = true;
     malloc_limit = gc_params.malloc_limit_min;
+    objspace->heap_pages.alloc_bytes_budget = gc_params.heap_init_bytes;
 #ifdef MALLOC_COUNTERS_NEED_LOCK
     rb_native_mutex_initialize(&objspace->malloc_counters.lock);
 #endif
