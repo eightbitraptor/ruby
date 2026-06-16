@@ -1,0 +1,81 @@
+name: env-probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Probe compiler target
+        run: |
+          set -euxo pipefail
+
+          echo "== OS =="
+          cat /etc/os-release
+          uname -a
+          echo "ImageOS=${ImageOS:-}"
+          echo "ImageVersion=${ImageVersion:-}"
+
+          echo "== CPU =="
+          lscpu || true
+          grep -m1 '^flags' /proc/cpuinfo || true
+
+          echo "== GCC =="
+          command -v gcc
+          gcc --version
+          gcc -v 2>&1
+          gcc -dumpmachine
+          gcc -Q --help=target 2>/dev/null | grep -E 'march|mtune|lzcnt|bmi|avx' || true
+
+          echo "== GCC macros =="
+          printf '' | gcc -std=c99 -dM -E - | sort | grep -E '__GNUC__|__VERSION__|__x86_64__|__LZCNT__|__BMI|__AVX|__SSE|__POPCNT__' || true
+
+          echo "== lzcnt include-order repro =="
+          cat >/tmp/lzcnt-order.c <<'EOF'
+          #include <stdint.h>
+
+          #ifndef __has_builtin
+          # define __has_builtin(x) 0
+          #endif
+
+          static inline unsigned f(uint64_t x)
+          {
+          #if defined(__x86_64__) && defined(__LZCNT__)
+              return (unsigned)_lzcnt_u64(x);
+          #elif __has_builtin(__builtin_clzll)
+              return (unsigned)__builtin_clzll((unsigned long long)x);
+          #else
+              return 0;
+          #endif
+          }
+
+          #include <x86intrin.h>
+
+          int main(void) { return (int)f(1); }
+          EOF
+
+          gcc -std=c99 -Wall -Wextra -Wimplicit-function-declaration \
+            -c /tmp/lzcnt-order.c -o /tmp/lzcnt-order-default.o
+
+          echo "== lzcnt include-order repro with forced x86-64-v3 =="
+          if gcc -std=c99 -march=x86-64-v3 -Wall -Wextra -Wimplicit-function-declaration \
+              -c /tmp/lzcnt-order.c -o /tmp/lzcnt-order-v3.o; then
+            echo "forced x86-64-v3 repro compiled successfully"
+          else
+            echo "forced x86-64-v3 repro failed as expected for the Ruby/json header-order bug"
+          fi
