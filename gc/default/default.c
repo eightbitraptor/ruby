@@ -7877,6 +7877,9 @@ enum gc_stat_sym {
     gc_stat_sym_total_free_bytes,
     gc_stat_sym_malloc_increase_bytes,
     gc_stat_sym_malloc_increase_bytes_limit,
+    gc_stat_sym_alloc_bytes_budget,
+    gc_stat_sym_bytes_since_gc,
+    gc_stat_sym_budget_gc_count,
     gc_stat_sym_minor_gc_count,
     gc_stat_sym_major_gc_count,
     gc_stat_sym_compact_count,
@@ -7929,6 +7932,9 @@ setup_gc_stat_symbols(void)
         S(total_free_bytes);
         S(malloc_increase_bytes);
         S(malloc_increase_bytes_limit);
+        S(alloc_bytes_budget);
+        S(bytes_since_gc);
+        S(budget_gc_count);
         S(minor_gc_count);
         S(major_gc_count);
         S(compact_count);
@@ -8015,6 +8021,9 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     SET(total_freed_pages, objspace->heap_pages.freed_pages);
     SET(malloc_increase_bytes, gc_malloc_counters_increase_unsigned(objspace, &objspace->malloc_counters.counters));
     SET(malloc_increase_bytes_limit, malloc_limit);
+    SET(alloc_bytes_budget, objspace->heap_pages.alloc_bytes_budget);
+    SET(bytes_since_gc, gc_bytes_since_gc(objspace));
+    SET(budget_gc_count, objspace->heap_pages.budget_gc_count);
     SET(minor_gc_count, objspace->profile.minor_gc_count);
     SET(major_gc_count, objspace->profile.major_gc_count);
     SET(compact_count, objspace->profile.compact_count);
