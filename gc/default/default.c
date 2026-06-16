@@ -2644,12 +2644,13 @@ newobj_cache_miss(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size
         }
 
         if (obj == Qfalse) {
-            // Single-budget GC trigger (GVL held here). Gated on !incremental: a budget
-            // crossing during an in-progress major must not collapse it to stop-the-world.
+            // Single-budget GC trigger (GVL held here, so the is_incremental_marking
+            // check is race-free). Gated because gc_start asserts !is_incremental_marking:
+            // firing during an in-progress incremental major would abort, not just STW.
             if (!is_incremental_marking(objspace) &&
                     gc_bytes_since_gc(objspace) > objspace->heap_pages.alloc_bytes_budget) {
                 RUBY_ATOMIC_SIZE_INC(objspace->heap_pages.budget_gc_count);
-                garbage_collect(objspace, GPR_FLAG_NEWOBJ);
+                (void)garbage_collect(objspace, GPR_FLAG_NEWOBJ);
             }
 
             // Get next free page (possibly running GC, otherwise growing the heap)
@@ -8573,11 +8574,12 @@ objspace_malloc_increase_body(rb_objspace_t *objspace, void *mem, size_t new_siz
 
     if (type == MEMOP_TYPE_MALLOC && gc_allowed) {
       retry:
-        if (malloc_increase > malloc_limit && ruby_native_thread_p() && !dont_gc_val()) {
+        if (gc_bytes_since_gc(objspace) > objspace->heap_pages.alloc_bytes_budget && ruby_native_thread_p() && !dont_gc_val()) {
             if (ruby_thread_has_gvl_p() && is_lazy_sweeping(objspace)) {
                 gc_rest(objspace); /* gc_rest can reduce malloc_increase */
                 goto retry;
             }
+            RUBY_ATOMIC_SIZE_INC(objspace->heap_pages.budget_gc_count);
             garbage_collect_with_gvl(objspace, GPR_FLAG_MALLOC);
         }
     }
