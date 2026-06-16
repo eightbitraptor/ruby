@@ -2304,47 +2304,16 @@ heap_prepare(rb_objspace_t *objspace, rb_heap_t *heap)
         heap_page_allocate_and_initialize(objspace, heap);
     }
 
-    /* If we still don't have a free page and not allowed to create a new page,
-     * we should start a new GC cycle. */
+    /* Slot exhaustion no longer triggers GC: the byte budget is the sole GC trigger
+     * (Option B2). If we still have no free page, grow the heap unconditionally. */
     if (heap->free_pages == NULL) {
-        GC_ASSERT(objspace->empty_pages_count == 0);
-        GC_ASSERT(objspace->heap_pages.allocatable_bytes == 0);
-
-        if (gc_start(objspace, GPR_FLAG_NEWOBJ) == FALSE) {
-            rb_memerror();
+        if (objspace->heap_pages.allocatable_bytes == 0) {
+            heap_allocatable_bytes_expand(objspace, heap,
+                    heap->freed_slots + heap->empty_slots,
+                    heap->total_slots, heap->slot_size);
         }
-        else {
-            if (objspace->heap_pages.allocatable_bytes == 0 && !gc_config_full_mark_val) {
-                heap_allocatable_bytes_expand(objspace, heap,
-                        heap->freed_slots + heap->empty_slots,
-                        heap->total_slots, heap->slot_size);
-                GC_ASSERT(objspace->heap_pages.allocatable_bytes > 0);
-            }
-            /* Do steps of incremental marking or lazy sweeping if the GC run permits. */
-            gc_continue(objspace, heap);
-
-            /* If we're not incremental marking (e.g. a minor GC) or finished
-             * sweeping and still don't have a free page, then
-             * gc_sweep_finish_heap should allow us to create a new page. */
-            if (heap->free_pages == NULL && !heap_page_allocate_and_initialize(objspace, heap)) {
-                if (gc_needs_major_flags == GPR_FLAG_NONE) {
-                    rb_bug("cannot create a new page after GC");
-                }
-                else { // Major GC is required, which will allow us to create new page
-                    if (gc_start(objspace, GPR_FLAG_NEWOBJ) == FALSE) {
-                        rb_memerror();
-                    }
-                    else {
-                        /* Do steps of incremental marking or lazy sweeping. */
-                        gc_continue(objspace, heap);
-
-                        if (heap->free_pages == NULL &&
-                                !heap_page_allocate_and_initialize(objspace, heap)) {
-                            rb_bug("cannot create a new page after major GC");
-                        }
-                    }
-                }
-            }
+        if (!heap_page_allocate_and_initialize(objspace, heap)) {
+            rb_bug("cannot create a new page");
         }
     }
 

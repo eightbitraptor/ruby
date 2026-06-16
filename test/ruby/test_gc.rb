@@ -320,8 +320,13 @@ class TestGc < Test::Unit::TestCase
 
     assert_separately([{"RUBY_GC_HEAP_INIT_BYTES" => "409600"}, "-W0"], __FILE__, __LINE__, <<-'RUBY')
       GC.start
-      count = GC.stat(:heap_free_slots) + GC.stat_heap(0, :heap_allocatable_slots)
-      count.times{ "a" + "b" }
+      # GC is now driven by an allocation byte budget, not slot exhaustion (which
+      # grows the heap instead). Allocate transient objects until an
+      # allocation-driven GC fires, then check it was reported as :newobj.
+      gc_count = GC.stat(:count)
+      while GC.stat(:count) == gc_count
+        "a" + "b"
+      end
       assert_equal :newobj, GC.latest_gc_info[:gc_by]
     RUBY
 
