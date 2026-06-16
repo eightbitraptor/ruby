@@ -2644,7 +2644,15 @@ newobj_cache_miss(rb_objspace_t *objspace, rb_ractor_newobj_cache_t *cache, size
         }
 
         if (obj == Qfalse) {
-            // Get next free page (possibly running GC)
+            // Single-budget GC trigger (GVL held here). Gated on !incremental: a budget
+            // crossing during an in-progress major must not collapse it to stop-the-world.
+            if (!is_incremental_marking(objspace) &&
+                    gc_bytes_since_gc(objspace) > objspace->heap_pages.alloc_bytes_budget) {
+                RUBY_ATOMIC_SIZE_INC(objspace->heap_pages.budget_gc_count);
+                garbage_collect(objspace, GPR_FLAG_NEWOBJ);
+            }
+
+            // Get next free page (possibly running GC, otherwise growing the heap)
             struct heap_page *page = heap_next_free_page(objspace, heap);
             ractor_cache_set_page(objspace, cache, heap_idx, page);
 
