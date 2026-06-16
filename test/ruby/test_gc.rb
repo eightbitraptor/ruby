@@ -324,9 +324,11 @@ class TestGc < Test::Unit::TestCase
       # grows the heap instead). Allocate transient objects until an
       # allocation-driven GC fires, then check it was reported as :newobj.
       gc_count = GC.stat(:count)
-      while GC.stat(:count) == gc_count
+      1_000_000.times do
         "a" + "b"
+        break if GC.stat(:count) != gc_count
       end
+      assert_operator GC.stat(:count), :>, gc_count, "byte-budget GC did not fire"
       assert_equal :newobj, GC.latest_gc_info[:gc_by]
     RUBY
 

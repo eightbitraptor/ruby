@@ -2305,13 +2305,15 @@ heap_prepare(rb_objspace_t *objspace, rb_heap_t *heap)
     }
 
     /* Slot exhaustion no longer triggers GC: the byte budget is the sole GC trigger
-     * (Option B2). If we still have no free page, grow the heap unconditionally. */
+     * (Option B2). If the opportunistic attempt above failed, there are no empty
+     * pages and no allocatable bytes, so grow the heap unconditionally rather than
+     * collecting. */
     if (heap->free_pages == NULL) {
-        if (objspace->heap_pages.allocatable_bytes == 0) {
-            heap_allocatable_bytes_expand(objspace, heap,
-                    heap->freed_slots + heap->empty_slots,
-                    heap->total_slots, heap->slot_size);
-        }
+        GC_ASSERT(objspace->empty_pages_count == 0);
+        GC_ASSERT(objspace->heap_pages.allocatable_bytes == 0);
+        heap_allocatable_bytes_expand(objspace, heap,
+                heap->freed_slots + heap->empty_slots,
+                heap->total_slots, heap->slot_size);
         if (!heap_page_allocate_and_initialize(objspace, heap)) {
             rb_bug("cannot create a new page");
         }
