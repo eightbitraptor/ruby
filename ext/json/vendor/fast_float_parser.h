@@ -713,15 +713,15 @@ ffc_nlz_int64(uint64_t x)
 #if defined(_MSC_VER) && defined(__AVX2__)
     return (unsigned int)__lzcnt64(x);
 
+#elif defined(__has_builtin) && __has_builtin(__builtin_clzll)
+    return (unsigned int)__builtin_clzll((unsigned long long)x);
+
 #elif defined(__x86_64__) && defined(__LZCNT__)
     return (unsigned int)_lzcnt_u64(x);
 
 #elif defined(_WIN64) && defined(_MSC_VER) /* &&! defined(__AVX2__) */
     unsigned long r;
     return _BitScanReverse64(&r, x) ? (63u - (unsigned int)r) : 64;
-
-#elif defined(__has_builtin) && __has_builtin(__builtin_clzll)
-    return (unsigned int)__builtin_clzll((unsigned long long)x);
 
 #else
     uint64_t y;
