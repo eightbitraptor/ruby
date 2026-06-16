@@ -117,6 +117,9 @@
 #ifndef GC_HEAP_OLDOBJECT_LIMIT_FACTOR
 #define GC_HEAP_OLDOBJECT_LIMIT_FACTOR 2.0
 #endif
+#ifndef GC_HEAP_BUDGET_GROWTH_FACTOR
+#define GC_HEAP_BUDGET_GROWTH_FACTOR 0.5
+#endif
 
 #ifndef GC_HEAP_FREE_SLOTS_MIN_RATIO
 #define GC_HEAP_FREE_SLOTS_MIN_RATIO  0.20
@@ -219,6 +222,7 @@ typedef struct {
     double heap_free_slots_max_ratio;
     double uncollectible_wb_unprotected_objects_limit_ratio;
     double oldobject_limit_factor;
+    double heap_budget_growth_factor;
 
     size_t malloc_limit_min;
     size_t malloc_limit_max;
@@ -240,6 +244,7 @@ static ruby_gc_params_t gc_params = {
     GC_HEAP_FREE_SLOTS_MAX_RATIO,
     GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO,
     GC_HEAP_OLDOBJECT_LIMIT_FACTOR,
+    GC_HEAP_BUDGET_GROWTH_FACTOR,
 
     GC_MALLOC_LIMIT_MIN,
     GC_MALLOC_LIMIT_MAX,
@@ -8338,6 +8343,7 @@ rb_gc_impl_set_params(void *objspace_ptr)
     get_envparam_double("RUBY_GC_HEAP_FREE_SLOTS_GOAL_RATIO", &gc_params.heap_free_slots_goal_ratio,
                         gc_params.heap_free_slots_min_ratio, gc_params.heap_free_slots_max_ratio, TRUE);
     get_envparam_double("RUBY_GC_HEAP_OLDOBJECT_LIMIT_FACTOR", &gc_params.oldobject_limit_factor, 0.0, 0.0, TRUE);
+    get_envparam_double("RUBY_GC_HEAP_BUDGET_GROWTH_FACTOR", &gc_params.heap_budget_growth_factor, 0.0, 0.0, TRUE);
     get_envparam_double("RUBY_GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO", &gc_params.uncollectible_wb_unprotected_objects_limit_ratio, 0.0, 0.0, TRUE);
 
     if (get_envparam_size("RUBY_GC_MALLOC_LIMIT", &gc_params.malloc_limit_min, 0)) {
