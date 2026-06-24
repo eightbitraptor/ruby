@@ -26,6 +26,7 @@
 #include "vm_sync.h"
 #include "builtin.h"
 #include "ruby/internal/attr/nonstring.h"
+#include "ruby_atomic.h"
 
 #if defined(SYMBOL_DEBUG) && (SYMBOL_DEBUG+0)
 # undef SYMBOL_DEBUG
@@ -79,18 +80,62 @@ Init_op_tbl(void)
     }
 }
 
-static const int ID_ENTRY_UNIT = 512;
+enum { ID_ENTRY_UNIT = 512 };
+
+struct sym_id_str_chunk {
+    VALUE entries[ID_ENTRY_UNIT];
+};
 
 typedef struct {
     rb_atomic_t next_id;
     VALUE sym_set;
 
     VALUE ids;
+    struct sym_id_str_chunk **id_strs;
+    size_t id_strs_size;
 } rb_symbols_t;
 
 rb_symbols_t ruby_global_symbols = {
     .next_id = tNEXT_ID,
 };
+
+static struct sym_id_str_chunk *
+get_id_str_chunk(rb_symbols_t *symbols, size_t idx)
+{
+    if (idx >= symbols->id_strs_size) return NULL;
+    return RUBY_ATOMIC_PTR_LOAD(symbols->id_strs[idx]);
+}
+
+static void
+set_id_str_entry(rb_symbols_t *symbols, rb_id_serial_t num, VALUE str, bool create)
+{
+    size_t idx = num / ID_ENTRY_UNIT;
+    struct sym_id_str_chunk *chunk;
+
+    RUBY_ASSERT(idx < symbols->id_strs_size);
+    chunk = get_id_str_chunk(symbols, idx);
+
+    if (!chunk && create) {
+        chunk = ZALLOC(struct sym_id_str_chunk);
+        RUBY_ATOMIC_PTR_SET(symbols->id_strs[idx], chunk);
+    }
+
+    RUBY_ASSERT(chunk != NULL);
+    RUBY_ATOMIC_VALUE_SET(chunk->entries[num % ID_ENTRY_UNIT], str);
+}
+
+static VALUE
+get_id_str_entry(rb_symbols_t *symbols, rb_id_serial_t num)
+{
+    size_t idx = num / ID_ENTRY_UNIT;
+    struct sym_id_str_chunk *chunk;
+
+    if (idx >= symbols->id_strs_size) return 0;
+    chunk = get_id_str_chunk(symbols, idx);
+
+    if (!chunk) return 0;
+    return RUBY_ATOMIC_VALUE_LOAD(chunk->entries[num % ID_ENTRY_UNIT]);
+}
 
 struct sym_set_static_sym_entry {
     VALUE sym;
@@ -162,13 +207,18 @@ struct sym_id_entry {
     VALUE str;
 };
 
+struct sym_id_entry_list {
+    rb_id_serial_t first_serial;
+    rb_darray(struct sym_id_entry) entries;
+};
+
 static void
 sym_id_entry_list_mark(void *ptr)
 {
-    rb_darray(struct sym_id_entry) ary = ptr;
+    struct sym_id_entry_list *list = ptr;
 
     struct sym_id_entry *entry;
-    rb_darray_foreach(ary, i, entry) {
+    rb_darray_foreach(list->entries, i, entry) {
         // sym must be pinned because it may be used in places that don't
         // support compaction
         rb_gc_mark(entry->sym);
@@ -179,25 +229,29 @@ sym_id_entry_list_mark(void *ptr)
 static void
 sym_id_entry_list_free(void *ptr)
 {
-    rb_darray_free_sized(ptr, struct sym_id_entry);
+    struct sym_id_entry_list *list = ptr;
+
+    rb_darray_free_sized(list->entries, struct sym_id_entry);
+    xfree(list);
 }
 
 static size_t
 sym_id_entry_list_memsize(const void *ptr)
 {
-    const rb_darray(struct sym_id_entry) ary = ptr;
+    const struct sym_id_entry_list *list = ptr;
 
-    return rb_darray_memsize(ary);
+    return sizeof(*list) + rb_darray_memsize(list->entries);
 }
 
 static void
 sym_id_entry_list_compact(void *ptr)
 {
-    rb_darray(struct sym_id_entry) ary = ptr;
+    struct sym_id_entry_list *list = ptr;
 
     struct sym_id_entry *entry;
-    rb_darray_foreach(ary, i, entry) {
+    rb_darray_foreach(list->entries, i, entry) {
         entry->str = rb_gc_location(entry->str);
+        set_id_str_entry(&ruby_global_symbols, list->first_serial + (rb_id_serial_t)i, entry->str, false);
     }
 }
 
@@ -274,23 +328,26 @@ set_id_entry(rb_symbols_t *symbols, rb_id_serial_t num, VALUE str, VALUE sym)
     size_t idx = num / ID_ENTRY_UNIT;
 
     VALUE id_entry_list, ids = symbols->ids;
-    rb_darray(struct sym_id_entry) entries;
+    struct sym_id_entry_list *entry_list;
     if (idx >= (size_t)RARRAY_LEN(ids) || NIL_P(id_entry_list = rb_ary_entry(ids, (long)idx))) {
-        rb_darray_make(&entries, ID_ENTRY_UNIT);
-        id_entry_list = TypedData_Wrap_Struct(0, &sym_id_entry_list_type, entries);
+        entry_list = ZALLOC(struct sym_id_entry_list);
+        entry_list->first_serial = (rb_id_serial_t)(idx * ID_ENTRY_UNIT);
+        rb_darray_make(&entry_list->entries, ID_ENTRY_UNIT);
+        id_entry_list = TypedData_Wrap_Struct(0, &sym_id_entry_list_type, entry_list);
         rb_ary_store(ids, (long)idx, id_entry_list);
     }
     else {
-        entries = RTYPEDDATA_GET_DATA(id_entry_list);
+        entry_list = RTYPEDDATA_GET_DATA(id_entry_list);
     }
 
     idx = num % ID_ENTRY_UNIT;
-    struct sym_id_entry *entry = rb_darray_ref(entries, idx);
+    struct sym_id_entry *entry = rb_darray_ref(entry_list->entries, idx);
     RUBY_ASSERT(entry->str == 0);
     RUBY_ASSERT(entry->sym == 0);
 
     RB_OBJ_WRITE(id_entry_list, &entry->str, str);
     RB_OBJ_WRITE(id_entry_list, &entry->sym, sym);
+    set_id_str_entry(symbols, num, str, true);
 }
 
 static VALUE
@@ -417,6 +474,8 @@ Init_sym(void)
 
     symbols->sym_set = rb_concurrent_set_new(&sym_set_funcs, 1024);
     symbols->ids = rb_ary_hidden_new(0);
+    symbols->id_strs_size = ((size_t)RB_ID_SERIAL_MAX / ID_ENTRY_UNIT) + 1;
+    symbols->id_strs = ZALLOC_N(struct sym_id_str_chunk *, symbols->id_strs_size);
 
     Init_op_tbl();
     Init_id();
@@ -439,10 +498,24 @@ rb_free_global_symbol_table_i(VALUE *sym_ptr, void *data)
     return ST_DELETE;
 }
 
+static void
+free_id_strs(rb_symbols_t *symbols)
+{
+    if (!symbols->id_strs) return;
+
+    for (size_t i = 0; i < symbols->id_strs_size; i++) {
+        xfree(symbols->id_strs[i]);
+    }
+    xfree(symbols->id_strs);
+    symbols->id_strs = NULL;
+    symbols->id_strs_size = 0;
+}
+
 void
 rb_free_global_symbol_table(void)
 {
     rb_concurrent_set_foreach_with_replace(ruby_global_symbols.sym_set, rb_free_global_symbol_table_i, NULL);
+    free_id_strs(&ruby_global_symbols);
 }
 
 WARN_UNUSED_RESULT(static ID lookup_str_id(VALUE str));
@@ -768,11 +841,11 @@ get_id_serial_entry(rb_id_serial_t num)
             VALUE ids = symbols->ids;
             VALUE id_entry_list;
             if (idx < (size_t)RARRAY_LEN(ids) && !NIL_P(id_entry_list = rb_ary_entry(ids, (long)idx))) {
-                rb_darray(struct sym_id_entry) entries = RTYPEDDATA_GET_DATA(id_entry_list);
+                struct sym_id_entry_list *entry_list = RTYPEDDATA_GET_DATA(id_entry_list);
 
                 size_t pos = (size_t)(num % ID_ENTRY_UNIT);
-                RUBY_ASSERT(pos < rb_darray_size(entries));
-                entry = rb_darray_ref(entries, pos);
+                RUBY_ASSERT(pos < rb_darray_size(entry_list->entries));
+                entry = rb_darray_ref(entry_list->entries, pos);
             }
         }
     }
@@ -787,11 +860,25 @@ get_id_sym(ID id)
     return entry ? entry->sym : 0;
 }
 
+#if RUBY_DEBUG
 static VALUE
-get_id_str(ID id)
+get_id_str_locked(ID id)
 {
     struct sym_id_entry *entry = get_id_serial_entry(rb_id_to_serial(id));
     return entry ? entry->str : 0;
+}
+#endif
+
+static VALUE
+get_id_str(ID id)
+{
+    VALUE str = get_id_str_entry(&ruby_global_symbols, rb_id_to_serial(id));
+
+#if RUBY_DEBUG
+    RUBY_ASSERT(str == get_id_str_locked(id));
+#endif
+
+    return str;
 }
 
 int
@@ -986,10 +1073,9 @@ rb_sym2id(VALUE sym)
                 VALUE fstr = RSYMBOL(sym)->fstr;
                 ID num = next_id_base();
 
+                set_id_entry(symbols, rb_id_to_serial(num), fstr, sym);
                 RSYMBOL(sym)->id = id |= num;
                 /* make it permanent object */
-
-                set_id_entry(symbols, rb_id_to_serial(num), fstr, sym);
             }
         }
     }
