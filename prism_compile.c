@@ -3673,6 +3673,56 @@ pm_forwarding_local_p(const pm_node_t *node, pm_constant_id_t param_name)
 }
 
 /**
+ * Helper for pm_forwarding_wrapper_call(): test whether an explicit receiver expression is
+ * safe to keep on a forwarded call, i.e. whether it provably cannot observe the forwarded
+ * parameters (`*rest`, `**kwrest`, `&block`).
+ *
+ * The optimization runs the wrapper through a synthesized `forwardable` iseq whose only
+ * local is the hidden `...` slot; the forwarded parameters are NOT materialized as ordinary
+ * locals. So the receiver, evaluated in that frame before the call, must not need them. We
+ * allow exactly the expression forms that reference no local variable at all:
+ *
+ *   - implicit self (NULL)
+ *   - `self`
+ *   - constant reads and constant paths (`Foo`, `Foo::Bar`, `self::Bar`)
+ *   - instance / class / global variable reads (`@x`, `@@x`, `$x`)
+ *   - argument-less, block-less method-call chains (`recv`, `self.foo`, `a.b.c`)
+ *
+ * Each forwarded parameter is a local in the original method, so the only way a receiver
+ * could reference one is a LocalVariableReadNode — which none of the above admit (a bare
+ * `recv` is a method call, not a local). A call that takes arguments or a block, or any
+ * other node form, might read a parameter, so it is rejected. This is the "args can't
+ * escape into the receiver" guarantee: since the receiver cannot name the args, evaluating
+ * it without them is faithful.
+ */
+static bool
+pm_forwarding_safe_receiver_p(const pm_node_t *node)
+{
+    if (node == NULL) return true;
+
+    switch (PM_NODE_TYPE(node)) {
+      case PM_SELF_NODE:
+      case PM_CONSTANT_READ_NODE:
+      case PM_INSTANCE_VARIABLE_READ_NODE:
+      case PM_CLASS_VARIABLE_READ_NODE:
+      case PM_GLOBAL_VARIABLE_READ_NODE:
+        return true;
+      case PM_CONSTANT_PATH_NODE:
+        // `Foo::Bar` / `expr::Bar`: the optional left-hand side must itself be safe.
+        return pm_forwarding_safe_receiver_p(((const pm_constant_path_node_t *) node)->parent);
+      case PM_CALL_NODE: {
+        // A method call with no arguments and no block: `recv`, `self.foo`, `a.b`. The
+        // arguments/block could otherwise reference a forwarded parameter, so require none.
+        const pm_call_node_t *call = (const pm_call_node_t *) node;
+        if (call->arguments != NULL || call->block != NULL) return false;
+        return pm_forwarding_safe_receiver_p(call->receiver);
+      }
+      default:
+        return false;
+    }
+}
+
+/**
  * Detect a pure pass-through wrapper method:
  *
  *     def foo(*a, **k, &b)
@@ -3686,9 +3736,11 @@ pm_forwarding_local_p(const pm_node_t *node, pm_constant_id_t param_name)
  *     def foo(*args, &block);           bar(*args, &block);           end  // reify kw, +block
  *     def foo(*args);                   bar(*args);                   end  // reify kw, drops block
  *
- * The parameters may be named or anonymous, and the body must be a single call with an
- * implicit-self receiver that forwards each parameter to exactly the matching argument
- * position (and nothing else). The block parameter and the call's block argument must
+ * The parameters may be named or anonymous, and the body must be a single call that
+ * forwards each parameter to exactly the matching argument position (and nothing else). The
+ * receiver is implicit self or an explicit receiver that cannot reference the forwarded
+ * parameters (see pm_forwarding_safe_receiver_p), e.g. `recv.bar(*a, **k, &b)`. The block
+ * parameter and the call's block argument must
  * agree (present together or absent together), and likewise the keyword-rest parameter and
  * the call's `**kwrest` argument. When the method has this exact shape, returns the inner
  * call node so an alternate `forwardable` iseq can be built whose body is `bar(...)` —
@@ -3750,8 +3802,10 @@ pm_forwarding_wrapper_call(const pm_scope_node_t *scope_node)
 
     const pm_call_node_t *call = (const pm_call_node_t *) body;
 
-    // Implicit-self receiver only (v1). Reject safe-navigation / attribute writes.
-    if (call->receiver != NULL) return NULL;
+    // The receiver may be implicit self or an explicit receiver, but only one that cannot
+    // observe the forwarded parameters (see pm_forwarding_safe_receiver_p) — the optimized
+    // frame does not materialize them as locals. Reject safe-navigation / attribute writes.
+    if (!pm_forwarding_safe_receiver_p(call->receiver)) return NULL;
     if (PM_NODE_FLAG_P(call, PM_CALL_NODE_FLAGS_SAFE_NAVIGATION)) return NULL;
     if (PM_NODE_FLAG_P(call, PM_CALL_NODE_FLAGS_ATTRIBUTE_WRITE)) return NULL;
 
@@ -3840,7 +3894,11 @@ pm_compile_forwarding_wrapper(rb_iseq_t *iseq, const pm_scope_node_t *scope_node
 
     pm_call_node_t call = {
         .base = call_node->base,
-        .receiver = NULL,
+        // Preserve the original receiver (NULL for implicit self, or a safe explicit receiver
+        // vetted by pm_forwarding_safe_receiver_p). It references no forwarded parameter, so it
+        // compiles correctly against the synthesized `(...)` scope whose only local is the
+        // forwarding slot.
+        .receiver = call_node->receiver,
         .call_operator_loc = call_node->call_operator_loc,
         .name = call_node->name,
         .message_loc = call_node->message_loc,
