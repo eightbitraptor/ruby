@@ -204,6 +204,14 @@ unsigned int *rb_iseq_insns_info_decode_positions(const struct rb_iseq_constant_
 
 int rb_vm_insn_addr2opcode(const void *addr);
 
+/* Counters for the pass-through wrapper forwarding optimization, exposed via
+ * RubyVM.stat. Both are bumped during prism compilation (under the GVL):
+ * ruby_vm_method_definitions_compiled counts every source `def` (the
+ * denominator), and ruby_vm_forwardable_methods_optimized counts those that got
+ * the hidden forwarding iseq fast path (the numerator). */
+RUBY_EXTERN size_t ruby_vm_method_definitions_compiled;
+RUBY_EXTERN size_t ruby_vm_forwardable_methods_optimized;
+
 RUBY_SYMBOL_EXPORT_BEGIN
 
 /* compile.c */

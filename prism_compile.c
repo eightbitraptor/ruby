@@ -3963,6 +3963,7 @@ pm_compile_forwarding_wrapper(rb_iseq_t *iseq, const pm_scope_node_t *scope_node
     }
 
     RB_OBJ_WRITE(iseq, &ISEQ_BODY(iseq)->forwarding_iseq, (VALUE)forwarding_iseq);
+    ruby_vm_forwardable_methods_optimized++;
 
     pm_scope_node_destroy(&next_scope_node);
 }
@@ -9480,6 +9481,11 @@ pm_compile_node(rb_iseq_t *iseq, const pm_node_t *node, LINK_ANCHOR *const ret, 
         // ^^^^^^^^^^^^^^^^^
         const pm_def_node_t *cast = (const pm_def_node_t *) node;
         ID method_name = pm_constant_id_lookup(scope_node, cast->name);
+
+        // Denominator for the forwarding optimization: count every source `def`.
+        // The synthesized forwarding/mandatory-only child iseqs are built via
+        // pm_iseq_build (not by compiling a PM_DEF_NODE), so they are not counted.
+        ruby_vm_method_definitions_compiled++;
 
         pm_scope_node_t next_scope_node;
         pm_scope_node_init((const pm_node_t *) cast, &next_scope_node, scope_node);

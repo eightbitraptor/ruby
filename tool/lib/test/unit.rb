@@ -1756,9 +1756,29 @@ module Test
           break unless report.empty?
         end
 
+        _print_rubyvm_stat
+
         return (failures + errors).nonzero? # or return nil...
       rescue Interrupt
         abort 'Interrupted'
+      end
+
+      # Print RubyVM.stat after the whole run, highlighting the share of method
+      # definitions that received the pass-through wrapper forwarding optimization.
+      # Guarded so it is a no-op on a ruby without these counters (the keys are
+      # simply absent from the hash there).
+      def _print_rubyvm_stat
+        return unless defined?(RubyVM) && RubyVM.respond_to?(:stat)
+        stat = RubyVM.stat
+        num = stat[:forwardable_methods_optimized]
+        den = stat[:method_definitions_compiled]
+        puts
+        puts "RubyVM.stat: #{stat}"
+        if num && den
+          pct = den.zero? ? 0.0 : 100.0 * num / den
+          puts "Forwarding wrapper optimization: %d / %d method definitions optimized (%.2f%%)" %
+            [num, den, pct]
+        end
       end
 
       ##

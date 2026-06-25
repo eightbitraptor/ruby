@@ -724,6 +724,10 @@ rb_serial_t ruby_vm_constant_cache_invalidations = 0;
 rb_serial_t ruby_vm_constant_cache_misses = 0;
 rb_serial_t ruby_vm_global_cvar_state = 1;
 
+/* Pass-through wrapper forwarding optimization counters (see iseq.h). */
+size_t ruby_vm_method_definitions_compiled = 0;
+size_t ruby_vm_forwardable_methods_optimized = 0;
+
 static const struct rb_callcache vm_empty_cc = {
     .flags = T_IMEMO | (imemo_callcache << FL_USHIFT) | VM_CALLCACHE_UNMARKABLE,
     .klass = Qundef,
@@ -818,6 +822,7 @@ vm_stat(int argc, VALUE *argv, VALUE self)
 {
     static VALUE sym_constant_cache_invalidations, sym_constant_cache_misses, sym_global_cvar_state, sym_next_shape_id;
     static VALUE sym_shape_cache_size;
+    static VALUE sym_method_definitions_compiled, sym_forwardable_methods_optimized;
     VALUE arg = Qnil;
     VALUE hash = Qnil, key = Qnil;
 
@@ -840,6 +845,8 @@ vm_stat(int argc, VALUE *argv, VALUE self)
         S(global_cvar_state);
     S(next_shape_id);
     S(shape_cache_size);
+    S(method_definitions_compiled);
+    S(forwardable_methods_optimized);
 #undef S
 
 #define SET(name, attr) \
@@ -853,6 +860,8 @@ vm_stat(int argc, VALUE *argv, VALUE self)
     SET(global_cvar_state, ruby_vm_global_cvar_state);
     SET(next_shape_id, (rb_serial_t)rb_shapes_count());
     SET(shape_cache_size, (rb_serial_t)rb_shapes_cache_size());
+    SET(method_definitions_compiled, ruby_vm_method_definitions_compiled);
+    SET(forwardable_methods_optimized, ruby_vm_forwardable_methods_optimized);
 #undef SET
 
 #if USE_DEBUG_COUNTER
