@@ -3652,6 +3652,210 @@ pm_compile_builtin_mandatory_only_method(rb_iseq_t *iseq, pm_scope_node_t *scope
     return COMPILE_OK;
 }
 
+/**
+ * Helper for pm_forwarding_wrapper_call(): test whether a forwarded argument
+ * expression references exactly the parameter named `param_name`. For a named
+ * parameter, `node` must be a depth-0 LocalVariableReadNode of that name. For an
+ * anonymous parameter (`*`, `**`, `&` — constant id 0), the forwarded expression is
+ * absent, so `node` must be NULL.
+ */
+static bool
+pm_forwarding_local_p(const pm_node_t *node, pm_constant_id_t param_name)
+{
+    if (param_name == 0) {
+        return node == NULL;
+    }
+    if (node == NULL || !PM_NODE_TYPE_P(node, PM_LOCAL_VARIABLE_READ_NODE)) {
+        return false;
+    }
+    const pm_local_variable_read_node_t *read = (const pm_local_variable_read_node_t *) node;
+    return read->name == param_name && read->depth == 0;
+}
+
+/**
+ * Detect a pure pass-through wrapper method:
+ *
+ *     def foo(*a, **k, &b)
+ *       bar(*a, **k, &b)
+ *     end
+ *
+ * The parameters may be named or anonymous, and the body must be a single call with an
+ * implicit-self receiver that forwards each of the three parameters to exactly the
+ * matching argument position (and nothing else). When the method has this exact shape,
+ * returns the inner call node so an alternate `forwardable` iseq can be built whose body
+ * is `bar(...)` — reusing the caller's arguments without allocating the intermediate
+ * Array/Hash. Returns NULL otherwise.
+ *
+ * Requiring an explicit `**kwrest` is deliberate: it makes the method ineligible for
+ * `ruby2_keywords`, so that interaction can never arise.
+ */
+static const pm_call_node_t *
+pm_forwarding_wrapper_call(const pm_scope_node_t *scope_node)
+{
+    const pm_node_t *ast_node = scope_node->ast_node;
+    if (ast_node == NULL || !PM_NODE_TYPE_P(ast_node, PM_DEF_NODE)) return NULL;
+
+    const pm_def_node_t *def_node = (const pm_def_node_t *) ast_node;
+    const pm_parameters_node_t *params = def_node->parameters;
+    if (params == NULL) return NULL;
+
+    // Parameters must be exactly (*rest, **kwrest, &block).
+    if (params->requireds.size != 0 || params->optionals.size != 0 ||
+        params->posts.size != 0 || params->keywords.size != 0) {
+        return NULL;
+    }
+    if (params->rest == NULL || !PM_NODE_TYPE_P(params->rest, PM_REST_PARAMETER_NODE)) return NULL;
+    if (params->keyword_rest == NULL || !PM_NODE_TYPE_P(params->keyword_rest, PM_KEYWORD_REST_PARAMETER_NODE)) return NULL;
+    if (params->block == NULL || !PM_NODE_TYPE_P(params->block, PM_BLOCK_PARAMETER_NODE)) return NULL;
+
+    pm_constant_id_t rest_name = ((const pm_rest_parameter_node_t *) params->rest)->name;
+    pm_constant_id_t kwrest_name = ((const pm_keyword_rest_parameter_node_t *) params->keyword_rest)->name;
+    pm_constant_id_t block_name = ((const pm_block_parameter_node_t *) params->block)->name;
+
+    // Body must be a single statement that is a call (handles both block-body and
+    // endless `def foo(...) = bar(...)` forms).
+    const pm_node_t *body = def_node->body;
+    if (body == NULL) return NULL;
+    if (PM_NODE_TYPE_P(body, PM_STATEMENTS_NODE)) {
+        const pm_statements_node_t *stmts = (const pm_statements_node_t *) body;
+        if (stmts->body.size != 1) return NULL;
+        body = stmts->body.nodes[0];
+    }
+    if (!PM_NODE_TYPE_P(body, PM_CALL_NODE)) return NULL;
+
+    const pm_call_node_t *call = (const pm_call_node_t *) body;
+
+    // Implicit-self receiver only (v1). Reject safe-navigation / attribute writes.
+    if (call->receiver != NULL) return NULL;
+    if (PM_NODE_FLAG_P(call, PM_CALL_NODE_FLAGS_SAFE_NAVIGATION)) return NULL;
+    if (PM_NODE_FLAG_P(call, PM_CALL_NODE_FLAGS_ATTRIBUTE_WRITE)) return NULL;
+
+    // Arguments must be exactly (*rest, **kwrest) plus a &block argument, each forwarding
+    // only its corresponding parameter.
+    const pm_arguments_node_t *args = call->arguments;
+    if (args == NULL || args->arguments.size != 2) return NULL;
+
+    const pm_node_t *arg0 = args->arguments.nodes[0];
+    if (!PM_NODE_TYPE_P(arg0, PM_SPLAT_NODE)) return NULL;
+    if (!pm_forwarding_local_p(((const pm_splat_node_t *) arg0)->expression, rest_name)) return NULL;
+
+    const pm_node_t *arg1 = args->arguments.nodes[1];
+    if (!PM_NODE_TYPE_P(arg1, PM_KEYWORD_HASH_NODE)) return NULL;
+    const pm_keyword_hash_node_t *kwhash = (const pm_keyword_hash_node_t *) arg1;
+    if (kwhash->elements.size != 1) return NULL;
+    const pm_node_t *kw0 = kwhash->elements.nodes[0];
+    if (!PM_NODE_TYPE_P(kw0, PM_ASSOC_SPLAT_NODE)) return NULL;
+    if (!pm_forwarding_local_p(((const pm_assoc_splat_node_t *) kw0)->value, kwrest_name)) return NULL;
+
+    if (call->block == NULL || !PM_NODE_TYPE_P(call->block, PM_BLOCK_ARGUMENT_NODE)) return NULL;
+    if (!pm_forwarding_local_p(((const pm_block_argument_node_t *) call->block)->expression, block_name)) return NULL;
+
+    return call;
+}
+
+/**
+ * Build the alternate `forwardable` iseq for a pure pass-through wrapper (see
+ * pm_forwarding_wrapper_call). Synthesizes the AST for `def foo(...); bar(...); end` and
+ * compiles it via pm_iseq_build, then stores the result on the primary body's
+ * forwarding_iseq field. Modeled on pm_compile_builtin_mandatory_only_method.
+ */
+static void
+pm_compile_forwarding_wrapper(rb_iseq_t *iseq, const pm_scope_node_t *scope_node, const pm_call_node_t *call_node, const pm_node_location_t *node_location)
+{
+    const pm_def_node_t *def_node = (const pm_def_node_t *) scope_node->ast_node;
+
+    // Synthesize the parameter list `(...)`.
+    pm_forwarding_parameter_node_t forwarding_param = {
+        .base = {
+            .type = PM_FORWARDING_PARAMETER_NODE,
+            .flags = 0,
+            .node_id = 0,
+            .location = def_node->parameters->base.location,
+        },
+    };
+
+    pm_parameters_node_t parameters = {
+        .base = def_node->parameters->base,
+        .keyword_rest = (pm_node_t *) &forwarding_param,
+    };
+
+    // Synthesize the body `bar(...)`.
+    pm_forwarding_arguments_node_t forwarding_args = {
+        .base = {
+            .type = PM_FORWARDING_ARGUMENTS_NODE,
+            .flags = 0,
+            .node_id = 0,
+            .location = call_node->base.location,
+        },
+    };
+
+    pm_node_t *argument_nodes[1] = { (pm_node_t *) &forwarding_args };
+    pm_arguments_node_t arguments = {
+        .base = {
+            .type = PM_ARGUMENTS_NODE,
+            .flags = PM_ARGUMENTS_NODE_FLAGS_CONTAINS_FORWARDING,
+            .node_id = 0,
+            .location = call_node->base.location,
+        },
+        .arguments = { .nodes = argument_nodes, .size = 1, .capacity = 1 },
+    };
+
+    pm_call_node_t call = {
+        .base = call_node->base,
+        .receiver = NULL,
+        .call_operator_loc = call_node->call_operator_loc,
+        .name = call_node->name,
+        .message_loc = call_node->message_loc,
+        .opening_loc = call_node->opening_loc,
+        .arguments = &arguments,
+        .closing_loc = call_node->closing_loc,
+        .equal_loc = call_node->equal_loc,
+        .block = NULL,
+    };
+
+    pm_node_t *statement_nodes[1] = { (pm_node_t *) &call };
+    pm_statements_node_t statements = {
+        .base = {
+            .type = PM_STATEMENTS_NODE,
+            .flags = 0,
+            .node_id = 0,
+            .location = call_node->base.location,
+        },
+        .body = { .nodes = statement_nodes, .size = 1, .capacity = 1 },
+    };
+
+    const pm_def_node_t def = {
+        .base = def_node->base,
+        .name = def_node->name,
+        .receiver = def_node->receiver,
+        .parameters = &parameters,
+        .body = (pm_node_t *) &statements,
+        .locals = {
+            .ids = def_node->locals.ids,
+            .size = 0,
+            .capacity = def_node->locals.capacity,
+        },
+    };
+
+    pm_scope_node_t next_scope_node;
+    pm_scope_node_init(&def.base, &next_scope_node, (pm_scope_node_t *) scope_node);
+
+    const rb_iseq_t *forwarding_iseq = pm_iseq_build(
+        &next_scope_node,
+        rb_iseq_base_label(iseq),
+        rb_iseq_path(iseq),
+        rb_iseq_realpath(iseq),
+        node_location->line,
+        NULL,
+        0,
+        ISEQ_TYPE_METHOD,
+        ISEQ_COMPILE_DATA(iseq)->option
+    );
+    RB_OBJ_WRITE(iseq, &ISEQ_BODY(iseq)->forwarding_iseq, (VALUE)forwarding_iseq);
+
+    pm_scope_node_destroy(&next_scope_node);
+}
+
 static int
 pm_compile_builtin_function_call(rb_iseq_t *iseq, LINK_ANCHOR *const ret, pm_scope_node_t *scope_node, const pm_call_node_t *call_node, const pm_node_location_t *node_location, int popped, const rb_iseq_t *parent_block, const char *builtin_func)
 {
@@ -7110,6 +7314,16 @@ pm_compile_scope_node(rb_iseq_t *iseq, pm_scope_node_t *scope_node, const pm_nod
         PUSH_TRACE(ret, RUBY_EVENT_RETURN);
 
         ISEQ_COMPILE_DATA(iseq)->last_line = body->location.code_location.end_pos.lineno;
+
+        // If this method is a pure pass-through wrapper, build an alternate forwardable
+        // iseq selected at runtime to skip the intermediate Array/Hash allocation. The
+        // primary iseq compiled above still drives all reflection.
+        if (ISEQ_BODY(iseq)->mandatory_only_iseq == NULL) {
+            const pm_call_node_t *fwd_call = pm_forwarding_wrapper_call(scope_node);
+            if (fwd_call != NULL) {
+                pm_compile_forwarding_wrapper(iseq, scope_node, fwd_call, node_location);
+            }
+        }
         break;
       }
       case ISEQ_TYPE_RESCUE: {

@@ -1099,7 +1099,7 @@ rb_method_definition_set(const rb_method_entry_t *me, rb_method_definition_t *de
                     METHOD_ENTRY_BASIC_SET((rb_method_entry_t *)me, TRUE);
                 }
 
-                if (ISEQ_BODY(iseq)->mandatory_only_iseq) def->iseq_overload = 1;
+                if (ISEQ_BODY(iseq)->mandatory_only_iseq || ISEQ_BODY(iseq)->forwarding_iseq) def->iseq_overload = 1;
 
                 if (0) vm_cref_dump("rb_method_definition_create", cref);
 
@@ -1662,7 +1662,13 @@ get_overloaded_cme(const rb_callable_method_entry_t *cme)
                                                       false);
 
         RB_OBJ_WRITE(me, &def->body.iseq.cref, cme->def->body.iseq.cref);
-        RB_OBJ_WRITE(me, &def->body.iseq.iseqptr, ISEQ_BODY(cme->def->body.iseq.iseqptr)->mandatory_only_iseq);
+
+        // Dispatch to whichever alternate iseq this method carries. The two are mutually
+        // exclusive: a forwarding wrapper is never a mandatory-only builtin.
+        const rb_iseq_t *iseqptr = cme->def->body.iseq.iseqptr;
+        const rb_iseq_t *alt_iseq = ISEQ_BODY(iseqptr)->forwarding_iseq;
+        if (alt_iseq == NULL) alt_iseq = ISEQ_BODY(iseqptr)->mandatory_only_iseq;
+        RB_OBJ_WRITE(me, &def->body.iseq.iseqptr, alt_iseq);
 
         ASSERT_vm_locking();
         st_insert(overloaded_cme_table(), (st_data_t)cme, (st_data_t)me);
@@ -1675,16 +1681,30 @@ get_overloaded_cme(const rb_callable_method_entry_t *cme)
 const rb_callable_method_entry_t *
 rb_check_overloaded_cme(const rb_callable_method_entry_t *cme, const struct rb_callinfo * const ci)
 {
-    if (UNLIKELY(cme->def->iseq_overload) &&
-        (vm_ci_flag(ci) & (VM_CALL_ARGS_SIMPLE)) &&
-        (!(vm_ci_flag(ci) & VM_CALL_FORWARDING)) &&
-        (int)vm_ci_argc(ci) == ISEQ_BODY(method_entry_iseqptr(cme))->param.lead_num) {
+    if (UNLIKELY(cme->def->iseq_overload)) {
         VM_ASSERT(cme->def->type == VM_METHOD_TYPE_ISEQ, "type: %d", cme->def->type); // iseq_overload is marked only on ISEQ methods
+        const rb_iseq_t *iseq = method_entry_iseqptr(cme);
 
-        cme = get_overloaded_cme(cme);
+        bool swap;
+        if (ISEQ_BODY(iseq)->forwarding_iseq != NULL) {
+            // Pure pass-through wrapper: the forwardable alternate accepts every call
+            // shape (it stores the caller's CallInfo into the `...` slot), so swap
+            // unconditionally.
+            swap = true;
+        }
+        else {
+            // mandatory_only_iseq: only when every argument is a mandatory positional.
+            swap = (vm_ci_flag(ci) & (VM_CALL_ARGS_SIMPLE)) &&
+                   (!(vm_ci_flag(ci) & VM_CALL_FORWARDING)) &&
+                   (int)vm_ci_argc(ci) == ISEQ_BODY(iseq)->param.lead_num;
+        }
 
-        VM_ASSERT(cme != NULL);
-        METHOD_ENTRY_CACHED_SET((struct rb_callable_method_entry_struct *)cme);
+        if (swap) {
+            cme = get_overloaded_cme(cme);
+
+            VM_ASSERT(cme != NULL);
+            METHOD_ENTRY_CACHED_SET((struct rb_callable_method_entry_struct *)cme);
+        }
     }
 
     return cme;

@@ -13678,6 +13678,7 @@ ibf_dump_iseq_each(struct ibf_dump *dump, const rb_iseq_t *iseq)
     const int parent_iseq_index =           ibf_dump_iseq(dump, ISEQ_BODY(iseq)->parent_iseq);
     const int local_iseq_index =            ibf_dump_iseq(dump, ISEQ_BODY(iseq)->local_iseq);
     const int mandatory_only_iseq_index =   ibf_dump_iseq(dump, ISEQ_BODY(iseq)->mandatory_only_iseq);
+    const int forwarding_iseq_index =       ibf_dump_iseq(dump, ISEQ_BODY(iseq)->forwarding_iseq);
     const ibf_offset_t ci_entries_offset =  ibf_dump_ci_entries(dump, iseq);
     const ibf_offset_t outer_variables_offset = ibf_dump_outer_variables(dump, iseq);
 
@@ -13747,6 +13748,7 @@ ibf_dump_iseq_each(struct ibf_dump *dump, const rb_iseq_t *iseq)
     ibf_dump_write_small_value(dump, parent_iseq_index);
     ibf_dump_write_small_value(dump, local_iseq_index);
     ibf_dump_write_small_value(dump, mandatory_only_iseq_index);
+    ibf_dump_write_small_value(dump, forwarding_iseq_index);
     ibf_dump_write_small_value(dump, IBF_BODY_OFFSET(ci_entries_offset));
     ibf_dump_write_small_value(dump, IBF_BODY_OFFSET(outer_variables_offset));
     ibf_dump_write_small_value(dump, body->variable.flip_count);
@@ -13859,6 +13861,7 @@ ibf_load_iseq_each(struct ibf_load *load, rb_iseq_t *iseq, ibf_offset_t offset)
     const int parent_iseq_index = (int)ibf_load_small_value(load, &reading_pos);
     const int local_iseq_index = (int)ibf_load_small_value(load, &reading_pos);
     const int mandatory_only_iseq_index = (int)ibf_load_small_value(load, &reading_pos);
+    const int forwarding_iseq_index = (int)ibf_load_small_value(load, &reading_pos);
     const ibf_offset_t ci_entries_offset = (ibf_offset_t)IBF_BODY_OFFSET(ibf_load_small_value(load, &reading_pos));
     const ibf_offset_t outer_variables_offset = (ibf_offset_t)IBF_BODY_OFFSET(ibf_load_small_value(load, &reading_pos));
     const rb_snum_t variable_flip_count = (rb_snum_t)ibf_load_small_value(load, &reading_pos);
@@ -13977,10 +13980,12 @@ ibf_load_iseq_each(struct ibf_load *load, rb_iseq_t *iseq, ibf_offset_t offset)
     const rb_iseq_t *parent_iseq = ibf_load_iseq(load, (const rb_iseq_t *)(VALUE)parent_iseq_index);
     const rb_iseq_t *local_iseq = ibf_load_iseq(load, (const rb_iseq_t *)(VALUE)local_iseq_index);
     const rb_iseq_t *mandatory_only_iseq = ibf_load_iseq(load, (const rb_iseq_t *)(VALUE)mandatory_only_iseq_index);
+    const rb_iseq_t *forwarding_iseq = ibf_load_iseq(load, (const rb_iseq_t *)(VALUE)forwarding_iseq_index);
 
     RB_OBJ_WRITE(iseq, &load_body->parent_iseq, parent_iseq);
     RB_OBJ_WRITE(iseq, &load_body->local_iseq, local_iseq);
     RB_OBJ_WRITE(iseq, &load_body->mandatory_only_iseq, mandatory_only_iseq);
+    RB_OBJ_WRITE(iseq, &load_body->forwarding_iseq, forwarding_iseq);
 
     // This must be done after the local table is loaded.
     if (load_body->param.keyword != NULL) {

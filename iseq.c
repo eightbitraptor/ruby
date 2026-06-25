@@ -381,6 +381,7 @@ rb_iseq_mark_and_move(rb_iseq_t *iseq, bool reference_updating)
         if (body->local_iseq) rb_gc_mark_and_move_ptr(&body->local_iseq);
         if (body->parent_iseq) rb_gc_mark_and_move_ptr(&body->parent_iseq);
         if (body->mandatory_only_iseq) rb_gc_mark_and_move_ptr(&body->mandatory_only_iseq);
+        if (body->forwarding_iseq) rb_gc_mark_and_move_ptr(&body->forwarding_iseq);
 
         if (body->call_data) {
             for (unsigned int i = 0; i < body->ci_size; i++) {

@@ -552,6 +552,13 @@ struct rb_iseq_constant_body {
 
     const rb_iseq_t *mandatory_only_iseq;
 
+    // For a pure pass-through wrapper method `def foo(*a, **k, &b); bar(*a, **k, &b); end`,
+    // an alternate `forwardable` iseq whose body is `bar(...)`. Selected at runtime via the
+    // overloaded-cme machinery (see rb_check_overloaded_cme) to skip the intermediate
+    // Array/Hash allocation. Mutually exclusive with mandatory_only_iseq. The primary iseq
+    // still drives all reflection (Method#parameters names, #arity).
+    const rb_iseq_t *forwarding_iseq;
+
 #if USE_YJIT || USE_ZJIT
     // Function pointer for JIT code on jit_exec()
     rb_jit_func_t jit_entry;
