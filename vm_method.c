@@ -3204,6 +3204,16 @@ rb_mod_ruby2_keywords(int argc, VALUE *argv, VALUE module)
                         !ISEQ_BODY(me->def->body.iseq.iseqptr)->param.flags.has_kw &&
                         !ISEQ_BODY(me->def->body.iseq.iseqptr)->param.flags.has_kwrest) {
                     ISEQ_BODY(me->def->body.iseq.iseqptr)->param.flags.ruby2_keywords = 1;
+                    // If this method is a pure pass-through wrapper we optimized into a
+                    // forwarding alternate (`def foo(*a, &b); bar(*a, &b); end` etc.), the
+                    // alternate defaults to reifying keywords into a positional Hash (the
+                    // non-ruby2_keywords downgrade). ruby2_keywords means the wrapper must
+                    // instead PRESERVE keyword-ness, which is exactly transparent `...`
+                    // forwarding — so clear reify mode on the alternate. The cache clear below
+                    // drops the swapped call cache, so the next call re-reads the new flag.
+                    if (ISEQ_BODY(me->def->body.iseq.iseqptr)->forwarding_iseq) {
+                        ISEQ_BODY((rb_iseq_t *)ISEQ_BODY(me->def->body.iseq.iseqptr)->forwarding_iseq)->param.flags.forwardable_reify_kw = 0;
+                    }
                     rb_clear_method_cache(module, name);
                 }
                 else {

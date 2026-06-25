@@ -465,6 +465,17 @@ struct rb_iseq_constant_body {
             // When set, vm_caller_setup_fwd_args drops the block (VM_BLOCK_HANDLER_NONE)
             // rather than forwarding the LEP block handler. Implies forwardable.
             unsigned int forwardable_no_block: 1;
+
+            // Set only on a synthesized `forwardable` alternate iseq built for a pure
+            // pass-through wrapper that has NO keyword-rest parameter, e.g.
+            // `def foo(*a, &b); bar(*a, &b); end` or `def foo(*a); bar(*a); end`. Such a
+            // wrapper is not keyword-transparent: it downgrades any keywords the caller
+            // passed into a trailing positional Hash, whereas the `...` fast path would
+            // preserve keyword-ness. When set, vm_caller_setup_fwd_args materializes the
+            // forwarded keywords into one positional Hash and strips keyword-ness before
+            // replaying. Cleared by rb_mod_ruby2_keywords (ruby2_keywords restores the
+            // transparent semantics). Implies forwardable.
+            unsigned int forwardable_reify_kw: 1;
         } flags;
 
         unsigned int size;

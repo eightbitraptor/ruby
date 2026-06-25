@@ -3679,22 +3679,26 @@ pm_forwarding_local_p(const pm_node_t *node, pm_constant_id_t param_name)
  *       bar(*a, **k, &b)
  *     end
  *
- * The block parameter is optional, giving two accepted shapes:
+ * Both the block and the keyword-rest parameters are optional, giving four accepted shapes:
  *
- *     def foo(*args, **kwargs, &block); bar(*args, **kwargs, &block); end  // forwards block
- *     def foo(*args, **kwargs);         bar(*args, **kwargs);         end  // drops block
+ *     def foo(*args, **kwargs, &block); bar(*args, **kwargs, &block); end  // transparent, +block
+ *     def foo(*args, **kwargs);         bar(*args, **kwargs);         end  // transparent, drops block
+ *     def foo(*args, &block);           bar(*args, &block);           end  // reify kw, +block
+ *     def foo(*args);                   bar(*args);                   end  // reify kw, drops block
  *
  * The parameters may be named or anonymous, and the body must be a single call with an
  * implicit-self receiver that forwards each parameter to exactly the matching argument
  * position (and nothing else). The block parameter and the call's block argument must
- * agree: present together, or absent together. When the method has this exact shape,
- * returns the inner call node so an alternate `forwardable` iseq can be built whose body
- * is `bar(...)` — reusing the caller's arguments without allocating the intermediate
- * Array/Hash. The no-block shape additionally sets forwardable_no_block on the alternate
- * so the caller's block is dropped rather than forwarded. Returns NULL otherwise.
+ * agree (present together or absent together), and likewise the keyword-rest parameter and
+ * the call's `**kwrest` argument. When the method has this exact shape, returns the inner
+ * call node so an alternate `forwardable` iseq can be built whose body is `bar(...)` —
+ * reusing the caller's arguments without allocating the intermediate Array/Hash.
  *
- * Requiring an explicit `**kwrest` is deliberate: it makes the method ineligible for
- * `ruby2_keywords`, so that interaction can never arise.
+ * The no-block shapes set forwardable_no_block on the alternate so the caller's block is
+ * dropped rather than forwarded. The kwrest-free shapes set forwardable_reify_kw so any
+ * keywords the caller passes are materialized into a trailing positional Hash (the `...`
+ * path would otherwise preserve keyword-ness, which a `(*a)`/`(*a,&b)` method does not).
+ * Returns NULL otherwise.
  */
 static const pm_call_node_t *
 pm_forwarding_wrapper_call(const pm_scope_node_t *scope_node)
@@ -3712,16 +3716,25 @@ pm_forwarding_wrapper_call(const pm_scope_node_t *scope_node)
         return NULL;
     }
     if (params->rest == NULL || !PM_NODE_TYPE_P(params->rest, PM_REST_PARAMETER_NODE)) return NULL;
-    if (params->keyword_rest == NULL || !PM_NODE_TYPE_P(params->keyword_rest, PM_KEYWORD_REST_PARAMETER_NODE)) return NULL;
 
-    // The block parameter is optional: `(*a, **k, &b)` forwards the block; `(*a, **k)` does
-    // not (the synthesized alternate carries forwardable_no_block). Either way the parameter
-    // list and the forwarded arguments below must agree.
+    // The keyword-rest parameter is optional but constrains keyword behavior:
+    //   `**k` present -> the wrapper is keyword-transparent; the call must forward `**k`.
+    //   absent        -> the wrapper downgrades keywords into a trailing positional Hash; the
+    //                    synthesized alternate carries forwardable_reify_kw and the call must
+    //                    NOT forward keywords. `**nil` (PM_NO_KEYWORDS_PARAMETER_NODE) is
+    //                    rejected here: it forbids keywords entirely, which the forwardable
+    //                    path cannot reproduce.
+    const bool has_kwrest = (params->keyword_rest != NULL);
+    if (has_kwrest && !PM_NODE_TYPE_P(params->keyword_rest, PM_KEYWORD_REST_PARAMETER_NODE)) return NULL;
+
+    // The block parameter is optional: `(..., &b)` forwards the block; otherwise the
+    // synthesized alternate carries forwardable_no_block. Either way the parameter list and
+    // the forwarded arguments below must agree.
     const bool has_block_param = (params->block != NULL);
     if (has_block_param && !PM_NODE_TYPE_P(params->block, PM_BLOCK_PARAMETER_NODE)) return NULL;
 
     pm_constant_id_t rest_name = ((const pm_rest_parameter_node_t *) params->rest)->name;
-    pm_constant_id_t kwrest_name = ((const pm_keyword_rest_parameter_node_t *) params->keyword_rest)->name;
+    pm_constant_id_t kwrest_name = has_kwrest ? ((const pm_keyword_rest_parameter_node_t *) params->keyword_rest)->name : 0;
     pm_constant_id_t block_name = has_block_param ? ((const pm_block_parameter_node_t *) params->block)->name : 0;
 
     // Body must be a single statement that is a call (handles both block-body and
@@ -3742,22 +3755,26 @@ pm_forwarding_wrapper_call(const pm_scope_node_t *scope_node)
     if (PM_NODE_FLAG_P(call, PM_CALL_NODE_FLAGS_SAFE_NAVIGATION)) return NULL;
     if (PM_NODE_FLAG_P(call, PM_CALL_NODE_FLAGS_ATTRIBUTE_WRITE)) return NULL;
 
-    // Arguments must be exactly (*rest, **kwrest) plus a &block argument, each forwarding
-    // only its corresponding parameter.
+    // Arguments must be exactly `*rest` (plus `**kwrest` when the method has a keyword-rest
+    // parameter), each forwarding only its corresponding parameter. With no keyword-rest
+    // parameter the call must carry no keyword argument at all.
     const pm_arguments_node_t *args = call->arguments;
-    if (args == NULL || args->arguments.size != 2) return NULL;
+    const size_t expected_args = has_kwrest ? 2 : 1;
+    if (args == NULL || args->arguments.size != expected_args) return NULL;
 
     const pm_node_t *arg0 = args->arguments.nodes[0];
     if (!PM_NODE_TYPE_P(arg0, PM_SPLAT_NODE)) return NULL;
     if (!pm_forwarding_local_p(((const pm_splat_node_t *) arg0)->expression, rest_name)) return NULL;
 
-    const pm_node_t *arg1 = args->arguments.nodes[1];
-    if (!PM_NODE_TYPE_P(arg1, PM_KEYWORD_HASH_NODE)) return NULL;
-    const pm_keyword_hash_node_t *kwhash = (const pm_keyword_hash_node_t *) arg1;
-    if (kwhash->elements.size != 1) return NULL;
-    const pm_node_t *kw0 = kwhash->elements.nodes[0];
-    if (!PM_NODE_TYPE_P(kw0, PM_ASSOC_SPLAT_NODE)) return NULL;
-    if (!pm_forwarding_local_p(((const pm_assoc_splat_node_t *) kw0)->value, kwrest_name)) return NULL;
+    if (has_kwrest) {
+        const pm_node_t *arg1 = args->arguments.nodes[1];
+        if (!PM_NODE_TYPE_P(arg1, PM_KEYWORD_HASH_NODE)) return NULL;
+        const pm_keyword_hash_node_t *kwhash = (const pm_keyword_hash_node_t *) arg1;
+        if (kwhash->elements.size != 1) return NULL;
+        const pm_node_t *kw0 = kwhash->elements.nodes[0];
+        if (!PM_NODE_TYPE_P(kw0, PM_ASSOC_SPLAT_NODE)) return NULL;
+        if (!pm_forwarding_local_p(((const pm_assoc_splat_node_t *) kw0)->value, kwrest_name)) return NULL;
+    }
 
     if (has_block_param) {
         // `(*a, **k, &b)`: the call must forward the block as `&b`.
@@ -3877,6 +3894,14 @@ pm_compile_forwarding_wrapper(rb_iseq_t *iseq, const pm_scope_node_t *scope_node
     // so vm_caller_setup_fwd_args drops the block instead of forwarding the LEP handler.
     if (def_node->parameters->block == NULL) {
         ISEQ_BODY((rb_iseq_t *)forwarding_iseq)->param.flags.forwardable_no_block = TRUE;
+    }
+    // A wrapper with no keyword-rest parameter (`def foo(*a, &b); bar(*a, &b); end` or
+    // `def foo(*a); bar(*a); end`) downgrades any keywords the caller passes into a trailing
+    // positional Hash, whereas the `...` fast path would preserve keyword-ness. Flag the
+    // alternate so vm_caller_setup_fwd_args reifies forwarded keywords into a positional Hash.
+    // (ruby2_keywords on this method clears the flag — see rb_mod_ruby2_keywords.)
+    if (def_node->parameters->keyword_rest == NULL) {
+        ISEQ_BODY((rb_iseq_t *)forwarding_iseq)->param.flags.forwardable_reify_kw = TRUE;
     }
 
     RB_OBJ_WRITE(iseq, &ISEQ_BODY(iseq)->forwarding_iseq, (VALUE)forwarding_iseq);

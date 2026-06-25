@@ -1218,6 +1218,117 @@ vm_caller_setup_fwd_args(const rb_execution_context_t *ec, rb_control_frame_t *r
 
     vm_adjust_stack_forwarding(ec, GET_CFP(), caller_argc, splat);
 
+    // Synthesized kwrest-free pass-through wrapper (`def foo(*a, &b); bar(*a, &b); end` or
+    // `def foo(*a); bar(*a); end`): unlike `...`, such a method is NOT keyword-transparent.
+    // Lacking a keyword-rest parameter, it downgrades any keywords the caller passed into a
+    // trailing positional Hash (the real method would collect them into `a`). Reproduce that
+    // by materializing the forwarded keywords into one positional Hash and replaying the call
+    // with that Hash as an ordinary trailing positional argument (no keyword flags). With no
+    // keywords there is nothing to do — the common case stays the unchanged zero-alloc replay.
+    // ruby2_keywords clears the flag (the wrapper then forwards transparently, which is exactly
+    // ruby2_keywords semantics).
+    //
+    // The positional args may already be sitting on the stack as a single unexpanded splat
+    // array (when the caller used VM_CALL_ARGS_SPLAT — the forwardable frame stores args raw,
+    // so `bar(*arr, **kw)` leaves [..splat array.., kw] on top, mirroring the layout
+    // setup_parameters_complex expects at the `f(*a, **kw)` case). In that case the reified
+    // Hash must be appended INTO the splat array (which stays the last positional slot), not
+    // pushed as an extra slot, or the downstream splat expansion would treat the Hash as the
+    // array. Otherwise the args are flat and the Hash is simply pushed on top.
+    if (UNLIKELY(ISEQ_BODY(ISEQ_BODY(GET_ISEQ())->local_iseq)->param.flags.forwardable_reify_kw) &&
+        (caller_flag & (VM_CALL_KWARG | VM_CALL_KW_SPLAT))) {
+        rb_control_frame_t *cfp = GET_CFP();
+        VALUE kwh = Qundef;
+
+        if (caller_flag & VM_CALL_KWARG) {
+            // Keyword VALUES are the top `keyword_len` stack slots; their NAMES are in `kw`.
+            // Collapse them into one fresh positional Hash (always non-empty for KWARG).
+            int kw_len = kw->keyword_len;
+            kwh = make_rest_kw_hash(kw->keywords, kw_len, cfp->sp - kw_len);
+            cfp->sp -= kw_len;
+            caller_argc -= kw_len;
+        }
+        else {
+            // A single keyword-splat value (a Hash, or Qnil for `**nil`; `**obj` was already
+            // run through `splatkw`) is the top slot. An empty/nil splat is dropped just like
+            // ignore_keyword_hash_p does for a kwrest-free method; a non-empty Hash becomes a
+            // positional, dup'd (unless already a fresh copy) and with the ruby2_keywords flag
+            // stripped so it is not re-expanded as keywords downstream — matching how the real
+            // method would store a forwarded `**h` into its rest.
+            VALUE h = cfp->sp[-1];
+            cfp->sp -= 1;
+            caller_argc -= 1;
+            if (RB_TYPE_P(h, T_HASH) && !RHASH_EMPTY_P(h)) {
+                if (!(caller_flag & VM_CALL_KW_SPLAT_MUT)) {
+                    h = rb_hash_dup(h);
+                }
+                FL_UNSET_RAW(h, RHASH_PASS_AS_KEYWORDS);
+                kwh = h;
+            }
+        }
+
+        if (!UNDEF_P(kwh)) {
+            if (caller_flag & VM_CALL_ARGS_SPLAT) {
+                // Positional args are an unexpanded splat array now at the top slot; append the
+                // reified Hash into it (dup unless we already own a fresh copy) so it remains a
+                // single trailing positional.
+                VALUE rest = cfp->sp[-1];
+                if (!(caller_flag & VM_CALL_ARGS_SPLAT_MUT)) {
+                    rest = rb_ary_dup(rest);
+                    cfp->sp[-1] = rest;
+                    caller_flag |= VM_CALL_ARGS_SPLAT_MUT;
+                }
+                rb_ary_push(rest, kwh);
+            }
+            else {
+                // Flat positionals: push the Hash as the new top slot.
+                *(cfp->sp++) = kwh;
+                caller_argc += 1;
+            }
+        }
+
+        caller_flag &= ~(VM_CALL_KWARG | VM_CALL_KW_SPLAT | VM_CALL_KW_SPLAT_MUT);
+        kw = NULL;
+    }
+    // No explicit keywords, but a latent ruby2_keywords-flagged hash may be sitting in the
+    // positional args. The non-r2k `(*a)` method we emulate is NOT keyword-transparent and,
+    // crucially, treats such a hash OPPOSITELY depending on its delivery form:
+    //   * via splat (`w(*arr)`, flagged last element): binding to `*a` STRIPS the flag, so
+    //     the forwarded `bar(*a)` re-splat sees an ordinary positional Hash.
+    //   * as a direct positional (`w(h)`): the flag is KEPT, so `bar(*a)` re-splats and
+    //     re-interprets it as keywords.
+    // The transparent `...` path does neither (it preserves shape + flag verbatim), so the
+    // reify alternate must reproduce both to match the real method.
+    else if (UNLIKELY(ISEQ_BODY(ISEQ_BODY(GET_ISEQ())->local_iseq)->param.flags.forwardable_reify_kw)) {
+        rb_control_frame_t *cfp = GET_CFP();
+        if (caller_flag & VM_CALL_ARGS_SPLAT) {
+            // Splat array is the single (unexpanded) top slot; strip the flag off a flagged
+            // last element so downstream binds it positionally.
+            VALUE rest = cfp->sp[-1];
+            long len = RARRAY_LEN(rest);
+            if (len > 0) {
+                VALUE last = RARRAY_AREF(rest, len - 1);
+                if (RB_TYPE_P(last, T_HASH) && FL_TEST_RAW(last, RHASH_PASS_AS_KEYWORDS)) {
+                    if (!(caller_flag & VM_CALL_ARGS_SPLAT_MUT)) {
+                        rest = rb_ary_dup(rest);
+                        cfp->sp[-1] = rest;
+                        caller_flag |= VM_CALL_ARGS_SPLAT_MUT;
+                    }
+                    last = rb_hash_dup(last);
+                    FL_UNSET_RAW(last, RHASH_PASS_AS_KEYWORDS);
+                    RARRAY_ASET(rest, len - 1, last);
+                }
+            }
+        }
+        else if (caller_argc > 0) {
+            // Flat positionals: a flagged last hash must be delivered AS keywords.
+            VALUE last = cfp->sp[-1];
+            if (RB_TYPE_P(last, T_HASH) && FL_TEST_RAW(last, RHASH_PASS_AS_KEYWORDS)) {
+                caller_flag |= VM_CALL_KW_SPLAT;
+            }
+        }
+    }
+
     *adjusted_ci = VM_CI_ON_STACK(
             site_mid,
             ((caller_flag & ~(VM_CALL_ARGS_SIMPLE | VM_CALL_FCALL)) |

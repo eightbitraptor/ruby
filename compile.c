@@ -13708,7 +13708,8 @@ ibf_dump_iseq_each(struct ibf_dump *dump, const rb_iseq_t *iseq)
         (body->param.flags.use_block        << 12) |
         (body->param.flags.forwardable      << 13) |
         (body->param.flags.accepts_no_block << 14) |
-        (body->param.flags.forwardable_no_block << 15);
+        (body->param.flags.forwardable_no_block << 15) |
+        (body->param.flags.forwardable_reify_kw << 16);
 
 #if IBF_ISEQ_ENABLE_LOCAL_BUFFER
 #  define IBF_BODY_OFFSET(x) (x)
@@ -13932,6 +13933,7 @@ ibf_load_iseq_each(struct ibf_load *load, rb_iseq_t *iseq, ibf_offset_t offset)
     load_body->param.flags.forwardable = (param_flags >> 13) & 1;
     load_body->param.flags.accepts_no_block = (param_flags >> 14) & 1;
     load_body->param.flags.forwardable_no_block = (param_flags >> 15) & 1;
+    load_body->param.flags.forwardable_reify_kw = (param_flags >> 16) & 1;
     load_body->param.size = param_size;
     load_body->param.lead_num = param_lead_num;
     load_body->param.opt_num = param_opt_num;
