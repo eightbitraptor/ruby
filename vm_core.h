@@ -457,6 +457,14 @@ struct rb_iseq_constant_body {
             unsigned int use_block: 1;
             unsigned int forwardable: 1;
             unsigned int accepts_no_block: 1;
+
+            // Set only on a synthesized `forwardable` alternate iseq (see
+            // rb_iseq_constant_body::forwarding_iseq) built for a pure pass-through wrapper
+            // that has no block parameter, e.g. `def foo(*a, **k); bar(*a, **k); end`. Such
+            // a wrapper does NOT forward the caller's block, but the `...` fast path would.
+            // When set, vm_caller_setup_fwd_args drops the block (VM_BLOCK_HANDLER_NONE)
+            // rather than forwarding the LEP block handler. Implies forwardable.
+            unsigned int forwardable_no_block: 1;
         } flags;
 
         unsigned int size;

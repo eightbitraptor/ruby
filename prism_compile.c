@@ -3679,12 +3679,19 @@ pm_forwarding_local_p(const pm_node_t *node, pm_constant_id_t param_name)
  *       bar(*a, **k, &b)
  *     end
  *
+ * The block parameter is optional, giving two accepted shapes:
+ *
+ *     def foo(*args, **kwargs, &block); bar(*args, **kwargs, &block); end  // forwards block
+ *     def foo(*args, **kwargs);         bar(*args, **kwargs);         end  // drops block
+ *
  * The parameters may be named or anonymous, and the body must be a single call with an
- * implicit-self receiver that forwards each of the three parameters to exactly the
- * matching argument position (and nothing else). When the method has this exact shape,
+ * implicit-self receiver that forwards each parameter to exactly the matching argument
+ * position (and nothing else). The block parameter and the call's block argument must
+ * agree: present together, or absent together. When the method has this exact shape,
  * returns the inner call node so an alternate `forwardable` iseq can be built whose body
  * is `bar(...)` — reusing the caller's arguments without allocating the intermediate
- * Array/Hash. Returns NULL otherwise.
+ * Array/Hash. The no-block shape additionally sets forwardable_no_block on the alternate
+ * so the caller's block is dropped rather than forwarded. Returns NULL otherwise.
  *
  * Requiring an explicit `**kwrest` is deliberate: it makes the method ineligible for
  * `ruby2_keywords`, so that interaction can never arise.
@@ -3706,11 +3713,16 @@ pm_forwarding_wrapper_call(const pm_scope_node_t *scope_node)
     }
     if (params->rest == NULL || !PM_NODE_TYPE_P(params->rest, PM_REST_PARAMETER_NODE)) return NULL;
     if (params->keyword_rest == NULL || !PM_NODE_TYPE_P(params->keyword_rest, PM_KEYWORD_REST_PARAMETER_NODE)) return NULL;
-    if (params->block == NULL || !PM_NODE_TYPE_P(params->block, PM_BLOCK_PARAMETER_NODE)) return NULL;
+
+    // The block parameter is optional: `(*a, **k, &b)` forwards the block; `(*a, **k)` does
+    // not (the synthesized alternate carries forwardable_no_block). Either way the parameter
+    // list and the forwarded arguments below must agree.
+    const bool has_block_param = (params->block != NULL);
+    if (has_block_param && !PM_NODE_TYPE_P(params->block, PM_BLOCK_PARAMETER_NODE)) return NULL;
 
     pm_constant_id_t rest_name = ((const pm_rest_parameter_node_t *) params->rest)->name;
     pm_constant_id_t kwrest_name = ((const pm_keyword_rest_parameter_node_t *) params->keyword_rest)->name;
-    pm_constant_id_t block_name = ((const pm_block_parameter_node_t *) params->block)->name;
+    pm_constant_id_t block_name = has_block_param ? ((const pm_block_parameter_node_t *) params->block)->name : 0;
 
     // Body must be a single statement that is a call (handles both block-body and
     // endless `def foo(...) = bar(...)` forms).
@@ -3747,8 +3759,17 @@ pm_forwarding_wrapper_call(const pm_scope_node_t *scope_node)
     if (!PM_NODE_TYPE_P(kw0, PM_ASSOC_SPLAT_NODE)) return NULL;
     if (!pm_forwarding_local_p(((const pm_assoc_splat_node_t *) kw0)->value, kwrest_name)) return NULL;
 
-    if (call->block == NULL || !PM_NODE_TYPE_P(call->block, PM_BLOCK_ARGUMENT_NODE)) return NULL;
-    if (!pm_forwarding_local_p(((const pm_block_argument_node_t *) call->block)->expression, block_name)) return NULL;
+    if (has_block_param) {
+        // `(*a, **k, &b)`: the call must forward the block as `&b`.
+        if (call->block == NULL || !PM_NODE_TYPE_P(call->block, PM_BLOCK_ARGUMENT_NODE)) return NULL;
+        if (!pm_forwarding_local_p(((const pm_block_argument_node_t *) call->block)->expression, block_name)) return NULL;
+    }
+    else {
+        // `(*a, **k)`: the wrapper has no block parameter, so the call must pass no block
+        // at all (neither `&b` nor a literal block). The alternate iseq then forwards
+        // positional + keyword args but drops the block (forwardable_no_block).
+        if (call->block != NULL) return NULL;
+    }
 
     return call;
 }
@@ -3851,6 +3872,13 @@ pm_compile_forwarding_wrapper(rb_iseq_t *iseq, const pm_scope_node_t *scope_node
         ISEQ_TYPE_METHOD,
         ISEQ_COMPILE_DATA(iseq)->option
     );
+    // A wrapper with no block parameter (`def foo(*a, **k); bar(*a, **k); end`) must NOT
+    // forward the caller's block, but the `...` fast path always would. Flag the alternate
+    // so vm_caller_setup_fwd_args drops the block instead of forwarding the LEP handler.
+    if (def_node->parameters->block == NULL) {
+        ISEQ_BODY((rb_iseq_t *)forwarding_iseq)->param.flags.forwardable_no_block = TRUE;
+    }
+
     RB_OBJ_WRITE(iseq, &ISEQ_BODY(iseq)->forwarding_iseq, (VALUE)forwarding_iseq);
 
     pm_scope_node_destroy(&next_scope_node);

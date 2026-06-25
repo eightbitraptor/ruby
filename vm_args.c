@@ -1207,6 +1207,11 @@ vm_caller_setup_fwd_args(const rb_execution_context_t *ec, rb_control_frame_t *r
     if (is_super && blockiseq) {
         bh = vm_caller_setup_arg_block(ec, GET_CFP(), site_ci, blockiseq, is_super);
     }
+    else if (ISEQ_BODY(ISEQ_BODY(GET_ISEQ())->local_iseq)->param.flags.forwardable_no_block) {
+        // Synthesized pass-through wrapper without a block parameter
+        // (`def foo(*a, **k); bar(*a, **k); end`): forward args but not the block.
+        bh = VM_BLOCK_HANDLER_NONE;
+    }
     else {
         bh = VM_ENV_BLOCK_HANDLER(GET_LEP());
     }
