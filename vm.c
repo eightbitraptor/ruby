@@ -823,6 +823,7 @@ vm_stat(int argc, VALUE *argv, VALUE self)
     static VALUE sym_constant_cache_invalidations, sym_constant_cache_misses, sym_global_cvar_state, sym_next_shape_id;
     static VALUE sym_shape_cache_size;
     static VALUE sym_method_definitions_compiled, sym_forwardable_methods_optimized;
+    static VALUE sym_symbol_id_entry_size;
     VALUE arg = Qnil;
     VALUE hash = Qnil, key = Qnil;
 
@@ -847,6 +848,7 @@ vm_stat(int argc, VALUE *argv, VALUE self)
     S(shape_cache_size);
     S(method_definitions_compiled);
     S(forwardable_methods_optimized);
+    S(symbol_id_entry_size);
 #undef S
 
 #define SET(name, attr) \
@@ -863,6 +865,13 @@ vm_stat(int argc, VALUE *argv, VALUE self)
     SET(method_definitions_compiled, ruby_vm_method_definitions_compiled);
     SET(forwardable_methods_optimized, ruby_vm_forwardable_methods_optimized);
 #undef SET
+
+    if (key == sym_symbol_id_entry_size) {
+        return SIZET2NUM(rb_sym_id_entry_memsize());
+    }
+    else if (hash != Qnil) {
+        rb_hash_aset(hash, sym_symbol_id_entry_size, SIZET2NUM(rb_sym_id_entry_memsize()));
+    }
 
 #if USE_DEBUG_COUNTER
     ruby_debug_counter_show_at_exit(FALSE);

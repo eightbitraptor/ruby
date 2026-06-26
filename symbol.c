@@ -1298,6 +1298,27 @@ rb_sym_immortal_count(void)
     return (size_t)(RUBY_ATOMIC_LOAD(ruby_global_symbols.next_id) - 1);
 }
 
+/* Total bytes used by symbols->ids: the id_entry_dir directory plus every
+ * sym_id_entry bucket it references. */
+size_t
+rb_sym_id_entry_memsize(void)
+{
+    VALUE dir_obj = rbimpl_atomic_value_load(&ruby_global_symbols.ids, RBIMPL_ATOMIC_ACQUIRE);
+    if (!dir_obj) return 0;
+
+    const struct id_entry_dir *dir = RTYPEDDATA_GET_DATA(dir_obj);
+    size_t size = id_entry_dir_memsize(dir);
+
+    for (long i = 0; i < dir->capa; i++) {
+        VALUE bucket = rbimpl_atomic_value_load(&dir->entries[i], RBIMPL_ATOMIC_ACQUIRE);
+        if (bucket) {
+            size += sym_id_entry_list_memsize(RTYPEDDATA_GET_DATA(bucket));
+        }
+    }
+
+    return size;
+}
+
 int
 rb_is_const_id(ID id)
 {
