@@ -19,6 +19,7 @@
 #include "internal/symbol.h"
 #include "internal/vm.h"
 #include "probes.h"
+#include "ruby/atomic.h"
 #include "ruby/encoding.h"
 #include "ruby/ractor.h"
 #include "ruby/st.h"
@@ -40,8 +41,6 @@
 
 #define IDSET_ATTRSET_FOR_SYNTAX ((1U<<ID_LOCAL)|(1U<<ID_CONST))
 #define IDSET_ATTRSET_FOR_INTERN (~(~0U<<(1<<ID_SCOPE_SHIFT)) & ~(1U<<ID_ATTRSET))
-
-#define SYMBOL_PINNED_P(sym) (RSYMBOL(sym)->id&~ID_SCOPE_MASK)
 
 #define STATIC_SYM2ID(sym) RSHIFT((VALUE)(sym), RUBY_SPECIAL_SHIFT)
 
@@ -212,6 +211,98 @@ static const rb_data_type_t sym_id_entry_list_type = {
     0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_WB_PROTECTED
 };
 
+/* Directory mapping an ID serial (via idx = serial / ID_ENTRY_UNIT) to its
+ * sym_id_entry bucket. This replaces the former hidden Ruby Array so that the
+ * read path (get_id_serial_entry, and therefore rb_id2str / rb_sym2str) can run
+ * lock-free.
+ *
+ * Concurrency model (single-writer / multi-reader): the sole writer is
+ * set_id_entry, which runs under the VM lock. Readers take no lock. Growth
+ * allocates a brand new directory, copies the (cheap) bucket pointers forward,
+ * and publishes it with an atomic release store; superseded directories are
+ * reclaimed by the GC once no reader still references them (GC-as-RCU, mirroring
+ * the idiom in concurrent_set.c). `capa` and the `entries` base pointer are
+ * immutable once a directory is published; individual entries[idx] slots are
+ * filled lazily by the writer and published with a release store, and readers
+ * acquire-load them. */
+struct id_entry_dir {
+    long capa;
+    VALUE *entries;
+};
+
+static void
+id_entry_dir_mark(void *ptr)
+{
+    struct id_entry_dir *dir = ptr;
+    for (long i = 0; i < dir->capa; i++) {
+        if (dir->entries[i]) {
+            // buckets remain movable, as they were when stored in a Ruby Array
+            rb_gc_mark_movable(dir->entries[i]);
+        }
+    }
+}
+
+static void
+id_entry_dir_free(void *ptr)
+{
+    struct id_entry_dir *dir = ptr;
+    SIZED_FREE_N(dir->entries, dir->capa);
+}
+
+static size_t
+id_entry_dir_memsize(const void *ptr)
+{
+    const struct id_entry_dir *dir = ptr;
+    return sizeof(struct id_entry_dir) + dir->capa * sizeof(VALUE);
+}
+
+static void
+id_entry_dir_compact(void *ptr)
+{
+    // Only ever runs stop-the-world, so it cannot race the lock-free readers.
+    struct id_entry_dir *dir = ptr;
+    for (long i = 0; i < dir->capa; i++) {
+        if (dir->entries[i]) {
+            dir->entries[i] = rb_gc_location(dir->entries[i]);
+        }
+    }
+}
+
+/* Hack: Though it would be trivial, we're intentionally avoiding WB-protecting
+ * this object. This prevents the object from aging and ensures superseded
+ * directories can always be collected in a minor GC. It also means the writer
+ * can publish bucket pointers into entries[] with a plain atomic release store
+ * (no write barrier) on the path that races the lock-free readers.
+ */
+static const rb_data_type_t id_entry_dir_type = {
+    "symbol_id_entry_directory",
+    {
+        id_entry_dir_mark,
+        id_entry_dir_free,
+        id_entry_dir_memsize,
+        id_entry_dir_compact,
+    },
+    /* Hack: NOT WB_PROTECTED on purpose (see above) */
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+/* Covers 16 * ID_ENTRY_UNIT == 8192 serials, comfortably more than the static
+ * ids registered during boot, so Init_sym does not trigger a grow. */
+static const long ID_ENTRY_DIR_INITIAL_CAPA = 16;
+
+static VALUE
+id_entry_dir_new(long capa)
+{
+    struct id_entry_dir *dir;
+    VALUE obj = TypedData_Make_Struct(0, struct id_entry_dir, &id_entry_dir_type, dir);
+    // TypedData_Make_Struct zero-fills the struct (capa == 0), so a GC triggered
+    // by ZALLOC_N below marks nothing before entries/capa are set. Assign capa
+    // last so the mark/compact loops never read entries before it is allocated.
+    dir->entries = ZALLOC_N(VALUE, capa);
+    dir->capa = capa;
+    return obj;
+}
+
 static int
 sym_check_asciionly(VALUE str, bool fake_str)
 {
@@ -264,6 +355,34 @@ next_id_base(void)
     return (ID)serial << ID_SCOPE_SHIFT;
 }
 
+/* Allocate a larger directory able to index min_idx, copy the existing bucket
+ * pointers forward, and publish it. Called only by the sole writer (set_id_entry),
+ * under the VM lock. Returns the (stable, non-embedded) new directory struct. */
+static struct id_entry_dir *
+id_entry_dir_grow(rb_symbols_t *symbols, struct id_entry_dir *old_dir, size_t min_idx)
+{
+    ASSERT_vm_locking();
+
+    long new_capa = old_dir->capa ? old_dir->capa * 2 : ID_ENTRY_DIR_INITIAL_CAPA;
+    while ((size_t)new_capa <= min_idx) new_capa *= 2;
+
+    // id_entry_dir_new may trigger GC, but the old directory is still reachable
+    // via symbols->ids until we publish below, so it and its buckets stay marked.
+    VALUE new_obj = id_entry_dir_new(new_capa);
+    struct id_entry_dir *new_dir = RTYPEDDATA_GET_DATA(new_obj);
+
+    for (long i = 0; i < old_dir->capa; i++) {
+        new_dir->entries[i] = old_dir->entries[i];
+    }
+
+    // Publish: this release pairs with the acquire load in get_id_serial_entry.
+    // The old directory becomes unreachable from roots, but is kept alive for any
+    // in-flight lock-free reader by that reader's own machine stack (GC-as-RCU).
+    rbimpl_atomic_value_store(&symbols->ids, new_obj, RBIMPL_ATOMIC_RELEASE);
+
+    return new_dir;
+}
+
 static void
 set_id_entry(rb_symbols_t *symbols, rb_id_serial_t num, VALUE str, VALUE sym)
 {
@@ -273,15 +392,23 @@ set_id_entry(rb_symbols_t *symbols, rb_id_serial_t num, VALUE str, VALUE sym)
 
     size_t idx = num / ID_ENTRY_UNIT;
 
-    VALUE id_entry_list, ids = symbols->ids;
+    // Sole writer, under the VM lock, so symbols->ids and the slots can be read plainly.
+    struct id_entry_dir *dir = RTYPEDDATA_GET_DATA(symbols->ids);
+    if (idx >= (size_t)dir->capa) {
+        dir = id_entry_dir_grow(symbols, dir, idx);
+    }
+
+    VALUE bucket = dir->entries[idx];
     rb_darray(struct sym_id_entry) entries;
-    if (idx >= (size_t)RARRAY_LEN(ids) || NIL_P(id_entry_list = rb_ary_entry(ids, (long)idx))) {
+    if (!bucket) {
         rb_darray_make(&entries, ID_ENTRY_UNIT);
-        id_entry_list = TypedData_Wrap_Struct(0, &sym_id_entry_list_type, entries);
-        rb_ary_store(ids, (long)idx, id_entry_list);
+        bucket = TypedData_Wrap_Struct(0, &sym_id_entry_list_type, entries);
+        // Publish the (calloc-zeroed) bucket; release pairs with the reader's
+        // acquire load. No write barrier needed: id_entry_dir is not WB-protected.
+        rbimpl_atomic_value_store(&dir->entries[idx], bucket, RBIMPL_ATOMIC_RELEASE);
     }
     else {
-        entries = RTYPEDDATA_GET_DATA(id_entry_list);
+        entries = RTYPEDDATA_GET_DATA(bucket);
     }
 
     idx = num % ID_ENTRY_UNIT;
@@ -289,8 +416,14 @@ set_id_entry(rb_symbols_t *symbols, rb_id_serial_t num, VALUE str, VALUE sym)
     RUBY_ASSERT(entry->str == 0);
     RUBY_ASSERT(entry->sym == 0);
 
-    RB_OBJ_WRITE(id_entry_list, &entry->str, str);
-    RB_OBJ_WRITE(id_entry_list, &entry->sym, sym);
+    // These entry stores are NOT release-published via the bucket pointer (the
+    // bucket may already have been published above for a sibling serial). The
+    // happens-before that lets a lock-free reader see them is supplied by the
+    // caller: sym_set_create runs set_id_entry *before* rb_concurrent_set_find_or_insert
+    // release-publishes the symbol key, and any holder of this id acquired it
+    // through that set. Do not reorder set_id_entry after the key publish.
+    RB_OBJ_WRITE(bucket, &entry->str, str);
+    RB_OBJ_WRITE(bucket, &entry->sym, sym);
 }
 
 static VALUE
@@ -416,7 +549,7 @@ Init_sym(void)
     rb_symbols_t *symbols = &ruby_global_symbols;
 
     symbols->sym_set = rb_concurrent_set_new(&sym_set_funcs, 1024);
-    symbols->ids = rb_ary_hidden_new(0);
+    symbols->ids = id_entry_dir_new(ID_ENTRY_DIR_INITIAL_CAPA);
 
     Init_op_tbl();
     Init_id();
@@ -757,24 +890,41 @@ rb_enc_symname2_p(const char *name, long len, rb_encoding *enc)
     return rb_enc_symname_type(name, len, enc, IDSET_ATTRSET_FOR_SYNTAX) != -1;
 }
 
+/* Lock-free lookup of the sym_id_entry for a serial.
+ *
+ * Takes no lock: it acquire-loads the published directory and bucket pointers,
+ * pairing with the release stores in set_id_entry / id_entry_dir_grow.
+ *
+ * The caller MUST hold the GVL across both this call and its subsequent read of
+ * the returned entry's ->str / ->sym fields. That is what makes the read atomic
+ * with respect to GC: the VM barrier is cooperative, so GC and compaction (which
+ * rewrite entry->str and may move bucket wrappers) run only while every other EC
+ * is parked at a safepoint -- never partway through this straight-line C. The
+ * returned pointer itself stays valid indefinitely because buckets are immortal
+ * (every grow copies all bucket pointers forward; buckets are never freed). */
 static struct sym_id_entry *
 get_id_serial_entry(rb_id_serial_t num)
 {
     struct sym_id_entry *entry = NULL;
 
-    GLOBAL_SYMBOLS_LOCKING(symbols) {
-        if (num && num < RUBY_ATOMIC_LOAD(symbols->next_id)) {
-            size_t idx = num / ID_ENTRY_UNIT;
-            VALUE ids = symbols->ids;
-            VALUE id_entry_list;
-            if (idx < (size_t)RARRAY_LEN(ids) && !NIL_P(id_entry_list = rb_ary_entry(ids, (long)idx))) {
-                rb_darray(struct sym_id_entry) entries = RTYPEDDATA_GET_DATA(id_entry_list);
+    if (num && num < RUBY_ATOMIC_LOAD(ruby_global_symbols.next_id)) {
+        size_t idx = num / ID_ENTRY_UNIT;
+
+        VALUE dir_obj = rbimpl_atomic_value_load(&ruby_global_symbols.ids, RBIMPL_ATOMIC_ACQUIRE);
+        struct id_entry_dir *dir = RTYPEDDATA_GET_DATA(dir_obj);
+
+        if (idx < (size_t)dir->capa) {
+            VALUE bucket = rbimpl_atomic_value_load(&dir->entries[idx], RBIMPL_ATOMIC_ACQUIRE);
+            if (bucket) {
+                rb_darray(struct sym_id_entry) entries = RTYPEDDATA_GET_DATA(bucket);
 
                 size_t pos = (size_t)(num % ID_ENTRY_UNIT);
                 RUBY_ASSERT(pos < rb_darray_size(entries));
                 entry = rb_darray_ref(entries, pos);
             }
         }
+
+        RB_GC_GUARD(dir_obj);
     }
 
     return entry;
@@ -849,6 +999,22 @@ sym_find(VALUE str)
     }
 }
 
+/* Acquire-load a symbol's id field.
+ *
+ * A dynamic symbol's id (the part carrying its serial) is assigned lazily by
+ * rb_sym2id, which performs a release store of ->id *after* set_id_entry has
+ * populated the serial->{str,sym} entry. Acquiring here pairs with that release:
+ * a thread that observes the pinned id is therefore guaranteed to also observe
+ * the entry, so the lock-free rb_id2str / rb_sym2str lookups never see a pinned
+ * id pointing at an as-yet-unwritten entry. (For an already-pinned symbol the
+ * entry was published long ago and this is just a plain load on every platform
+ * we target; ID and VALUE are both uintptr_t, so the cast is exact.) */
+static inline ID
+sym_id_load_acquire(VALUE sym)
+{
+    return (ID)rbimpl_atomic_value_load((VALUE *)&RSYMBOL(sym)->id, RBIMPL_ATOMIC_ACQUIRE);
+}
+
 static ID
 lookup_str_id(VALUE str)
 {
@@ -862,7 +1028,7 @@ lookup_str_id(VALUE str)
         return STATIC_SYM2ID(sym);
     }
     else if (DYNAMIC_SYM_P(sym)) {
-        ID id = RSYMBOL(sym)->id;
+        ID id = sym_id_load_acquire(sym);
         if (id & ~ID_SCOPE_MASK) return id;
     }
     else {
@@ -978,6 +1144,19 @@ rb_sym2id(VALUE sym)
         id = STATIC_SYM2ID(sym);
     }
     else if (DYNAMIC_SYM_P(sym)) {
+        /* Fast path: the symbol is already pinned (has a serial in ->id).
+         * This is by far the common case, and it needs no lock. The
+         * acquire-load pairs with the release store in the slow path below
+         * (and in any concurrent first-pin), so once we observe a serial the
+         * matching set_id_entry is fully visible to us. */
+        id = sym_id_load_acquire(sym);
+        if (LIKELY(id & ~ID_SCOPE_MASK)) {
+            return id;
+        }
+
+        /* Slow path: first pin. set_id_entry is single-writer, so we take the
+         * lock and re-check ->id inside it in case another thread pinned the
+         * symbol while we were waiting (double-checked locking). */
         GLOBAL_SYMBOLS_LOCKING(symbols) {
             RUBY_ASSERT(!rb_objspace_garbage_object_p(sym));
             id = RSYMBOL(sym)->id;
@@ -985,11 +1164,24 @@ rb_sym2id(VALUE sym)
             if (UNLIKELY(!(id & ~ID_SCOPE_MASK))) {
                 VALUE fstr = RSYMBOL(sym)->fstr;
                 ID num = next_id_base();
+                id |= num;
 
-                RSYMBOL(sym)->id = id |= num;
-                /* make it permanent object */
-
+                /* Populate the serial->{str,sym} entry *before* publishing the
+                 * pinned id below. The publish is a release store paired with the
+                 * acquire in sym_id_load_acquire (and the VM-lock acquire on the
+                 * ->id read above), so a lock-free reader that observes the pinned
+                 * id is guaranteed to see this entry. Order matters: a reader
+                 * reaching get_id_serial_entry can only have a dynamic symbol's
+                 * serial by way of its ->id, so the entry must exist first. */
                 set_id_entry(symbols, rb_id_to_serial(num), fstr, sym);
+
+                /* Publish the now-pinned id (this is what "makes it a permanent
+                 * object"). ->id is an ID (uintptr_t serial | scope bits), not an
+                 * object reference, so no write barrier is involved: this is a
+                 * plain pointer-width atomic store whose only job is the RELEASE
+                 * ordering that pairs with sym_id_load_acquire. The (VALUE) casts
+                 * are width casts (ID and VALUE are both uintptr_t). */
+                rbimpl_atomic_value_store((VALUE *)&RSYMBOL(sym)->id, (VALUE)id, RBIMPL_ATOMIC_RELEASE);
             }
         }
     }
@@ -1170,8 +1362,9 @@ rb_check_id(volatile VALUE *namep)
         return STATIC_SYM2ID(name);
     }
     else if (DYNAMIC_SYM_P(name)) {
-        if (SYMBOL_PINNED_P(name)) {
-            return RSYMBOL(name)->id;
+        ID id = sym_id_load_acquire(name);
+        if (id & ~ID_SCOPE_MASK) { /* pinned: serial assigned */
+            return id;
         }
         else {
             *namep = RSYMBOL(name)->fstr;
@@ -1201,8 +1394,9 @@ rb_get_symbol_id(VALUE name)
         return STATIC_SYM2ID(name);
     }
     else if (DYNAMIC_SYM_P(name)) {
-        if (SYMBOL_PINNED_P(name)) {
-            return RSYMBOL(name)->id;
+        ID id = sym_id_load_acquire(name);
+        if (id & ~ID_SCOPE_MASK) { /* pinned: serial assigned */
+            return id;
         }
         else {
             return 0;
