@@ -636,6 +636,11 @@ typedef struct rb_objspace {
     struct {
         rb_darray(struct heap_page *) sorted;
 
+        uintptr_t *frames;
+        size_t frames_capacity;
+        size_t frames_count;
+        size_t frames_tombstones;
+
         size_t allocated_pages;
         size_t freed_pages;
         uintptr_t range[2];
@@ -1966,6 +1971,119 @@ calloc1(size_t n)
     return calloc(1, n);
 }
 
+#define PAGE_FRAME_EMPTY        ((uintptr_t)0)
+#define PAGE_FRAME_TOMBSTONE    UINTPTR_MAX
+#define PAGE_FRAME_MIN_CAPACITY 64
+
+static inline uintptr_t
+page_frame_of(struct heap_page_body *body)
+{
+    return (uintptr_t)body >> HEAP_PAGE_ALIGN_LOG;
+}
+
+static inline size_t
+page_frames_index(uintptr_t frame, size_t mask)
+{
+    uint64_t h = (uint64_t)frame * UINT64_C(0x9E3779B97F4A7C15);
+    h ^= h >> 32;
+    return (size_t)h & mask;
+}
+
+static inline bool
+page_frames_member_p(rb_objspace_t *objspace, uintptr_t addr)
+{
+    const uintptr_t *frames = objspace->heap_pages.frames;
+    const size_t mask = objspace->heap_pages.frames_capacity - 1;
+    const uintptr_t frame = addr >> HEAP_PAGE_ALIGN_LOG;
+
+    for (size_t idx = page_frames_index(frame, mask); ; idx = (idx + 1) & mask) {
+        uintptr_t key = frames[idx];
+        if (key == frame) return true;
+        if (key == PAGE_FRAME_EMPTY) return false;
+    }
+}
+
+static void
+page_frames_rebuild(rb_objspace_t *objspace, size_t new_capacity)
+{
+    GC_ASSERT((new_capacity & (new_capacity - 1)) == 0);
+    GC_ASSERT(new_capacity >= PAGE_FRAME_MIN_CAPACITY);
+    GC_ASSERT(objspace->heap_pages.frames_count * 2 < new_capacity);
+
+    uintptr_t *frames = calloc1(new_capacity * sizeof(uintptr_t));
+    if (frames == NULL) rb_memerror();
+
+    size_t mask = new_capacity - 1;
+    uintptr_t *old_frames = objspace->heap_pages.frames;
+    if (old_frames != NULL) {
+        for (size_t i = 0; i < objspace->heap_pages.frames_capacity; i++) {
+            uintptr_t frame = old_frames[i];
+            if (frame == PAGE_FRAME_EMPTY || frame == PAGE_FRAME_TOMBSTONE) continue;
+
+            size_t idx = page_frames_index(frame, mask);
+            while (frames[idx] != PAGE_FRAME_EMPTY) idx = (idx + 1) & mask;
+            frames[idx] = frame;
+        }
+    }
+
+    objspace->heap_pages.frames = frames;
+    objspace->heap_pages.frames_capacity = new_capacity;
+    objspace->heap_pages.frames_tombstones = 0;
+    free(old_frames);
+}
+
+static void
+page_frames_insert(rb_objspace_t *objspace, struct heap_page_body *body)
+{
+    uintptr_t frame = page_frame_of(body);
+
+    if (RB_UNLIKELY(frame == PAGE_FRAME_EMPTY || frame == PAGE_FRAME_TOMBSTONE)) {
+        rb_bug("page_frames_insert: page body %p collides with a frame sentinel", (void *)body);
+    }
+    GC_ASSERT(!page_frames_member_p(objspace, (uintptr_t)body));
+
+    size_t occupied = objspace->heap_pages.frames_count + objspace->heap_pages.frames_tombstones;
+    if (RB_UNLIKELY((occupied + 1) * 2 > objspace->heap_pages.frames_capacity)) {
+        size_t new_capacity = objspace->heap_pages.frames_capacity;
+        while ((objspace->heap_pages.frames_count + 1) * 2 >= new_capacity) {
+            new_capacity *= 2;
+        }
+        page_frames_rebuild(objspace, new_capacity);
+    }
+
+    uintptr_t *frames = objspace->heap_pages.frames;
+    size_t mask = objspace->heap_pages.frames_capacity - 1;
+    size_t idx = page_frames_index(frame, mask);
+    while (frames[idx] != PAGE_FRAME_EMPTY && frames[idx] != PAGE_FRAME_TOMBSTONE) {
+        GC_ASSERT(frames[idx] != frame);
+        idx = (idx + 1) & mask;
+    }
+    if (frames[idx] == PAGE_FRAME_TOMBSTONE) objspace->heap_pages.frames_tombstones--;
+    frames[idx] = frame;
+    objspace->heap_pages.frames_count++;
+}
+
+static void
+page_frames_remove(rb_objspace_t *objspace, struct heap_page_body *body)
+{
+    uintptr_t frame = page_frame_of(body);
+    uintptr_t *frames = objspace->heap_pages.frames;
+    size_t mask = objspace->heap_pages.frames_capacity - 1;
+
+    for (size_t idx = page_frames_index(frame, mask); ; idx = (idx + 1) & mask) {
+        uintptr_t key = frames[idx];
+        if (key == frame) {
+            frames[idx] = PAGE_FRAME_TOMBSTONE;
+            objspace->heap_pages.frames_count--;
+            objspace->heap_pages.frames_tombstones++;
+            return;
+        }
+        if (key == PAGE_FRAME_EMPTY) {
+            rb_bug("page_frames_remove: page body %p is not in the frame table", (void *)body);
+        }
+    }
+}
+
 void
 rb_gc_impl_set_event_hook(void *objspace_ptr, const rb_event_flag_t event)
 {
@@ -2249,6 +2367,7 @@ heap_page_free(rb_objspace_t *objspace, struct heap_page *page)
 {
     global_page_index_remove(page);
     objspace->heap_pages.freed_pages++;
+    page_frames_remove(objspace, page->body);
     heap_page_body_free(page->body);
     free(page);
 }
@@ -2541,6 +2660,7 @@ heap_page_allocate(rb_objspace_t *objspace)
     page->body = page_body;
     page_body->header.page = page;
     page->objspace = objspace;
+    page_frames_insert(objspace, page_body);
 
     objspace->heap_pages.allocated_pages++;
 
@@ -3189,9 +3309,9 @@ ptr_in_page_body_p(const void *ptr, const void *memb)
     }
 }
 
-PUREFUNC(static inline struct heap_page *heap_page_for_ptr(rb_objspace_t *objspace, uintptr_t ptr);)
-static inline struct heap_page *
-heap_page_for_ptr(rb_objspace_t *objspace, uintptr_t ptr)
+#if RGENGC_CHECK_MODE
+static struct heap_page *
+heap_page_for_ptr_bsearch(rb_objspace_t *objspace, uintptr_t ptr)
 {
     struct heap_page **res;
 
@@ -3210,6 +3330,27 @@ heap_page_for_ptr(rb_objspace_t *objspace, uintptr_t ptr)
     else {
         return NULL;
     }
+}
+#endif
+
+PUREFUNC(static inline struct heap_page *heap_page_for_ptr(rb_objspace_t *objspace, uintptr_t ptr);)
+static inline struct heap_page *
+heap_page_for_ptr(rb_objspace_t *objspace, uintptr_t ptr)
+{
+    struct heap_page *page = NULL;
+
+    if (ptr >= (uintptr_t)heap_pages_lomem &&
+            ptr <= (uintptr_t)heap_pages_himem &&
+            page_frames_member_p(objspace, ptr)) {
+        page = GET_HEAP_PAGE(ptr);
+        GC_ASSERT(page->body == GET_PAGE_BODY(ptr));
+    }
+
+#if RGENGC_CHECK_MODE
+    GC_ASSERT(page == heap_page_for_ptr_bsearch(objspace, ptr));
+#endif
+
+    return page;
 }
 
 PUREFUNC(static inline bool is_pointer_to_heap(rb_objspace_t *objspace, const void *ptr);)
@@ -6484,9 +6625,20 @@ gc_verify_internal_consistency_(rb_objspace_t *objspace, bool world_stopped)
     data.world_stopped = world_stopped;
     gc_report(5, objspace, "gc_verify_internal_consistency: start\n");
 
+    if (objspace->heap_pages.frames_count != (size_t)rb_darray_size(objspace->heap_pages.sorted)) {
+        rb_bug("gc_verify_internal_consistency: frame table has %"PRIuSIZE" entries "
+               "but %"PRIuSIZE" heap pages exist",
+               objspace->heap_pages.frames_count, (size_t)rb_darray_size(objspace->heap_pages.sorted));
+    }
+
     /* check relations */
     for (size_t i = 0; i < rb_darray_size(objspace->heap_pages.sorted); i++) {
         struct heap_page *page = rb_darray_get(objspace->heap_pages.sorted, i);
+
+        if (!page_frames_member_p(objspace, (uintptr_t)page->body)) {
+            rb_bug("gc_verify_internal_consistency: page %p is missing from the frame table",
+                   (void *)page->body);
+        }
         short slot_size = page->slot_size;
 
         uintptr_t start = (uintptr_t)page->start;
@@ -9157,6 +9309,10 @@ objspace_absorb(rb_objspace_t *dst, rb_objspace_t *src)
                 else hi = mid;
             }
             rb_darray_insert_without_gc(&objspace->heap_pages.sorted, hi, page);
+
+            /* The frame table is per-objspace, so an inherited page moves tables too. */
+            page_frames_remove(src, page->body);
+            page_frames_insert(dst, page->body);
 
             if (heap_pages_lomem == 0 || heap_pages_lomem > start) heap_pages_lomem = start;
             if (heap_pages_himem < end) heap_pages_himem = end;
@@ -12126,6 +12282,11 @@ rb_gc_impl_objspace_free(void *objspace_ptr)
         heap_page_free(objspace, rb_darray_get(objspace->heap_pages.sorted, i));
     }
     rb_darray_free_without_gc(objspace->heap_pages.sorted);
+    GC_ASSERT(objspace->heap_pages.frames_count == 0);
+    free(objspace->heap_pages.frames);
+    objspace->heap_pages.frames = NULL;
+    objspace->heap_pages.frames_capacity = 0;
+    objspace->heap_pages.frames_tombstones = 0;
     heap_pages_lomem = 0;
     heap_pages_himem = 0;
 
@@ -12318,6 +12479,7 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
     }
 
     rb_darray_make_without_gc(&objspace->heap_pages.sorted, 0);
+    page_frames_rebuild(objspace, PAGE_FRAME_MIN_CAPACITY);
     rb_darray_make_without_gc(&objspace->weak_references, 0);
 
 #if RGENGC_ESTIMATE_OLDMALLOC
