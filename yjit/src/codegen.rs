@@ -9366,7 +9366,10 @@ fn gen_send_general(
             }
             VM_METHOD_TYPE_ALIAS => {
                 // Retrieve the aliased method and re-enter the switch
-                cme = unsafe { rb_aliased_callable_method_entry(cme) };
+                cme = unsafe { rb_aliased_callable_method_entry(cme, comptime_recv_klass) };
+                if cme.is_null() {
+                    return None;
+                }
                 continue;
             }
             // Send family of methods, e.g. call/apply

@@ -263,7 +263,7 @@ vm_call0_body(rb_execution_context_t *ec, struct rb_calling_info *calling, const
       case VM_METHOD_TYPE_ALIAS:
         {
             const rb_callable_method_entry_t *cme = vm_cc_cme(cc);
-            const rb_callable_method_entry_t *orig_cme = aliased_callable_method_entry(cme);
+            const rb_callable_method_entry_t *orig_cme = aliased_callable_method_entry(cme, CLASS_OF(calling->recv));
 
             if (cme == orig_cme) rb_bug("same!!");
 

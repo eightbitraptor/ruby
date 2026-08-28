@@ -4229,7 +4229,7 @@ rb_find_defined_class_by_owner(VALUE current_class, VALUE target_owner)
 }
 
 static const rb_callable_method_entry_t *
-aliased_callable_method_entry(const rb_callable_method_entry_t *me)
+aliased_callable_method_entry(const rb_callable_method_entry_t *me, VALUE recv_klass)
 {
     const rb_method_entry_t *orig_me = me->def->body.alias.original_me;
     const rb_callable_method_entry_t *cme;
@@ -4237,6 +4237,25 @@ aliased_callable_method_entry(const rb_callable_method_entry_t *me)
     if (orig_me->defined_class == 0) {
         VALUE defined_class = rb_find_defined_class_by_owner(me->defined_class, orig_me->owner);
         VM_ASSERT_TYPE(orig_me->owner, T_MODULE);
+
+        if (defined_class == me->defined_class) {
+            VALUE cur_owner = RB_TYPE_P(me->defined_class, T_ICLASS) ?
+                RBASIC_CLASS(me->defined_class) : me->defined_class;
+
+            if (cur_owner != orig_me->owner) {
+                if (NIL_P(recv_klass)) return NULL;
+                for (VALUE klass = recv_klass;
+                     klass && klass != me->defined_class;
+                     klass = RCLASS_SUPER(klass)) {
+                    VALUE owner = RB_TYPE_P(klass, T_ICLASS) ? RBASIC_CLASS(klass) : klass;
+                    if (owner == orig_me->owner) {
+                        defined_class = klass;
+                        break;
+                    }
+                }
+            }
+        }
+
         cme = rb_method_entry_complement_defined_class(orig_me, me->called_id, defined_class);
 
         if (me->def->reference_count == 1) {
@@ -4257,9 +4276,9 @@ aliased_callable_method_entry(const rb_callable_method_entry_t *me)
 }
 
 const rb_callable_method_entry_t *
-rb_aliased_callable_method_entry(const rb_callable_method_entry_t *me)
+rb_aliased_callable_method_entry(const rb_callable_method_entry_t *me, VALUE recv_klass)
 {
-    return aliased_callable_method_entry(me);
+    return aliased_callable_method_entry(me, recv_klass);
 }
 
 static VALUE
@@ -4268,7 +4287,7 @@ vm_call_alias(rb_execution_context_t *ec, rb_control_frame_t *cfp, struct rb_cal
     calling->cc = &VM_CC_ON_STACK(Qundef,
                                   vm_call_general,
                                   {{0}},
-                                  aliased_callable_method_entry(vm_cc_cme(calling->cc)));
+                                  aliased_callable_method_entry(vm_cc_cme(calling->cc), CLASS_OF(calling->recv)));
 
     return vm_call_method_each_type(ec, cfp, calling);
 }

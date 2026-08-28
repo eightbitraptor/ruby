@@ -141,6 +141,7 @@ extern "C" {
     pub fn rb_vm_setinstancevariable(iseq: IseqPtr, obj: VALUE, id: ID, val: VALUE, ic: IVC);
     pub fn rb_aliased_callable_method_entry(
         me: *const rb_callable_method_entry_t,
+        recv_klass: VALUE,
     ) -> *const rb_callable_method_entry_t;
     pub fn rb_vm_getclassvariable(iseq: IseqPtr, cfp: CfpPtr, id: ID, ic: ICVARC) -> VALUE;
     pub fn rb_vm_setclassvariable(

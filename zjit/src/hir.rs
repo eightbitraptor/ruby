@@ -4536,8 +4536,14 @@ impl Function {
                         }
                         let mut def_type = unsafe { get_cme_def_type(cme) };
                         while def_type == VM_METHOD_TYPE_ALIAS {
-                            cme = unsafe { rb_aliased_callable_method_entry(cme) };
+                            cme = unsafe { rb_aliased_callable_method_entry(cme, klass) };
+                            if cme.is_null() { break; }
                             def_type = unsafe { get_cme_def_type(cme) };
+                        }
+                        if cme.is_null() {
+                            self.set_dynamic_send_reason(insn_id, SendNotOptimizedMethodType(MethodType::Null));
+                            self.push_insn_id(block, insn_id);
+                            continue;
                         }
 
                         // Check if we can optimize `foo(&block)` where block is nil to a send without block.
@@ -5181,8 +5187,14 @@ impl Function {
 
                         let mut def_type = unsafe { get_cme_def_type(super_cme) };
                         while def_type == VM_METHOD_TYPE_ALIAS {
-                            super_cme = unsafe { rb_aliased_callable_method_entry(super_cme) };
+                            super_cme = unsafe { rb_aliased_callable_method_entry(super_cme, Qnil) };
+                            if super_cme.is_null() { break; }
                             def_type = unsafe { get_cme_def_type(super_cme) };
+                        }
+                        if super_cme.is_null() {
+                            self.push_insn_id(block, insn_id);
+                            self.set_dynamic_send_reason(insn_id, SuperTargetNotFound);
+                            continue;
                         }
 
                         let args = match resolved.insn(self) {

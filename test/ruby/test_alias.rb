@@ -341,4 +341,37 @@ class TestAlias < Test::Unit::TestCase
       end
     end
   end
+
+  def test_alias_of_prepended_module_method_in_module
+    wrapper = Module.new do
+      def foo = "wrapper+" + super
+    end
+    target = Module.new do
+      def foo = "target+" + super
+    end
+    target.prepend wrapper
+    target.module_eval { alias old_foo foo }
+
+    base = Class.new { def foo = "base" }
+    klass = Class.new(base) { include target }
+    assert_equal "wrapper+target+base", klass.new.old_foo
+
+    other_base = Class.new { def foo = "other" }
+    other_klass = Class.new(other_base) { include target }
+    assert_equal "wrapper+target+other", other_klass.new.old_foo
+    assert_equal "wrapper+target+base", klass.new.old_foo
+  end
+
+  def test_alias_of_included_module_method_in_module
+    m0 = Module.new do
+      def foo = "m0+" + super
+    end
+    m1 = Module.new do
+      include m0
+      alias old_foo foo
+    end
+    base = Class.new { def foo = "base" }
+    klass = Class.new(base) { include m1 }
+    assert_equal "m0+base", klass.new.old_foo
+  end
 end
