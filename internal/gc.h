@@ -274,6 +274,7 @@ void rb_gc_mark_vm_stack_values(long n, const VALUE *values);
 void rb_gc_update_values(long n, VALUE *values);
 void rb_gc_mark_set_no_pin(st_table *);
 void rb_gc_update_set_refs(st_table *);
+void rb_gc_writebarrier_remember(VALUE obj);
 
 #if USE_MODULAR_GC
 const char *rb_gc_active_gc_name(void);
@@ -303,7 +304,6 @@ rb_obj_atomic_write(
     RBIMPL_CAST(rb_obj_atomic_write((VALUE)(old), (VALUE *)(slot), (VALUE)(young), __FILE__, __LINE__))
 
 int rb_ec_stack_check(struct rb_execution_context_struct *ec);
-void rb_gc_writebarrier_remember(VALUE obj);
 void rb_gc_obj_became_shareable(VALUE obj);
 bool rb_gc_multi_objspace_p(void);
 bool rb_gc_obj_foreign_p(VALUE obj);
