@@ -622,6 +622,374 @@ class TestRactor < Test::Unit::TestCase
       assert_equal 4, ports.size
     RUBY
   end
+
+  def test_incremental_marking_in_main_and_non_main_ractors
+    omit 'incremental marking gate lives in the default GC' unless GC.config[:implementation] == 'default'
+    assert_ractor(<<~'RUBY', timeout: 120)
+      def start_local_incremental_major
+        GC.stress = false
+        EnvUtil.without_gc do
+          objects = []
+          while GC.latest_gc_info(:need_major_by).nil?
+            objects.append(100.times.map { '*' })
+            GC.start(full_mark: false)
+          end
+          GC.start(full_mark: false, immediate_mark: false)
+          GC.latest_gc_info(:state)
+        end
+      end
+
+      _blocker = Ractor.new { Ractor.receive }
+
+      assert_equal :marking, start_local_incremental_major
+
+      Ractor.new { Ractor.receive }
+      assert_equal :marking, GC.latest_gc_info(:state)
+
+      GC.start
+      assert_equal :none, GC.latest_gc_info(:state)
+      GC.verify_internal_consistency
+
+      entered, first_change, final = Ractor.new do
+        child_entered = start_local_incremental_major
+        child_first_change = nil
+        child_final = :marking
+        200_000.times do
+          Object.new
+          state = GC.latest_gc_info(:state)
+          child_first_change ||= state unless state == :marking
+          child_final = state
+          break if state == :none
+        end
+        [child_entered, child_first_change, child_final]
+      end.value
+      assert_equal :marking, entered
+      assert_includes [:sweeping, :none], first_change
+      assert_equal :none, final
+    RUBY
+  end
+
+  def test_global_gc_supersedes_ractor_local_incremental_mark
+    omit 'incremental marking gate lives in the default GC' unless GC.config[:implementation] == 'default'
+    assert_ractor(<<~'RUBY', timeout: 120)
+      def start_local_incremental_major
+        GC.stress = false
+        EnvUtil.without_gc do
+          objects = []
+          while GC.latest_gc_info(:need_major_by).nil?
+            objects.append(100.times.map { '*' })
+            GC.start(full_mark: false)
+          end
+          GC.start(full_mark: false, immediate_mark: false)
+          GC.latest_gc_info(:state)
+        end
+      end
+
+      child = Ractor.new do
+        weak_map = ObjectSpace::WeakMap.new
+        key = Object.new
+        weak_map[key] = :live
+        doomed = ObjectSpace::WeakMap.new
+        doomed[key] = 1
+        Ractor.main << start_local_incremental_major
+        doomed = nil
+        Ractor.receive
+        after_global = GC.latest_gc_info(:state)
+        alive = weak_map[key]
+        GC.verify_internal_consistency
+        GC.start(full_mark: false)
+        again = start_local_incremental_major
+        [after_global, alive, again]
+      end
+
+      assert_equal :marking, Ractor.receive
+      GC.start
+      child << :continue
+
+      after_global, alive, again = child.value
+      assert_equal :none, after_global
+      assert_equal :live, alive
+      assert_equal :marking, again
+    RUBY
+  end
+
+  def test_global_gc_clears_pending_major_request
+    omit 'incremental marking gate lives in the default GC' unless GC.config[:implementation] == 'default'
+    assert_ractor(<<~'RUBY', timeout: 120)
+      GC.stress = false
+      _blocker = Ractor.new { Ractor.receive }
+
+      EnvUtil.without_gc do
+        objects = []
+        while GC.latest_gc_info(:need_major_by).nil?
+          objects.append(100.times.map { '*' })
+          GC.start(full_mark: false)
+        end
+      end
+      assert_not_nil GC.latest_gc_info(:need_major_by)
+
+      GC.start
+      assert_includes [nil, :force], GC.latest_gc_info(:need_major_by)
+      assert_equal :none, GC.latest_gc_info(:state)
+      GC.verify_internal_consistency
+    RUBY
+  end
+
+  def test_fork_absorbs_mid_mark_zombie
+    omit 'incremental marking gate lives in the default GC' unless GC.config[:implementation] == 'default'
+    omit 'fork is not supported' unless Process.respond_to?(:fork)
+    assert_ractor(<<~'RUBY', timeout: 120)
+      def start_local_incremental_major
+        GC.stress = false
+        EnvUtil.without_gc do
+          objects = []
+          while GC.latest_gc_info(:need_major_by).nil?
+            objects.append(100.times.map { '*' })
+            GC.start(full_mark: false)
+          end
+          GC.start(full_mark: false, immediate_mark: false)
+          GC.latest_gc_info(:state)
+        end
+      end
+
+      r = Ractor.new do
+        Ractor.main << start_local_incremental_major
+        Ractor.receive
+      end
+      assert_equal :marking, Ractor.receive
+
+      pid = fork do
+        begin
+          r.value
+        rescue Ractor::Error
+        end
+        GC.verify_internal_consistency
+        GC.config(rgengc_allow_full_mark: false)
+        counts = [GC.stat(:count), GC.stat(:major_gc_count)]
+        400_000.times { Object.new }
+        raise "no collection ran after absorb" unless GC.stat(:count) > counts[0]
+        raise "a major collection ran with full marks disabled" unless GC.stat(:major_gc_count) == counts[1]
+        GC.verify_internal_consistency
+        exit!(0)
+      end
+      _, status = Process.wait2(pid)
+      assert_predicate status, :success?
+    RUBY
+  end
+
+  def test_first_ractor_new_settles_creator_mid_mark
+    omit 'incremental marking gate lives in the default GC' unless GC.config[:implementation] == 'default'
+    assert_ractor(<<~'RUBY', timeout: 120)
+      def start_local_incremental_major
+        GC.stress = false
+        EnvUtil.without_gc do
+          objects = []
+          while GC.latest_gc_info(:need_major_by).nil?
+            objects.append(100.times.map { '*' })
+            GC.start(full_mark: false)
+          end
+          GC.start(full_mark: false, immediate_mark: false)
+          GC.latest_gc_info(:state)
+        end
+      end
+
+      Thread.pass until Ractor.count == 1
+
+      assert_equal :marking, start_local_incremental_major
+      Ractor.new { Ractor.receive }
+      assert_equal :none, GC.latest_gc_info(:state)
+      assert_equal :marking, start_local_incremental_major
+      GC.verify_internal_consistency
+    RUBY
+  end
+
+  def test_ractor_join_absorbs_zombie_while_joiner_mid_mark
+    omit 'incremental marking gate lives in the default GC' unless GC.config[:implementation] == 'default'
+    assert_ractor(<<~'RUBY', timeout: 120)
+      def start_local_incremental_major
+        GC.stress = false
+        EnvUtil.without_gc do
+          objects = []
+          while GC.latest_gc_info(:need_major_by).nil?
+            objects.append(100.times.map { '*' })
+            GC.start(full_mark: false)
+          end
+          GC.start(full_mark: false, immediate_mark: false)
+          GC.latest_gc_info(:state)
+        end
+      end
+
+      zombie = Ractor.new { :done }
+
+      assert_equal :marking, start_local_incremental_major
+      assert_equal :done, zombie.value
+      assert_equal :none, GC.latest_gc_info(:state)
+      GC.verify_internal_consistency
+      assert_equal :marking, start_local_incremental_major
+    RUBY
+  end
+
+  def test_incremental_major_with_zombie_objspace
+    omit 'incremental marking gate lives in the default GC' unless GC.config[:implementation] == 'default'
+    assert_ractor(<<~'RUBY', timeout: 120)
+      def start_local_incremental_major
+        GC.stress = false
+        EnvUtil.without_gc do
+          objects = []
+          while GC.latest_gc_info(:need_major_by).nil?
+            objects.append(100.times.map { '*' })
+            GC.start(full_mark: false)
+          end
+          GC.start(full_mark: false, immediate_mark: false)
+          GC.latest_gc_info(:state)
+        end
+      end
+
+      zombie = Ractor.new { 1000.times { Object.new } }
+      zombie.join
+      Thread.pass until Ractor.count == 1
+
+      assert_equal :marking, start_local_incremental_major
+      200_000.times do
+        Object.new
+        break if GC.latest_gc_info(:state) == :none
+      end
+      assert_equal :none, GC.latest_gc_info(:state)
+      GC.verify_internal_consistency
+      assert_equal :marking, start_local_incremental_major
+    RUBY
+  end
+
+  def test_concurrent_incremental_marks_with_shareable_exchange
+    omit 'incremental marking gate lives in the default GC' unless GC.config[:implementation] == 'default'
+    assert_ractor(<<~'RUBY', timeout: 120)
+      def start_local_incremental_major
+        GC.stress = false
+        EnvUtil.without_gc do
+          objects = []
+          while GC.latest_gc_info(:need_major_by).nil?
+            objects.append(100.times.map { '*' })
+            GC.start(full_mark: false)
+          end
+          GC.start(full_mark: false, immediate_mark: false)
+          GC.latest_gc_info(:state)
+        end
+      end
+
+      worker = Ractor.new do
+        results = []
+        3.times do
+          entered = start_local_incremental_major
+          Ractor.main << :ready
+          inbound = Ractor.receive
+          Ractor.main << Ractor.make_shareable([inbound])
+          count_before = GC.stat(:count)
+          400_000.times do
+            Object.new
+            break if GC.latest_gc_info(:state) == :none
+          end
+          results << [entered, GC.latest_gc_info(:state), GC.stat(:count) - count_before]
+        end
+        GC.verify_internal_consistency
+        results
+      end
+
+      main_results = []
+      3.times do
+        entered = start_local_incremental_major
+        assert_equal :ready, Ractor.receive
+        worker << Ractor.make_shareable([:payload])
+        Ractor.receive
+        count_before = GC.stat(:count)
+        400_000.times do
+          Object.new
+          break if GC.latest_gc_info(:state) == :none
+        end
+        main_results << [entered, GC.latest_gc_info(:state), GC.stat(:count) - count_before]
+      end
+
+      (worker.value + main_results).each do |entered, final, extra_cycles|
+        assert_equal :marking, entered
+        assert_equal :none, final
+        assert_equal 0, extra_cycles
+      end
+      GC.verify_internal_consistency
+    RUBY
+  end
+
+  def test_writebarrier_foreign_objects_during_incremental_mark
+    omit 'incremental marking gate lives in the default GC' unless GC.config[:implementation] == 'default'
+    assert_ractor(<<~'RUBY', require: '-test-/gc/writebarrier', timeout: 120)
+      def start_local_incremental_major
+        GC.stress = false
+        EnvUtil.without_gc do
+          objects = []
+          while GC.latest_gc_info(:need_major_by).nil?
+            objects.append(100.times.map { '*' })
+            GC.start(full_mark: false)
+          end
+          GC.start(full_mark: false, immediate_mark: false)
+          GC.latest_gc_info(:state)
+        end
+      end
+
+      def finish_incremental_major
+        400_000.times do
+          Object.new
+          break if GC.latest_gc_info(:state) == :none
+        end
+        GC.latest_gc_info(:state)
+      end
+
+      box = Bug::GC::WriteBarrier::Box.new
+
+      Ractor.make_shareable(box)
+
+      worker = Ractor.new(box) do |box|
+        results = []
+        2.times do
+          entered = start_local_incremental_major
+          Ractor.main << :ready
+          inbound = Ractor.receive
+
+          retained = Array.new(200) { [] }
+          200.times { |i| retained[i] << inbound }
+          retained = nil
+
+          mine = Object.new
+          box.store(mine)
+          mine_id = mine.object_id
+          mine = nil
+          Bug::GC::WriteBarrier.remember(box)
+
+          Ractor.main << Ractor.make_shareable([:reply, mine_id])
+          results << [entered, finish_incremental_major, box.child.object_id == mine_id]
+        end
+        GC.verify_internal_consistency
+        results
+      end
+
+      main_retained = Array.new(200) { [] }
+      2.times do
+        entered = start_local_incremental_major
+        assert_equal :ready, Ractor.receive
+        worker << Ractor.make_shareable([:payload])
+        reply = Ractor.receive
+        200.times { |i| main_retained[i] << reply }
+        Bug::GC::WriteBarrier.remember(reply)
+        assert_equal :marking, entered
+        assert_equal :none, finish_incremental_major
+      end
+
+      worker.value.each do |entered, final, child_kept|
+        assert_equal :marking, entered
+        assert_equal :none, final
+        assert child_kept
+      end
+      GC.verify_internal_consistency
+    RUBY
+  end
+
   def test_port_receive_timeout
     assert_separately([], __FILE__, __LINE__, <<-'RUBY')
       Warning[:experimental] = false
