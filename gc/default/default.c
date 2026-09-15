@@ -6522,6 +6522,8 @@ check_color_i(const VALUE child, void *ptr)
     struct verify_internal_consistency_struct *data = (struct verify_internal_consistency_struct *)ptr;
     const VALUE parent = data->parent;
 
+    if (GET_HEAP_OBJSPACE(child) != data->objspace) return;
+
     if (!RVALUE_WB_UNPROTECTED(data->objspace, parent) && RVALUE_WHITE_P(data->objspace, child)) {
         fprintf(stderr, "verify_internal_consistency_reachable_i: WB miss (B->W) - %s -> %s\n",
                 rb_obj_info(parent), rb_obj_info(child));
