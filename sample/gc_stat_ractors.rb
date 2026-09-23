@@ -23,3 +23,8 @@ p({
   marking_time_ms: GC.stat(:marking_time, scope: :ractor),
   sweeping_time_ms: GC.stat(:sweeping_time, scope: :ractor)
 })
+
+puts "process-wide GC statistics:"
+p GC.stat(scope: :process)
+puts "process marking time (ms): #{GC.stat(:marking_time, scope: :process)}"
+puts "process sweeping time (ms): #{GC.stat(:sweeping_time, scope: :process)}"
