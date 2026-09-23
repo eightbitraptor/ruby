@@ -605,6 +605,14 @@ struct tdata_unsafe_free_chunk {
 STATIC_ASSERT(tdata_unsafe_free_bits_cover_chunk,
               TDATA_UNSAFE_FREE_CHUNK_CAPA <= 32);
 
+struct gc_process_stat_snapshot {
+    uint64_t count;
+    uint64_t minor_gc_count;
+    uint64_t major_gc_count;
+    uint64_t marking_time_ns;
+    uint64_t sweeping_time_ns;
+};
+
 typedef struct rb_objspace {
     struct {
         struct gc_malloc_bytes counters;
@@ -804,6 +812,12 @@ typedef struct rb_objspace {
     int fork_vm_lock_lev;
 
     struct rb_gc_vm_context vm_context;
+
+    /* Process-wide GC statistics publication. */
+    struct {
+        rb_nativethread_lock_t lock;
+        struct gc_process_stat_snapshot published;
+    } process_stat;
 } rb_objspace_t;
 
 /* The one VM-global GC structure; for now it only holds the page pool.  Page bodies are
@@ -880,6 +894,9 @@ typedef struct rb_global_objspace {
     struct tdata_unsafe_free_chunk *tdata_unsafe_free_published; /* atomic */
     struct tdata_unsafe_free_chunk *tdata_unsafe_free_cache; /* atomic */
     size_t tdata_unsafe_free_cache_len; /* atomic */
+
+    /* Archive of destroyed objspaces' final statistics, added once on absorption. */
+    struct gc_process_stat_snapshot process_stat_archive;
 } rb_global_objspace_t;
 
 static rb_global_objspace_t rb_global_objspace_instance;
@@ -2128,6 +2145,39 @@ rb_gc_impl_get_measure_total_time(void *objspace_ptr)
     rb_objspace_t *objspace = objspace_ptr;
 
     return objspace->flags.measure_gc;
+}
+
+static void
+gc_process_stat_capture(const rb_objspace_t *objspace,
+                        struct gc_process_stat_snapshot *out)
+{
+    out->count = (uint64_t)objspace->profile.count;
+    out->minor_gc_count = (uint64_t)objspace->profile.minor_gc_count;
+    out->major_gc_count = (uint64_t)objspace->profile.major_gc_count;
+    out->marking_time_ns = objspace->profile.marking_time_ns;
+    out->sweeping_time_ns = objspace->profile.sweeping_time_ns;
+}
+
+static void
+gc_process_stat_publish(rb_objspace_t *objspace)
+{
+    struct gc_process_stat_snapshot snap;
+    gc_process_stat_capture(objspace, &snap);
+    GC_ASSERT(snap.count == snap.minor_gc_count + snap.major_gc_count);
+    rb_native_mutex_lock(&objspace->process_stat.lock);
+    objspace->process_stat.published = snap;
+    rb_native_mutex_unlock(&objspace->process_stat.lock);
+}
+
+static void
+gc_process_stat_add(struct gc_process_stat_snapshot *dst,
+                    const struct gc_process_stat_snapshot *src)
+{
+    dst->count += src->count;
+    dst->minor_gc_count += src->minor_gc_count;
+    dst->major_gc_count += src->major_gc_count;
+    dst->marking_time_ns += src->marking_time_ns;
+    dst->sweeping_time_ns += src->sweeping_time_ns;
 }
 
 /* garbage objects will be collected soon. */
@@ -9056,6 +9106,13 @@ gc_clock_end(struct timespec *ts)
     return 0;
 }
 
+static void
+gc_process_stat_after_fork_i(void *objspace_ptr, void *data)
+{
+    rb_objspace_t *objspace = objspace_ptr;
+    rb_native_mutex_initialize(&objspace->process_stat.lock);
+}
+
 static inline bool
 gc_local_gc_holds_vm_lock(void)
 {
@@ -9178,6 +9235,7 @@ gc_exit(rb_objspace_t *objspace, enum gc_enter_event event, unsigned int *lock_l
     RUBY_DEBUG_LOG("%s (%s)", gc_enter_event_cstr(event), gc_current_status(objspace));
     gc_report(1, objspace, "gc_exit: %s [%s]\n", gc_enter_event_cstr(event), gc_current_status(objspace));
     during_gc = FALSE;
+    gc_process_stat_publish(objspace);
 
     switch (event) {
       case gc_enter_event_global:
@@ -9776,7 +9834,10 @@ gc_start_global(rb_objspace_t *driver, unsigned int reason, bool compact, bool a
     for (size_t i = 0; i < global_objspace->global_gc.n_objspaces; i++) {
         rb_objspace_t *objspace = global_objspace->global_gc.objspaces[i];
         objspace->flags.during_global_gc = FALSE;
-        if (objspace != driver) during_gc = FALSE;
+        if (objspace != driver) {
+            during_gc = FALSE;
+            gc_process_stat_publish(objspace);
+        }
     }
 
     /* The unified mark re-established the reachability of absorbed shareable objects, so a
@@ -10012,6 +10073,13 @@ objspace_absorb(rb_objspace_t *dst, rb_objspace_t *src)
 #endif
         MALLOC_COUNTERS_UNLOCK(dst);
     }
+
+    {
+        struct gc_process_stat_snapshot final_snap;
+        gc_process_stat_capture(src, &final_snap);
+        gc_process_stat_add(&global_objspace->process_stat_archive, &final_snap);
+    }
+    rb_native_mutex_destroy(&src->process_stat.lock);
 
     /* Free the shell (as rb_gc_impl_objspace_free does). */
     free(src->profile.records);
@@ -10856,9 +10924,72 @@ ns_to_ms(uint64_t ns)
 
 static void malloc_increase_local_flush(rb_objspace_t *objspace);
 
+static void
+gc_process_stat_accumulate_i(void *objspace_ptr, void *data)
+{
+    rb_objspace_t *objspace = objspace_ptr;
+    struct gc_process_stat_snapshot *total = (struct gc_process_stat_snapshot *)data;
+    struct gc_process_stat_snapshot snap;
+    rb_native_mutex_lock(&objspace->process_stat.lock);
+    snap = objspace->process_stat.published;
+    rb_native_mutex_unlock(&objspace->process_stat.lock);
+    gc_process_stat_add(total, &snap);
+}
+
+static VALUE
+gc_process_stat(VALUE hash_or_sym)
+{
+    VALUE hash = Qnil, key = Qnil;
+
+    if (RB_TYPE_P(hash_or_sym, T_HASH)) {
+        hash = hash_or_sym;
+    }
+    else if (SYMBOL_P(hash_or_sym)) {
+        key = hash_or_sym;
+    }
+    else {
+        rb_bug("non-hash or symbol given");
+    }
+
+    struct gc_process_stat_snapshot total;
+    unsigned int lev = RB_GC_VM_LOCK();
+    total = global_objspace->process_stat_archive;
+    rb_gc_vm_each_objspace(gc_process_stat_accumulate_i, &total);
+    RB_GC_VM_UNLOCK(lev);
+
+    /* Convert to Ruby values after all collector locks are released. */
+    uint64_t time_ns = total.marking_time_ns + total.sweeping_time_ns;
+
+#define SET64(name, attr) \
+    if (key == gc_stat_symbols[gc_stat_sym_##name]) \
+        return ULL2NUM(attr); \
+    else if (hash != Qnil) \
+        rb_hash_aset(hash, gc_stat_symbols[gc_stat_sym_##name], ULL2NUM(attr));
+
+    SET64(count, total.count);
+    SET64(time, ns_to_ms(time_ns));
+    SET64(marking_time, ns_to_ms(total.marking_time_ns));
+    SET64(sweeping_time, ns_to_ms(total.sweeping_time_ns));
+    SET64(minor_gc_count, total.minor_gc_count);
+    SET64(major_gc_count, total.major_gc_count);
+
+#undef SET64
+
+    if (!NIL_P(key)) {
+        /* Matched key should return above. */
+        return Qundef;
+    }
+
+    return hash;
+}
+
 VALUE
 rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
 {
+    if (objspace_ptr == NULL) {
+        return gc_process_stat(hash_or_sym);
+    }
+
     rb_objspace_t *objspace = objspace_ptr;
     VALUE hash = Qnil, key = Qnil;
 
@@ -12959,6 +13090,8 @@ rb_gc_impl_objspace_free(void *objspace_ptr)
     rb_native_mutex_destroy(&objspace->malloc_counters.lock);
 #endif
 
+    rb_native_mutex_destroy(&objspace->process_stat.lock);
+
     free(objspace);
 }
 
@@ -13009,6 +13142,10 @@ void
 rb_gc_impl_after_fork(void *objspace_ptr, rb_pid_t pid)
 {
     rb_objspace_t *objspace = objspace_ptr;
+
+    if (pid == 0) {
+        rb_gc_vm_each_objspace(gc_process_stat_after_fork_i, NULL);
+    }
 
     RB_GC_VM_UNLOCK(objspace->fork_vm_lock_lev);
     objspace->fork_vm_lock_lev = 0;
@@ -13081,6 +13218,9 @@ rb_gc_impl_objspace_alloc(void)
     global_objspace_init();
 
     rb_objspace_t *objspace = calloc1(sizeof(rb_objspace_t));
+    if (objspace) {
+        rb_native_mutex_initialize(&objspace->process_stat.lock);
+    }
 
     return objspace;
 }
@@ -13152,6 +13292,8 @@ rb_gc_impl_objspace_init(void *objspace_ptr)
     objspace->profile.invoke_wall_time = rb_hrtime_now();
     objspace->profile.max_records = GC_PROFILE_RECORD_DEFAULT_MAX_RECORDS;
     finalizer_table = st_init_numtable();
+
+    gc_process_stat_publish(objspace);
 }
 
 void

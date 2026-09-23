@@ -1825,6 +1825,10 @@ rb_gc_impl_latest_gc_info(void *objspace_ptr, VALUE key)
 VALUE
 rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
 {
+    if (objspace_ptr == NULL) {
+        rb_notimplement();
+    }
+
     rb_wbcheck_objspace_t *objspace = (rb_wbcheck_objspace_t *)objspace_ptr;
     GC_ASSERT(objspace);
 

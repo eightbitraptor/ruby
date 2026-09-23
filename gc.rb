@@ -118,6 +118,8 @@ module GC
   #
   # Returns the total number of times garbage collection has occurred:
   #
+  # With the default collector, counts the current Ractor's collections.
+  #
   #   GC.count # => 385
   #   GC.start
   #   GC.count # => 386
@@ -127,9 +129,9 @@ module GC
   end
 
   # call-seq:
-  #   GC.stat -> new_hash
-  #   GC.stat(key) -> value
-  #   GC.stat(hash) -> hash
+  #   GC.stat(scope: :ractor) -> new_hash
+  #   GC.stat(key, scope: :ractor) -> value
+  #   GC.stat(hash, scope: :ractor) -> hash
   #
   # This method is implementation-specific to CRuby.
   #
@@ -137,7 +139,11 @@ module GC
   # The particular statistics are implementation-specific
   # and may change in the future without notice.
   #
-  # With no argument given,
+  # With <tt>scope: :ractor</tt> (the default), returns statistics for the
+  # current Ractor's object space. With <tt>scope: :process</tt>, returns
+  # cumulative collection counts and measured GC time across all Ractors.
+  #
+  # With no positional argument or +nil+ given,
   # returns a hash containing the \GC statistics:
   #
   #   GC.stat
@@ -257,8 +263,36 @@ module GC
   # - +:heap_marked_slots+:
   #   The total number of objects marked in the last \GC.
   #
-  def self.stat hash_or_key = nil
-    Primitive.gc_stat hash_or_key
+  # === Process scope
+  #
+  # With <tt>scope: :process</tt>, the default collector reports cumulative
+  # collection counts and measured CPU time across all Ractors, retaining
+  # history from destroyed object spaces:
+  #
+  #   GC.stat(scope: :process)
+  #   # => {count: 42, minor_gc_count: 32, major_gc_count: 10,
+  #   #     time: 3, marking_time: 2, sweeping_time: 1}
+  #
+  # +:time+ may exceed +:marking_time+ plus +:sweeping_time+ by one millisecond
+  # because raw nanoseconds are summed before conversion. Times measure collector
+  # CPU work, not wall-clock pauses.
+  #
+  # Reads combine object-space publications without requesting a stop-the-world
+  # barrier. GC.measure_total_time controls future timing accumulation. Profiler
+  # controls do not affect these totals. A forked child inherits its parent's
+  # totals. MMTk and wbcheck raise NotImplementedError for this scope.
+  #
+  # Unknown scopes and unavailable keys raise ArgumentError.
+  #
+  def self.stat hash_or_key = nil, scope: :ractor
+    case scope
+    when :ractor
+      Primitive.gc_stat hash_or_key, false
+    when :process
+      Primitive.gc_stat hash_or_key, true
+    else
+      raise ArgumentError, "unknown scope: #{scope.inspect}"
+    end
   end
 
   # call-seq:
@@ -575,6 +609,9 @@ module GC
   #    GC.total_time -> integer
   #
   # Returns the \GC total time in nanoseconds:
+  #
+  # With the default collector, this is the current Ractor's measured GC CPU
+  # work, not wall-clock pause time.
   #
   #   GC.total_time # => 156250
   #

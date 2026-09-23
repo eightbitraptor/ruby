@@ -58,6 +58,12 @@ Note: We're only listing outstanding class updates.
 
 * GC
 
+    * `GC.stat` accepts `scope: :ractor` (the default) and `scope: :process`.
+      With the default collector, the process scope reports cumulative collection
+      counts and measured marking/sweeping CPU time across Ractors, including
+      history from destroyed object spaces, without requesting a stop-the-world
+      snapshot. Unscoped `GC.stat`, `GC.count`, and `GC.total_time` retain their
+      current-Ractor behavior.
     * Global compaction no longer counts overlapping CPU intervals in scalar GC
       timing statistics. Profiler wall-time intervals are unchanged.
 
