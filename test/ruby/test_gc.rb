@@ -1570,8 +1570,9 @@ class TestGc < Test::Unit::TestCase
     RUBY
   end
 
-  def test_stat_process_scope_is_unsupported_by_mmtk_and_wbcheck
-    omit 'process scope is supported on this collector' unless %w[mmtk wbcheck].include?(GC.config[:implementation])
+  def test_stat_process_scope_is_unsupported_by_non_default_gc
+    omit 'skipped on default GC' if GC.config[:implementation] == 'default'
+
     assert_kind_of Hash, GC.stat
     assert_kind_of Integer, GC.stat(:count)
     assert_raise(NotImplementedError) { GC.stat(scope: :process) }
