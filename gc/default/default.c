@@ -606,6 +606,14 @@ STATIC_ASSERT(tdata_unsafe_free_bits_cover_chunk,
               TDATA_UNSAFE_FREE_CHUNK_CAPA <= 32);
 
 struct gc_process_stat_snapshot {
+    uint32_t count;
+    uint32_t minor_gc_count;
+    uint32_t major_gc_count;
+    uint64_t marking_time_ns;
+    uint64_t sweeping_time_ns;
+};
+
+struct gc_process_stat_total {
     uint64_t count;
     uint64_t minor_gc_count;
     uint64_t major_gc_count;
@@ -896,7 +904,7 @@ typedef struct rb_global_objspace {
     size_t tdata_unsafe_free_cache_len; /* atomic */
 
     /* Archive of destroyed objspaces' final statistics, added once on absorption. */
-    struct gc_process_stat_snapshot process_stat_archive;
+    struct gc_process_stat_total process_stat_archive;
 } rb_global_objspace_t;
 
 static rb_global_objspace_t rb_global_objspace_instance;
@@ -2151,9 +2159,9 @@ static void
 gc_process_stat_capture(const rb_objspace_t *objspace,
                         struct gc_process_stat_snapshot *out)
 {
-    out->count = (uint64_t)objspace->profile.count;
-    out->minor_gc_count = (uint64_t)objspace->profile.minor_gc_count;
-    out->major_gc_count = (uint64_t)objspace->profile.major_gc_count;
+    out->count = (uint32_t)objspace->profile.count;
+    out->minor_gc_count = (uint32_t)objspace->profile.minor_gc_count;
+    out->major_gc_count = (uint32_t)objspace->profile.major_gc_count;
     out->marking_time_ns = objspace->profile.marking_time_ns;
     out->sweeping_time_ns = objspace->profile.sweeping_time_ns;
 }
@@ -2170,7 +2178,7 @@ gc_process_stat_publish(rb_objspace_t *objspace)
 }
 
 static void
-gc_process_stat_add(struct gc_process_stat_snapshot *dst,
+gc_process_stat_add(struct gc_process_stat_total *dst,
                     const struct gc_process_stat_snapshot *src)
 {
     dst->count += src->count;
@@ -10928,7 +10936,7 @@ static void
 gc_process_stat_accumulate_i(void *objspace_ptr, void *data)
 {
     rb_objspace_t *objspace = objspace_ptr;
-    struct gc_process_stat_snapshot *total = (struct gc_process_stat_snapshot *)data;
+    struct gc_process_stat_total *total = (struct gc_process_stat_total *)data;
     struct gc_process_stat_snapshot snap;
     rb_native_mutex_lock(&objspace->process_stat.lock);
     snap = objspace->process_stat.published;
@@ -10951,7 +10959,7 @@ gc_process_stat(VALUE hash_or_sym)
         rb_bug("non-hash or symbol given");
     }
 
-    struct gc_process_stat_snapshot total;
+    struct gc_process_stat_total total;
     unsigned int lev = RB_GC_VM_LOCK();
     total = global_objspace->process_stat_archive;
     rb_gc_vm_each_objspace(gc_process_stat_accumulate_i, &total);
