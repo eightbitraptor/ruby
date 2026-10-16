@@ -436,6 +436,11 @@ Ruby 4.0 bundled RubyGems and Bundler version 4. see the following links for det
   Integer index that fits in a `long`.  An index past the `int` range used to
   raise `RangeError`. [[Feature #22400]]
 
+* `GC.stat` no longer has the `:read_barrier_faults` key, because compaction
+  no longer uses a read barrier.  `GC.stat(:read_barrier_faults)` now raises
+  `ArgumentError`.  `GC::OPTS` lists `GC_CAN_COMPILE_COMPACTION` instead of
+  `GC_COMPACTION_SUPPORTED`.
+
 ## Stdlib compatibility issues
 
 * prism is now a bundled gem.  Under Bundler, `require "prism"` needs prism
@@ -532,6 +537,12 @@ The following APIs, which have been deprecated for many years, are removed.
 ## Implementation improvements
 
 - The default garbage collector has been switched from a freelist allocator to a bump pointer allocator. [[PR #17201]]
+
+- GC compaction no longer uses an `mprotect` read barrier.  It sweeps every
+  destination page before it moves the first object, so no object is freed
+  between the first move and the end of the reference update.  Compaction no
+  longer installs `SIGSEGV` and `SIGBUS` handlers, and it no longer requires
+  heap pages allocated with `mmap`.
 
 - The error_highlight, did_you_mean, and syntax_suggest gems are now
   loaded lazily on the first error display instead of at interpreter

@@ -1560,10 +1560,9 @@ class TestYJIT < Test::Unit::TestCase
     RUBY
   end
 
-  def test_gc_compact_read_barrier_under_jit_frame
+  def test_gc_compact_frees_fstrings_under_jit_frame
     omit "compaction is not supported on this platform" unless GC.respond_to?(:compact)
 
-    # Sweeping the dropped fstrings reads the fstring table on a locked page
     assert_compiles(<<~'RUBY', exits: :any, result: :ok)
       def churn(n) = n.times.map { |i| -"str#{i}" }
 

@@ -294,8 +294,8 @@ VALUE rb_str_tmp_new(rb_len_t len);
  *
  * A string may not be safe to be used without the GVL because Ruby code may
  * execute and cause a GC compaction to run. If the string is embedded, GC
- * compaction will mprotect the memory region and thus cause a segmentation
- * fault when the string is read from. This function will guarantee that the
+ * compaction can move it and reuse its old memory, so a pointer to the
+ * embedded contents becomes invalid. This function will guarantee that the
  * returned string is not embedded.
  *
  * @param[in] orig String to create a copy of.

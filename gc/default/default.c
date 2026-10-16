@@ -1,6 +1,5 @@
 #include "ruby/internal/config.h"
 
-#include <signal.h>
 #include <string.h>
 
 #ifndef _WIN32
@@ -143,12 +142,6 @@ rb_hrtime_sub(rb_hrtime_t a, rb_hrtime_t b)
 # endif
 #endif
 
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-# include <mach/task.h>
-# include <mach/mach_init.h>
-# include <mach/mach_port.h>
-#endif
-
 #ifndef RUBY_DEBUG_LOG
 # define RUBY_DEBUG_LOG(...)
 #endif
@@ -218,7 +211,7 @@ static RB_THREAD_LOCAL_SPECIFIER int malloc_increase_local;
 #endif
 
 #ifndef GC_CAN_COMPILE_COMPACTION
-#if defined(__wasi__) /* WebAssembly doesn't support signals */
+#if defined(__wasi__) /* Compaction is untested on WASI. */
 # define GC_CAN_COMPILE_COMPACTION 0
 #else
 # define GC_CAN_COMPILE_COMPACTION 1
@@ -540,6 +533,7 @@ typedef struct rb_heap_struct {
     struct ccan_list_head pages;
     struct heap_page *sweeping_page; /* iterator for .pages */
     struct heap_page *compact_cursor;
+    struct heap_page *compact_stop_page;
     uintptr_t compact_cursor_index;
     struct heap_page *pooled_pages;
     size_t total_pages;      /* total page count in a heap */
@@ -726,7 +720,6 @@ typedef struct rb_objspace {
         size_t major_gc_count;
         size_t global_gc_count;
         size_t compact_count;
-        size_t read_barrier_faults;
 #if RGENGC_PROFILE > 0
         size_t total_generated_normal_object_count;
         size_t total_generated_shady_object_count;
@@ -882,9 +875,12 @@ typedef struct rb_global_objspace {
 
     /* Global GC driver state.  compacting is true during the move phase: reference
      * updates are deferred until all forwarding exists, so a cross-objspace reference is
-     * rewritten exactly once.  objspaces is the snapshot being collected. */
+     * rewritten exactly once.  forwarding is true from the first move of any objspace
+     * until every reference is updated; no sweep may run while it is set.  objspaces is
+     * the snapshot being collected. */
     struct {
         bool compacting;
+        bool forwarding;
         struct rb_objspace **objspaces;
         size_t n_objspaces, objspaces_capa;
         size_t count;
@@ -4576,46 +4572,6 @@ gc_setup_mark_bits(struct heap_page *page)
 static int gc_is_moveable_obj(rb_objspace_t *objspace, VALUE obj);
 static VALUE gc_move(rb_objspace_t *objspace, VALUE scan, VALUE free, struct heap_page *src_page, struct heap_page *dest_page);
 
-#if defined(_WIN32)
-enum {HEAP_PAGE_LOCK = PAGE_NOACCESS, HEAP_PAGE_UNLOCK = PAGE_READWRITE};
-
-static BOOL
-protect_page_body(struct heap_page_body *body, DWORD protect)
-{
-    DWORD old_protect;
-    return VirtualProtect(body, HEAP_PAGE_SIZE, protect, &old_protect) != 0;
-}
-#elif defined(__wasi__)
-// wasi-libc's mprotect emulation does not support PROT_NONE
-enum {HEAP_PAGE_LOCK, HEAP_PAGE_UNLOCK};
-#define protect_page_body(body, protect) 1
-#else
-enum {HEAP_PAGE_LOCK = PROT_NONE, HEAP_PAGE_UNLOCK = PROT_READ | PROT_WRITE};
-#define protect_page_body(body, protect) !mprotect((body), HEAP_PAGE_SIZE, (protect))
-#endif
-
-static void
-lock_page_body(rb_objspace_t *objspace, struct heap_page_body *body)
-{
-    if (!protect_page_body(body, HEAP_PAGE_LOCK)) {
-        rb_bug("Couldn't protect page %p, errno: %s", (void *)body, strerror(errno));
-    }
-    else {
-        gc_report(5, objspace, "Protecting page in move %p\n", (void *)body);
-    }
-}
-
-static void
-unlock_page_body(rb_objspace_t *objspace, struct heap_page_body *body)
-{
-    if (!protect_page_body(body, HEAP_PAGE_UNLOCK)) {
-        rb_bug("Couldn't unprotect page %p, errno: %s", (void *)body, strerror(errno));
-    }
-    else {
-        gc_report(5, objspace, "Unprotecting page in move %p\n", (void *)body);
-    }
-}
-
 static uintptr_t
 heap_page_alloc_slot_from_region(struct heap_page *free_page)
 {
@@ -4693,216 +4649,13 @@ try_move(rb_objspace_t *objspace, rb_heap_t *heap, struct heap_page *free_page, 
     return true;
 }
 
-static void
-gc_unprotect_pages(rb_objspace_t *objspace, rb_heap_t *heap)
-{
-    struct heap_page *cursor = heap->compact_cursor;
-
-    while (cursor) {
-        unlock_page_body(objspace, cursor->body);
-        cursor = ccan_list_next(&heap->pages, cursor, page_node);
-    }
-}
-
 static void gc_update_references(rb_objspace_t *objspace);
 static void gc_update_references_heap(rb_objspace_t *objspace);
 static void gc_update_references_global(rb_objspace_t *objspace);
-#if GC_CAN_COMPILE_COMPACTION
-static void invalidate_moved_page(rb_objspace_t *objspace, struct heap_page *page);
-#endif
-
-#if defined(__MINGW32__) || defined(_WIN32)
-# define GC_COMPACTION_SUPPORTED 1
-#else
-/* If not MinGW, Windows, or does not have mmap, we cannot use mprotect for
- * the read barrier, so we must disable compaction. */
-# define GC_COMPACTION_SUPPORTED (GC_CAN_COMPILE_COMPACTION && HEAP_PAGE_ALLOC_USE_MMAP)
-#endif
-
-#if GC_CAN_COMPILE_COMPACTION
-static void
-read_barrier_handler(uintptr_t address)
-{
-    rb_objspace_t *objspace = (rb_objspace_t *)rb_gc_get_objspace();
-
-    struct heap_page_body *page_body = GET_PAGE_BODY(address);
-
-    /* If the page_body is NULL, then mprotect cannot handle it and will crash
-     * with "Cannot allocate memory". */
-    if (page_body == NULL) {
-        rb_bug("read_barrier_handler: segmentation fault at %p", (void *)address);
-    }
-
-    int lev = RB_GC_VM_LOCK();
-    {
-        unlock_page_body(objspace, page_body);
-
-        objspace->profile.read_barrier_faults++;
-
-        invalidate_moved_page(objspace, GET_HEAP_PAGE(address));
-    }
-    RB_GC_VM_UNLOCK(lev);
-}
-#endif
-
-#if !GC_CAN_COMPILE_COMPACTION
-static void
-uninstall_handlers(void)
-{
-    /* no-op */
-}
-
-static void
-install_handlers(void)
-{
-    /* no-op */
-}
-#elif defined(_WIN32)
-static LPTOP_LEVEL_EXCEPTION_FILTER old_handler;
-typedef void (*signal_handler)(int);
-static signal_handler old_sigsegv_handler;
-
-static LONG WINAPI
-read_barrier_signal(EXCEPTION_POINTERS *info)
-{
-    /* EXCEPTION_ACCESS_VIOLATION is what's raised by access to protected pages */
-    if (info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
-        /* > The second array element specifies the virtual address of the inaccessible data.
-         * https://docs.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-exception_record
-         *
-         * Use this address to invalidate the page */
-        read_barrier_handler((uintptr_t)info->ExceptionRecord->ExceptionInformation[1]);
-        return EXCEPTION_CONTINUE_EXECUTION;
-    }
-    else {
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
-}
-
-static void
-uninstall_handlers(void)
-{
-    signal(SIGSEGV, old_sigsegv_handler);
-    SetUnhandledExceptionFilter(old_handler);
-}
-
-static void
-install_handlers(void)
-{
-    /* Remove SEGV handler so that the Unhandled Exception Filter handles it */
-    old_sigsegv_handler = signal(SIGSEGV, NULL);
-    /* Unhandled Exception Filter has access to the violation address similar
-     * to si_addr from sigaction */
-    old_handler = SetUnhandledExceptionFilter(read_barrier_signal);
-}
-#else
-static struct sigaction old_sigbus_handler;
-static struct sigaction old_sigsegv_handler;
-
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-static exception_mask_t old_exception_masks[32];
-static mach_port_t old_exception_ports[32];
-static exception_behavior_t old_exception_behaviors[32];
-static thread_state_flavor_t old_exception_flavors[32];
-static mach_msg_type_number_t old_exception_count;
-
-static void
-disable_mach_bad_access_exc(void)
-{
-    old_exception_count = sizeof(old_exception_masks) / sizeof(old_exception_masks[0]);
-    task_swap_exception_ports(
-        mach_task_self(), EXC_MASK_BAD_ACCESS,
-        MACH_PORT_NULL, EXCEPTION_DEFAULT, 0,
-        old_exception_masks, &old_exception_count,
-        old_exception_ports, old_exception_behaviors, old_exception_flavors
-    );
-}
-
-static void
-restore_mach_bad_access_exc(void)
-{
-    for (mach_msg_type_number_t i = 0; i < old_exception_count; i++) {
-        task_set_exception_ports(
-            mach_task_self(),
-            old_exception_masks[i], old_exception_ports[i],
-            old_exception_behaviors[i], old_exception_flavors[i]
-        );
-    }
-}
-#endif
-
-#if defined(HAVE_PTHREAD_SIGMASK)
-# define gc_sigmask pthread_sigmask
-#else
-# define gc_sigmask sigprocmask
-#endif
-
-static void
-read_barrier_signal(int sig, siginfo_t *info, void *data)
-{
-    // setup SEGV/BUS handlers for errors
-    struct sigaction prev_sigbus, prev_sigsegv;
-    sigaction(SIGBUS, &old_sigbus_handler, &prev_sigbus);
-    sigaction(SIGSEGV, &old_sigsegv_handler, &prev_sigsegv);
-
-    // enable SIGBUS/SEGV
-    sigset_t set, prev_set;
-    sigemptyset(&set);
-    sigaddset(&set, SIGBUS);
-    sigaddset(&set, SIGSEGV);
-    gc_sigmask(SIG_UNBLOCK, &set, &prev_set);
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-    disable_mach_bad_access_exc();
-#endif
-    // run handler
-    read_barrier_handler((uintptr_t)info->si_addr);
-
-    // reset SEGV/BUS handlers
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-    restore_mach_bad_access_exc();
-#endif
-    sigaction(SIGBUS, &prev_sigbus, NULL);
-    sigaction(SIGSEGV, &prev_sigsegv, NULL);
-    gc_sigmask(SIG_SETMASK, &prev_set, NULL);
-}
-
-static void
-uninstall_handlers(void)
-{
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-    restore_mach_bad_access_exc();
-#endif
-    sigaction(SIGBUS, &old_sigbus_handler, NULL);
-    sigaction(SIGSEGV, &old_sigsegv_handler, NULL);
-}
-
-static void
-install_handlers(void)
-{
-    struct sigaction action;
-    memset(&action, 0, sizeof(struct sigaction));
-    sigemptyset(&action.sa_mask);
-    action.sa_sigaction = read_barrier_signal;
-    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
-
-    sigaction(SIGBUS, &action, &old_sigbus_handler);
-    sigaction(SIGSEGV, &action, &old_sigsegv_handler);
-#ifdef HAVE_MACH_TASK_EXCEPTION_PORTS
-    disable_mach_bad_access_exc();
-#endif
-}
-#endif
 
 static void
 gc_compact_finish(rb_objspace_t *objspace)
 {
-    for (int i = 0; i < HEAP_COUNT; i++) {
-        rb_heap_t *heap = &heaps[i];
-        gc_unprotect_pages(objspace, heap);
-    }
-
-    if (!global_objspace->global_gc.compacting) uninstall_handlers();
-
     if (global_objspace->global_gc.compacting) {
         /* In a compacting global GC this updates only this objspace's heap references;
          * gc_start_global sets during_reference_updating on every objspace (the
@@ -4918,6 +4671,7 @@ gc_compact_finish(rb_objspace_t *objspace)
     for (int i = 0; i < HEAP_COUNT; i++) {
         rb_heap_t *heap = &heaps[i];
         heap->compact_cursor = NULL;
+        heap->compact_stop_page = NULL;
         heap->free_pages = NULL;
         heap->compact_cursor_index = 0;
     }
@@ -4926,7 +4680,10 @@ gc_compact_finish(rb_objspace_t *objspace)
         gc_profile_record *record = gc_prof_record(objspace);
         record->moved_objects = objspace->rcompactor.total_moved - record->moved_objects;
     }
-    if (!global_objspace->global_gc.compacting) objspace->flags.during_compacting = FALSE;
+    if (!global_objspace->global_gc.compacting) {
+        objspace->flags.during_compacting = FALSE;
+        global_objspace->global_gc.forwarding = false;
+    }
 }
 
 struct gc_sweep_context {
@@ -5253,6 +5010,7 @@ gc_sweep_page(rb_objspace_t *objspace, rb_heap_t *heap, struct gc_sweep_context 
 {
     struct heap_page *sweep_page = ctx->page;
     GC_ASSERT(sweep_page->heap == heap);
+    GC_ASSERT(!global_objspace->global_gc.forwarding);
 
     uintptr_t p;
     bits_t *bits, bitset;
@@ -5900,73 +5658,10 @@ rb_gc_impl_location(void *objspace_ptr, VALUE value)
     return destination;
 }
 
-#if GC_CAN_COMPILE_COMPACTION
-static void
-invalidate_moved_plane(rb_objspace_t *objspace, struct heap_page *page, uintptr_t p, bits_t bitset)
-{
-    if (bitset) {
-        do {
-            if (bitset & 1) {
-                VALUE forwarding_object = (VALUE)p;
-                VALUE object;
-
-                if (BUILTIN_TYPE(forwarding_object) == T_MOVED) {
-                    GC_ASSERT(RVALUE_PINNED(objspace, forwarding_object));
-                    GC_ASSERT(!RVALUE_MARKED(objspace, forwarding_object));
-
-                    CLEAR_IN_BITMAP(GET_HEAP_PINNED_BITS(forwarding_object), forwarding_object);
-
-                    object = rb_gc_impl_location(objspace, forwarding_object);
-                    gc_move(objspace, object, forwarding_object, GET_HEAP_PAGE(object), page);
-                    /* forwarding_object is now our actual object, and "object"
-                     * is the free slot for the original page */
-
-                    struct heap_page *orig_page = GET_HEAP_PAGE(object);
-                    orig_page->free_slots++;
-                    RVALUE_AGE_SET_BITMAP(object, 0);
-                    heap_page_add_free_region(objspace, orig_page, object);
-
-                    GC_ASSERT(RVALUE_MARKED(objspace, forwarding_object));
-                    GC_ASSERT(BUILTIN_TYPE(forwarding_object) != T_MOVED);
-                    GC_ASSERT(BUILTIN_TYPE(forwarding_object) != T_NONE);
-                }
-            }
-            p += page->slot_size;
-            bitset >>= 1;
-        } while (bitset);
-    }
-}
-
-static void
-invalidate_moved_page(rb_objspace_t *objspace, struct heap_page *page)
-{
-    int i;
-    bits_t *mark_bits, *pin_bits;
-    bits_t bitset;
-    short slot_size = page->slot_size;
-    int total_slots = page->total_slots;
-    int bitmap_plane_count = CEILDIV(total_slots, BITS_BITLENGTH);
-
-    mark_bits = page->mark_bits;
-    pin_bits = page->pinned_bits;
-
-    uintptr_t p = page->start;
-
-    for (i=0; i < bitmap_plane_count; i++) {
-        /* Moved objects are pinned but never marked. We reuse the pin bits
-         * to indicate there is a moved object in this slot. */
-        bitset = pin_bits[i] & ~mark_bits[i];
-        invalidate_moved_plane(objspace, page, p, bitset);
-        p += BITS_BITLENGTH * slot_size;
-    }
-}
-#endif
-
 static void
 gc_compact_start(rb_objspace_t *objspace)
 {
     struct heap_page *page = NULL;
-    gc_mode_transition(objspace, gc_mode_compacting);
 
     for (int i = 0; i < HEAP_COUNT; i++) {
         rb_heap_t *heap = &heaps[i];
@@ -5975,6 +5670,7 @@ gc_compact_start(rb_objspace_t *objspace)
         }
 
         heap->compact_cursor = ccan_list_tail(&heap->pages, struct heap_page, page_node);
+        heap->compact_stop_page = heap->compact_cursor;
         heap->compact_cursor_index = 0;
     }
 
@@ -5987,10 +5683,6 @@ gc_compact_start(rb_objspace_t *objspace)
     memset(objspace->rcompactor.moved_count_table, 0, T_MASK * sizeof(size_t));
     memset(objspace->rcompactor.moved_up_count_table, 0, T_MASK * sizeof(size_t));
     memset(objspace->rcompactor.moved_down_count_table, 0, T_MASK * sizeof(size_t));
-
-    /* Set up read barrier for pages containing MOVED objects */
-    /* A compacting global GC installs the read barrier once for every objspace. */
-    if (!global_objspace->global_gc.compacting) install_handlers();
 }
 
 static void gc_sweep_compact(rb_objspace_t *objspace);
@@ -7793,17 +7485,13 @@ gc_compact_destination_pool(rb_objspace_t *objspace, rb_heap_t *src_pool, VALUE 
 }
 
 static bool
-gc_compact_move(rb_objspace_t *objspace, rb_heap_t *heap, VALUE src)
+gc_compact_reserve_slot(rb_objspace_t *objspace, rb_heap_t *dest_pool, size_t *free_slots)
 {
-    GC_ASSERT(BUILTIN_TYPE(src) != T_MOVED);
-    GC_ASSERT(gc_is_moveable_obj(objspace, src));
+    while (*free_slots == 0) {
+        if (gc_compact_heap_cursors_met_p(dest_pool)) {
+            return false;
+        }
 
-    rb_heap_t *dest_pool = gc_compact_destination_pool(objspace, heap, src);
-    if (gc_compact_heap_cursors_met_p(dest_pool)) {
-        return dest_pool != heap;
-    }
-
-    while (!try_move(objspace, dest_pool, dest_pool->free_pages, src)) {
         struct gc_sweep_context ctx = {
             .page = dest_pool->sweeping_page,
             .final_slots = 0,
@@ -7811,28 +7499,40 @@ gc_compact_move(rb_objspace_t *objspace, rb_heap_t *heap, VALUE src)
             .empty_slots = 0,
         };
 
-        /* The page of src could be partially compacted, so it may contain
-         * T_MOVED. Sweeping a page may read objects on this page, so we
-         * need to lock the page. */
-        lock_page_body(objspace, GET_PAGE_BODY(src));
         gc_sweep_page(objspace, dest_pool, &ctx);
-        unlock_page_body(objspace, GET_PAGE_BODY(src));
 
         if (dest_pool->sweeping_page->free_slots > 0) {
             heap_add_freepage(dest_pool, dest_pool->sweeping_page);
+            *free_slots += dest_pool->sweeping_page->free_slots;
         }
 
         dest_pool->sweeping_page = ccan_list_next(&dest_pool->pages, dest_pool->sweeping_page, page_node);
-        if (gc_compact_heap_cursors_met_p(dest_pool)) {
-            return dest_pool != heap;
-        }
     }
 
+    (*free_slots)--;
     return true;
 }
 
 static bool
-gc_compact_plane(rb_objspace_t *objspace, rb_heap_t *heap, uintptr_t p, bits_t bitset, struct heap_page *page)
+gc_compact_move(rb_objspace_t *objspace, rb_heap_t *heap, VALUE src)
+{
+    GC_ASSERT(BUILTIN_TYPE(src) != T_MOVED);
+    GC_ASSERT(gc_is_moveable_obj(objspace, src));
+
+    rb_heap_t *dest_pool = gc_compact_destination_pool(objspace, heap, src);
+
+    while (dest_pool->free_pages) {
+        if (try_move(objspace, dest_pool, dest_pool->free_pages, src)) {
+            return true;
+        }
+        dest_pool->free_pages = dest_pool->free_pages->free_next;
+    }
+
+    return dest_pool != heap;
+}
+
+static bool
+gc_compact_plane(rb_objspace_t *objspace, rb_heap_t *heap, uintptr_t p, bits_t bitset, struct heap_page *page, size_t *free_slots)
 {
     short slot_size = page->slot_size;
 
@@ -7841,11 +7541,19 @@ gc_compact_plane(rb_objspace_t *objspace, rb_heap_t *heap, uintptr_t p, bits_t b
         GC_ASSERT(vp % sizeof(VALUE) == 0);
 
         if (bitset & 1) {
-            objspace->rcompactor.considered_count_table[BUILTIN_TYPE(vp)]++;
+            if (free_slots) {
+                if (gc_is_moveable_obj(objspace, vp)) {
+                    rb_heap_t *dest_pool = gc_compact_destination_pool(objspace, heap, vp);
+                    if (!gc_compact_reserve_slot(objspace, dest_pool, &free_slots[dest_pool - heaps]) &&
+                            dest_pool == heap) {
+                        return false;
+                    }
+                }
+            }
+            else {
+                objspace->rcompactor.considered_count_table[BUILTIN_TYPE(vp)]++;
 
-            if (gc_is_moveable_obj(objspace, vp)) {
-                if (!gc_compact_move(objspace, heap, vp)) {
-                    //the cursors met. bubble up
+                if (gc_is_moveable_obj(objspace, vp) && !gc_compact_move(objspace, heap, vp)) {
                     return false;
                 }
             }
@@ -7857,9 +7565,8 @@ gc_compact_plane(rb_objspace_t *objspace, rb_heap_t *heap, uintptr_t p, bits_t b
     return true;
 }
 
-// Iterate up all the objects in page, moving them to where they want to go
 static bool
-gc_compact_page(rb_objspace_t *objspace, rb_heap_t *heap, struct heap_page *page)
+gc_compact_page(rb_objspace_t *objspace, rb_heap_t *heap, struct heap_page *page, size_t *free_slots)
 {
     GC_ASSERT(page == heap->compact_cursor);
 
@@ -7877,7 +7584,7 @@ gc_compact_page(rb_objspace_t *objspace, rb_heap_t *heap, struct heap_page *page
         // objects that can be moved are marked and not pinned
         bitset = (mark_bits[j] & ~pin_bits[j]);
         if (bitset) {
-            if (!gc_compact_plane(objspace, heap, (uintptr_t)p, bitset, page))
+            if (!gc_compact_plane(objspace, heap, (uintptr_t)p, bitset, page, free_slots))
                 return false;
         }
         p += BITS_BITLENGTH * slot_size;
@@ -7886,57 +7593,84 @@ gc_compact_page(rb_objspace_t *objspace, rb_heap_t *heap, struct heap_page *page
     return true;
 }
 
+/* The dry run is done with a heap when its cursors meet.  It records the page before the
+ * last page it walked in compact_stop_page.  The move pass walks the same pages in the
+ * same order against the same swept capacity, so it makes the same moves. */
 static bool
-gc_compact_all_compacted_p(rb_objspace_t *objspace)
+gc_compact_heap_done_p(rb_heap_t *heap, bool dry_run)
 {
-    for (int i = 0; i < HEAP_COUNT; i++) {
-        rb_heap_t *heap = &heaps[i];
-
-        if (heap->total_pages > 0 &&
-                !gc_compact_heap_cursors_met_p(heap)) {
-            return false;
-        }
+    if (dry_run) {
+        return heap->total_pages == 0 || gc_compact_heap_cursors_met_p(heap);
     }
-
-    return true;
+    return heap->compact_cursor == heap->compact_stop_page;
 }
 
-/* Compaction's move phase: relocate this objspace's movable objects and leave T_MOVED
- * forwarding behind without updating references yet.  A global GC calls this for every
- * objspace before updating any of them (two phases), so a cross-objspace reference to a
- * moved object is rewritten exactly once, after all forwarding exists. */
 static void
-gc_compact_relocate(rb_objspace_t *objspace)
+gc_compact_walk(rb_objspace_t *objspace, size_t *free_slots)
 {
-    gc_compact_start(objspace);
-
-    while (!gc_compact_all_compacted_p(objspace)) {
+    bool done;
+    do {
+        done = true;
         for (int i = 0; i < HEAP_COUNT; i++) {
             rb_heap_t *heap = &heaps[i];
 
-            if (gc_compact_heap_cursors_met_p(heap)) {
+            if (gc_compact_heap_done_p(heap, free_slots != NULL)) {
                 continue;
             }
+            done = false;
 
-            struct heap_page *start_page = heap->compact_cursor;
+            struct heap_page *page = heap->compact_cursor;
+            struct heap_page *prev = ccan_list_prev(&heap->pages, page, page_node);
+            bool finished = gc_compact_page(objspace, heap, page, free_slots);
 
-            if (!gc_compact_page(objspace, heap, start_page)) {
-                lock_page_body(objspace, start_page->body);
-
-                continue;
+            if (free_slots) {
+                GC_ASSERT(finished || heap->sweeping_page == page);
+                heap->compact_stop_page = prev;
+                heap->compact_cursor = heap->sweeping_page == page ? page : prev;
             }
-
-            // If we get here, we've finished moving all objects on the compact_cursor page
-            // So we can lock it and move the cursor on to the next one.
-            lock_page_body(objspace, start_page->body);
-            heap->compact_cursor = ccan_list_prev(&heap->pages, heap->compact_cursor, page_node);
+            else {
+                heap->compact_cursor = finished ? prev : heap->compact_stop_page;
+            }
         }
+    } while (!done);
+}
+
+/* Compaction's sweep phase: dry-run the move walk and sweep every destination page it
+ * would need.  No sweep runs between the first move and the end of the reference update,
+ * so no free reads a T_MOVED slot.  A global GC calls this for every objspace before
+ * relocating any of them. */
+static void
+gc_compact_prepare(rb_objspace_t *objspace)
+{
+    gc_compact_start(objspace);
+
+    size_t free_slots[HEAP_COUNT] = { 0 };
+    gc_compact_walk(objspace, free_slots);
+}
+
+/* Compaction's move phase: relocate this objspace's movable objects into the slots
+ * gc_compact_prepare swept, leaving T_MOVED forwarding behind without updating references
+ * yet.  It never sweeps.  A global GC calls this for every objspace before updating any
+ * of them (two phases), so a cross-objspace reference to a moved object is rewritten
+ * exactly once, after all forwarding exists. */
+static void
+gc_compact_relocate(rb_objspace_t *objspace)
+{
+    gc_mode_transition(objspace, gc_mode_compacting);
+    global_objspace->global_gc.forwarding = true;
+
+    for (int i = 0; i < HEAP_COUNT; i++) {
+        rb_heap_t *heap = &heaps[i];
+        heap->compact_cursor = ccan_list_tail(&heap->pages, struct heap_page, page_node);
     }
+
+    gc_compact_walk(objspace, NULL);
 }
 
 static void
 gc_sweep_compact(rb_objspace_t *objspace)
 {
+    gc_compact_prepare(objspace);
     gc_compact_relocate(objspace);
     /* A compacting global GC defers the finish (reference update) to the second phase,
      * after every objspace has been relocated. */
@@ -9770,12 +9504,12 @@ gc_start_global(rb_objspace_t *driver, unsigned int reason, bool compact, bool a
         }
     }
     else {
-        /* The move -> update-references -> free flow runs as three passes across ALL
-         * objspaces, not per objspace: (a) updating references must see every objspace's
-         * forwarding (a reference can point at a moved foreign object), and (b) freeing
-         * source pages must wait until everyone is updated (or another objspace's update
-         * reads a freed T_MOVED).  The read barrier is installed once for all passes. */
-        install_handlers();
+        /* The sweep -> move -> update-references -> free flow runs as passes across ALL
+         * objspaces, not per objspace: (a) every sweep must finish before any objspace
+         * moves (a free can read a foreign object through a VM-global weak table), (b)
+         * updating references must see every objspace's forwarding (a reference can point
+         * at a moved foreign object), and (c) freeing source pages must wait until everyone
+         * is updated (or another objspace's update reads a freed T_MOVED). */
 
         /* Only the driver records a profile entry for a global GC (gc_start_record), so time
          * only the driver's compaction work.  The move/update/free below runs inside the
@@ -9785,11 +9519,23 @@ gc_start_global(rb_objspace_t *driver, unsigned int reason, bool compact, bool a
         const bool driver_prof = gc_prof_enabled(driver);
         rb_hrtime_t driver_compact_wall_time = 0;
 
-        /* pass 1 (move): relocate every objspace and leave T_MOVED forwarding behind. */
+        /* pass 1 (sweep): sweep every objspace's destination pages before anything moves. */
         for (size_t i = 0; i < global_objspace->global_gc.n_objspaces; i++) {
             rb_objspace_t *os = global_objspace->global_gc.objspaces[i];
             gc_sweeping_enter(os);
             gc_sweep_start(os);        /* mode -> sweeping, order the heap for compaction */
+            rb_hrtime_t t0 = (os == driver && driver_prof) ? rb_hrtime_now() : 0;
+            gc_compact_prepare(os);
+            if (os == driver && driver_prof) {
+                driver_compact_wall_time = rb_hrtime_add(driver_compact_wall_time, elapsed_hrtime_from(t0));
+            }
+            gc_sweeping_cpu_exit(os);
+        }
+
+        /* pass 2 (move): relocate every objspace and leave T_MOVED forwarding behind. */
+        for (size_t i = 0; i < global_objspace->global_gc.n_objspaces; i++) {
+            rb_objspace_t *os = global_objspace->global_gc.objspaces[i];
+            gc_sweeping_cpu_enter(os);
             rb_hrtime_t t0 = (os == driver && driver_prof) ? rb_hrtime_now() : 0;
             gc_compact_relocate(os);   /* mode -> compacting, move */
             if (os == driver && driver_prof) {
@@ -9798,21 +9544,15 @@ gc_start_global(rb_objspace_t *driver, unsigned int reason, bool compact, bool a
             gc_sweeping_cpu_exit(os);
         }
 
-        /* pass 2 (update): all forwarding now exists, so update every objspace's
-         * references (cross-objspace ones resolve too); gc_compact_finish also unprotects
-         * pages and clears during_compacting.  The move-or-mark decision reads
-         * rb_gc_get_objspace()'s during_reference_updating: set it on every objspace. */
+        /* pass 3 (update): all forwarding now exists, so update every objspace's
+         * references (cross-objspace ones resolve too); gc_compact_finish also clears
+         * during_compacting.  The move-or-mark decision reads rb_gc_get_objspace()'s
+         * during_reference_updating: set it on every objspace. */
         gc_sweeping_cpu_enter(driver);
         for (size_t i = 0; i < global_objspace->global_gc.n_objspaces; i++) {
             global_objspace->global_gc.objspaces[i]->flags.during_reference_updating = TRUE;
         }
 
-        for (size_t i = 0; i < global_objspace->global_gc.n_objspaces; i++) {
-            rb_objspace_t *objspace = global_objspace->global_gc.objspaces[i];
-            for (int h = 0; h < HEAP_COUNT; h++) {
-                gc_unprotect_pages(objspace, &heaps[h]);
-            }
-        }
         rb_gc_before_updating_jit_code();
         gc_sweeping_cpu_exit(driver);
         for (size_t i = 0; i < global_objspace->global_gc.n_objspaces; i++) {
@@ -9843,11 +9583,11 @@ gc_start_global(rb_objspace_t *driver, unsigned int reason, bool compact, bool a
             global_objspace->global_gc.objspaces[i]->flags.during_compacting = FALSE;
         }
         global_objspace->global_gc.compacting = false;
-        uninstall_handlers();
+        global_objspace->global_gc.forwarding = false;
         gc_sweeping_cpu_exit(driver);
 
         /* Record the driver's compaction time and exclude it from the driver's sweep phase.
-         * gc_sweeping_exit(driver) in pass 3 subtracts gc_sweep_excluded_wall_time from the
+         * gc_sweeping_exit(driver) in pass 4 subtracts gc_sweep_excluded_wall_time from the
          * sweep wall time, so this must be set before it runs.  The excluded value is a sum
          * of sub-intervals of the driver's sweep phase, so the subtraction cannot underflow. */
         if (driver_prof) {
@@ -9858,7 +9598,7 @@ gc_start_global(rb_objspace_t *driver, unsigned int reason, bool compact, bool a
                     driver->profile.gc_sweep_excluded_wall_time, driver_compact_wall_time);
         }
 
-        /* pass 3 (free): page-sweep every objspace, freeing dead objects and the source pages
+        /* pass 4 (free): page-sweep every objspace, freeing dead objects and the source pages
          * that are now empty.  during_compacting is already cleared, so the sweep treats
          * T_MOVED as usual. */
         for (size_t i = 0; i < global_objspace->global_gc.n_objspaces; i++) {
@@ -10252,7 +9992,7 @@ rb_gc_impl_start(void *objspace_ptr, bool full_mark, bool immediate_mark, bool i
 
     /* For now, compact implies full mark / sweep, so ignore other flags */
     if (compact) {
-        GC_ASSERT(GC_COMPACTION_SUPPORTED);
+        GC_ASSERT(GC_CAN_COMPILE_COMPACTION);
 
         reason |= GPR_FLAG_COMPACT;
         if (!rb_gc_single_objspace_p()) {
@@ -10960,7 +10700,6 @@ enum gc_stat_sym {
     gc_stat_sym_major_gc_count,
     gc_stat_sym_global_gc_count,
     gc_stat_sym_compact_count,
-    gc_stat_sym_read_barrier_faults,
     gc_stat_sym_total_moved_objects,
     gc_stat_sym_remembered_wb_unprotected_objects,
     gc_stat_sym_remembered_wb_unprotected_objects_limit,
@@ -11016,7 +10755,6 @@ setup_gc_stat_symbols(void)
     S(major_gc_count);
     S(global_gc_count);
     S(compact_count);
-    S(read_barrier_faults);
     S(total_moved_objects);
     S(remembered_wb_unprotected_objects);
     S(remembered_wb_unprotected_objects_limit);
@@ -11174,7 +10912,6 @@ rb_gc_impl_stat(void *objspace_ptr, VALUE hash_or_sym)
     SET(major_gc_count, objspace->profile.major_gc_count);
     SET(global_gc_count, objspace->profile.global_gc_count);
     SET(compact_count, objspace->profile.compact_count);
-    SET(read_barrier_faults, objspace->profile.read_barrier_faults);
     SET(total_moved_objects, objspace->rcompactor.total_moved);
     SET(remembered_wb_unprotected_objects, objspace->rgengc.uncollectible_wb_unprotected_objects);
     SET(remembered_wb_unprotected_objects_limit, objspace->rgengc.uncollectible_wb_unprotected_objects_limit);
@@ -12908,8 +12645,6 @@ gc_verify_internal_consistency_m(VALUE dummy)
 static VALUE
 gc_set_auto_compact(VALUE _, VALUE v)
 {
-    GC_ASSERT(GC_COMPACTION_SUPPORTED);
-
     ruby_enable_autocompact = RTEST(v);
 
 #if RGENGC_CHECK_MODE
@@ -13462,20 +13197,11 @@ rb_gc_impl_init(void)
     /* Internal constants in the garbage collector. */
     rb_define_const(rb_mGC, "INTERNAL_CONSTANTS", gc_constants);
 
-    if (GC_COMPACTION_SUPPORTED) {
-        rb_define_singleton_method(rb_mGC, "compact", gc_compact, 0);
-        rb_define_singleton_method(rb_mGC, "auto_compact", gc_get_auto_compact, 0);
-        rb_define_singleton_method(rb_mGC, "auto_compact=", gc_set_auto_compact, 1);
-        rb_define_singleton_method(rb_mGC, "latest_compact_info", gc_compact_stats, 0);
-        rb_define_singleton_method(rb_mGC, "verify_compaction_references", gc_verify_compaction_references, -1);
-    }
-    else {
-        rb_define_singleton_method(rb_mGC, "compact", rb_f_notimplement, 0);
-        rb_define_singleton_method(rb_mGC, "auto_compact", rb_f_notimplement, 0);
-        rb_define_singleton_method(rb_mGC, "auto_compact=", rb_f_notimplement, 1);
-        rb_define_singleton_method(rb_mGC, "latest_compact_info", rb_f_notimplement, 0);
-        rb_define_singleton_method(rb_mGC, "verify_compaction_references", rb_f_notimplement, -1);
-    }
+    rb_define_singleton_method(rb_mGC, "compact", gc_compact, 0);
+    rb_define_singleton_method(rb_mGC, "auto_compact", gc_get_auto_compact, 0);
+    rb_define_singleton_method(rb_mGC, "auto_compact=", gc_set_auto_compact, 1);
+    rb_define_singleton_method(rb_mGC, "latest_compact_info", gc_compact_stats, 0);
+    rb_define_singleton_method(rb_mGC, "verify_compaction_references", gc_verify_compaction_references, -1);
 
 #if GC_DEBUG_STRESS_TO_CLASS
     rb_define_singleton_method(rb_mGC, "add_stress_to_class", rb_gcdebug_add_stress_to_class, -1);
@@ -13543,7 +13269,7 @@ rb_gc_impl_init(void)
         OPT(MALLOC_ALLOCATED_SIZE);
         OPT(MALLOC_ALLOCATED_SIZE_CHECK);
         OPT(GC_PROFILE_DETAIL_MEMORY);
-        OPT(GC_COMPACTION_SUPPORTED);
+        OPT(GC_CAN_COMPILE_COMPACTION);
 #undef OPT
         OBJ_FREEZE(opts);
     }

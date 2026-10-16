@@ -188,7 +188,6 @@ module GC
   #    major_gc_count: 1,
   #    global_gc_count: 0,
   #    compact_count: 0,
-  #    read_barrier_faults: 0,
   #    total_moved_objects: 0,
   #    remembered_wb_unprotected_objects: 0,
   #    remembered_wb_unprotected_objects_limit: 7,
@@ -261,8 +260,6 @@ module GC
   #   <tt>scope: :global</tt>, the process total, including terminated Ractors.
   # - +:compact_count+:
   #   The total number of compactions run since process start.
-  # - +:read_barrier_faults+:
-  #   The total number of times the read barrier was triggered during compaction.
   # - +:total_moved_objects+:
   #   The total number of objects compaction has moved.
   # - +:remembered_wb_unprotected_objects+:

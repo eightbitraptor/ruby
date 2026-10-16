@@ -192,7 +192,7 @@ jobs:
 
       - { uses: *compilers, name: 'ID_TABLE_DEBUG', with: { cppflags: '-DID_TABLE_DEBUG' }, timeout-minutes: 8, if: "${{ matrix.shard == '24' }}" }
       - { uses: *compilers, name: 'SYMBOL_DEBUG', with: { cppflags: '-DSYMBOL_DEBUG' }, timeout-minutes: 8, if: "${{ matrix.shard == '24' }}" }
-      - { uses: *compilers, name: 'RGENGC_CHECK_MODE', with: { cppflags: '-DRGENGC_CHECK_MODE' }, timeout-minutes: 8, if: "${{ matrix.shard == '19' }}" }
+      - { uses: *compilers, name: 'RGENGC_CHECK_MODE', with: { cppflags: '-DRGENGC_CHECK_MODE', test_all: 'ruby/test_gc_compact.rb' }, timeout-minutes: 8, if: "${{ matrix.shard == '19' }}" }
       - { uses: *compilers, name: 'USE_EMBED_CI=0', with: { cppflags: '-DUSE_EMBED_CI=0' }, timeout-minutes: 8, if: "${{ matrix.shard == '19' }}" }
       - { uses: *compilers, name: 'USE_FLONUM=0', with: { cppflags: '-DUSE_FLONUM=0', append_configure: '--disable-yjit --disable-zjit' }, timeout-minutes: 8, if: "${{ matrix.shard == '19' }}" }
 
