@@ -565,6 +565,7 @@ typedef struct rb_heap_struct {
     size_t total_slots;      /* total slot count */
     size_t init_slots;
     bool init_slots_scaled;
+    bool init_slots_starved;
 
 } rb_heap_t;
 
@@ -5774,8 +5775,20 @@ gc_sweep_finish_heap(rb_objspace_t *objspace, rb_heap_t *heap)
 
     if (is_full_marking(objspace) && heap->total_pages > 0) {
         GC_ASSERT(total_slots >= swept_slots);
-        heap->init_slots = heap_goal_total_slots(total_slots - swept_slots);
+        size_t goal = heap_goal_total_slots(total_slots - swept_slots);
+
+        /* A heap whose survivor-scaled allowance forced a major GC by NOFREE
+         * grows its allowance, so promoted garbage cannot keep forcing majors. */
+        if (heap->init_slots_starved && heap->init_slots_scaled) {
+            size_t cap = objspace_heap_init_bytes(objspace) / heap->slot_size;
+            size_t grown = (size_t)(heap->init_slots * gc_params.growth_factor);
+            if (grown > cap) grown = cap;
+            if (grown > goal) goal = grown;
+        }
+
+        heap->init_slots = goal;
         heap->init_slots_scaled = true;
+        heap->init_slots_starved = false;
     }
 
     size_t init_slots = heap_init_slots(objspace, heap);
@@ -5810,6 +5823,7 @@ gc_sweep_finish_heap(rb_objspace_t *objspace, rb_heap_t *heap)
                      objspace->heap_pages.allocatable_bytes < (min_free_slots * 7 / 8 - swept_slots) * heap->slot_size) {
                 gc_needs_major_flags |= GPR_FLAG_MAJOR_BY_NOFREE;
                 heap->force_major_gc_count++;
+                heap->init_slots_starved = true;
             }
         }
     }
@@ -10353,6 +10367,7 @@ objspace_absorb(rb_objspace_t *dst, rb_objspace_t *src)
         else {
             dheap->init_slots_scaled = false;
         }
+        dheap->init_slots_starved |= sheap->init_slots_starved;
     }
 
     /* The objspace-wide page bookkeeping. */
