@@ -316,6 +316,8 @@ static ruby_gc_params_t gc_params = {
     GC_OLDMALLOC_LIMIT_GROWTH_FACTOR,
 };
 
+static bool malloc_limit_user_set;
+
 /* GC_DEBUG:
  *  enable to embed GC debugging information.
  */
@@ -5865,6 +5867,24 @@ gc_check_oldmalloc(rb_objspace_t *objspace)
 }
 #endif
 
+static size_t
+gc_malloc_limit_floor(rb_objspace_t *objspace)
+{
+    if (malloc_limit_user_set) return gc_params.malloc_limit_min;
+
+    size_t floor = MIN(gc_params.malloc_limit_min, 8 * 1024 * 1024);
+    if (objspace->heap_pages.allocated_pages > SIZE_MAX / HEAP_PAGE_SIZE) {
+        return gc_params.malloc_limit_min;
+    }
+
+    size_t heap_bytes = objspace->heap_pages.allocated_pages * HEAP_PAGE_SIZE;
+    if (heap_bytes > SIZE_MAX / 21) {
+        return gc_params.malloc_limit_min;
+    }
+    size_t scaled = heap_bytes * 21 / 8;
+    return MIN(gc_params.malloc_limit_min, MAX(floor, scaled));
+}
+
 static void
 gc_adjust_malloc_limit_after_sweep(rb_objspace_t *objspace)
 {
@@ -5892,8 +5912,9 @@ gc_adjust_malloc_limit_after_sweep(rb_objspace_t *objspace)
     else {
         objspace->flags.malloc_limit_low_reclaim_count = 0;
         malloc_limit = (size_t)(malloc_limit * 0.98);
-        if (malloc_limit < gc_params.malloc_limit_min) {
-            malloc_limit = gc_params.malloc_limit_min;
+        size_t floor = gc_malloc_limit_floor(objspace);
+        if (malloc_limit < floor) {
+            malloc_limit = floor;
         }
     }
 }
@@ -9032,8 +9053,9 @@ gc_reset_malloc_info(rb_objspace_t *objspace, bool full_mark)
                         objspace->flags.malloc_limit_low_reclaim_count = 0;
                     }
                     malloc_limit = (size_t)(malloc_limit * 0.98);
-                    if (malloc_limit < gc_params.malloc_limit_min) {
-                        malloc_limit = gc_params.malloc_limit_min;
+                    size_t floor = gc_malloc_limit_floor(objspace);
+                    if (malloc_limit < floor) {
+                        malloc_limit = floor;
                     }
                 }
             }
@@ -11910,6 +11932,7 @@ rb_gc_impl_set_params(void *objspace_ptr)
     get_envparam_double("RUBY_GC_HEAP_REMEMBERED_WB_UNPROTECTED_OBJECTS_LIMIT_RATIO", &gc_params.uncollectible_wb_unprotected_objects_limit_ratio, 0.0, 0.0, TRUE);
 
     if (get_envparam_size("RUBY_GC_MALLOC_LIMIT", &gc_params.malloc_limit_min, 0)) {
+        malloc_limit_user_set = true;
         malloc_limit = gc_params.malloc_limit_min;
     }
     get_envparam_size  ("RUBY_GC_MALLOC_LIMIT_MAX", &gc_params.malloc_limit_max, 0);

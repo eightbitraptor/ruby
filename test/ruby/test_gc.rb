@@ -270,6 +270,14 @@ class TestGc < Test::Unit::TestCase
     RUBY
   end
 
+  def test_explicit_malloc_limit_remains_floor
+    env = { "RUBY_GC_MALLOC_LIMIT" => "#{32 * 1024 * 1024}" }
+    assert_in_out_err([env, "-W0", "-e", <<~'RUBY'], "", ["true"], [], "")
+      GC.start
+      puts GC.stat(:malloc_increase_bytes_limit) >= 32 * 1024 * 1024
+    RUBY
+  end
+
   def test_lazy_sweep_malloc_does_not_trigger_oldmalloc_major_gc
     omit 'default GC only' unless GC.config[:implementation] == 'default'
     omit 'stress' if GC.stress
