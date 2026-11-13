@@ -647,9 +647,10 @@ struct gc_process_stat_total {
 typedef struct rb_objspace {
     struct {
         struct gc_malloc_bytes counters;
+        gc_counter_t freed_in_gc;
+        int64_t malloc_increase_at_gc_start;
 #if RGENGC_ESTIMATE_OLDMALLOC
         size_t oldmalloc_increase;
-        gc_counter_t freed_in_gc;
 #endif
 #ifdef MALLOC_COUNTERS_NEED_LOCK
         rb_nativethread_lock_t lock;
@@ -685,6 +686,8 @@ typedef struct rb_objspace {
         /* No Ractor will own this objspace any more and it will never allocate again. */
         unsigned int ownerless : 1;
         unsigned int measure_gc : 1;
+        unsigned int adjust_malloc_limit_after_sweep : 1;
+        unsigned int malloc_limit_low_reclaim_count : 2;
     } flags;
 
     rb_event_flag_t hook_events;
@@ -5863,9 +5866,43 @@ gc_check_oldmalloc(rb_objspace_t *objspace)
 #endif
 
 static void
+gc_adjust_malloc_limit_after_sweep(rb_objspace_t *objspace)
+{
+    if (!objspace->flags.adjust_malloc_limit_after_sweep) return;
+
+    gc_counter_t freed;
+    MALLOC_COUNTERS_LOCK(objspace);
+    freed = gc_counter_load_relaxed(&objspace->malloc_counters.freed_in_gc);
+    MALLOC_COUNTERS_UNLOCK(objspace);
+
+    size_t increase = (size_t)objspace->malloc_counters.malloc_increase_at_gc_start;
+    objspace->flags.adjust_malloc_limit_after_sweep = false;
+
+    if (freed < increase && freed < increase - freed) {
+        if (objspace->flags.malloc_limit_low_reclaim_count < 2) {
+            objspace->flags.malloc_limit_low_reclaim_count++;
+        }
+        if (objspace->flags.malloc_limit_low_reclaim_count >= 2) {
+            malloc_limit = (size_t)(increase * gc_params.malloc_limit_growth_factor);
+            if (malloc_limit > gc_params.malloc_limit_max) {
+                malloc_limit = gc_params.malloc_limit_max;
+            }
+        }
+    }
+    else {
+        objspace->flags.malloc_limit_low_reclaim_count = 0;
+        malloc_limit = (size_t)(malloc_limit * 0.98);
+        if (malloc_limit < gc_params.malloc_limit_min) {
+            malloc_limit = gc_params.malloc_limit_min;
+        }
+    }
+}
+
+static void
 gc_sweep_finish(rb_objspace_t *objspace)
 {
     gc_report(1, objspace, "gc_sweep_finish\n");
+    gc_adjust_malloc_limit_after_sweep(objspace);
 
     if (is_full_marking(objspace)) {
         if (objspace->heap_pages.allocated_pages ==
@@ -7093,9 +7130,9 @@ gc_marks_check(rb_objspace_t *objspace, st_foreach_callback_func *checker_func, 
         .malloc_at_last_gc = gc_counter_load_relaxed(&objspace->malloc_counters.counters.malloc_at_last_gc),
         .free_at_last_gc   = gc_counter_load_relaxed(&objspace->malloc_counters.counters.free_at_last_gc),
     };
+    gc_counter_t saved_freed_in_gc = gc_counter_load_relaxed(&objspace->malloc_counters.freed_in_gc);
 #if RGENGC_ESTIMATE_OLDMALLOC
     size_t saved_oldmalloc_increase = gc_oldmalloc_increase_load(objspace);
-    gc_counter_t saved_freed_in_gc = gc_counter_load_relaxed(&objspace->malloc_counters.freed_in_gc);
 #endif
     MALLOC_COUNTERS_UNLOCK(objspace);
     VALUE already_disabled = rb_objspace_gc_disable(objspace);
@@ -7122,9 +7159,9 @@ gc_marks_check(rb_objspace_t *objspace, st_foreach_callback_func *checker_func, 
     gc_counter_store_release(&objspace->malloc_counters.counters.free,              saved_malloc.free);
     gc_counter_store_release(&objspace->malloc_counters.counters.malloc_at_last_gc, saved_malloc.malloc_at_last_gc);
     gc_counter_store_release(&objspace->malloc_counters.counters.free_at_last_gc,   saved_malloc.free_at_last_gc);
+    gc_counter_store_release(&objspace->malloc_counters.freed_in_gc, saved_freed_in_gc);
 #if RGENGC_ESTIMATE_OLDMALLOC
     RUBY_ATOMIC_SIZE_EXCHANGE(objspace->malloc_counters.oldmalloc_increase, saved_oldmalloc_increase);
-    gc_counter_store_release(&objspace->malloc_counters.freed_in_gc, saved_freed_in_gc);
 #endif
     MALLOC_COUNTERS_UNLOCK(objspace);
 }
@@ -8971,24 +9008,34 @@ gc_reset_malloc_info(rb_objspace_t *objspace, bool full_mark)
         int64_t inc = gc_malloc_counters_increase(objspace, &objspace->malloc_counters.counters);
         gc_malloc_counters_snapshot(objspace, &objspace->malloc_counters.counters);
         size_t old_limit = malloc_limit;
+        bool settling_previous_sweep = is_lazy_sweeping(objspace);
+        bool adjust_after_sweep =
+            !settling_previous_sweep &&
+            (objspace->profile.latest_gc_info & GPR_FLAG_MALLOC) &&
+            inc > 0 && (size_t)inc > malloc_limit;
 
-        /* A net-negative `inc` (more freed than malloc'd since last GC) is
-         * treated the same as "allocated less than malloc_limit".
-         * This matches what we were doing pre-monotonic counters, but is it right? */
-        /* A GC started by malloc always sees inc > malloc_limit, so growing on
-         * it would ratchet the limit to its maximum even when every malloc'd
-         * byte is garbage.  Only a GC started for another reason measures it. */
-        if (inc > 0 && (size_t)inc > malloc_limit &&
-                !(objspace->profile.latest_gc_info & GPR_FLAG_MALLOC)) {
-            malloc_limit = (size_t)((size_t)inc * gc_params.malloc_limit_growth_factor);
-            if (malloc_limit > gc_params.malloc_limit_max) {
-                malloc_limit = gc_params.malloc_limit_max;
+        objspace->flags.adjust_malloc_limit_after_sweep = adjust_after_sweep;
+        if (!settling_previous_sweep) {
+            if (adjust_after_sweep) {
+                objspace->malloc_counters.malloc_increase_at_gc_start = inc;
             }
-        }
-        else {
-            malloc_limit = (size_t)(malloc_limit * 0.98); /* magic number */
-            if (malloc_limit < gc_params.malloc_limit_min) {
-                malloc_limit = gc_params.malloc_limit_min;
+            else {
+                if (inc > 0 && (size_t)inc > malloc_limit) {
+                    objspace->flags.malloc_limit_low_reclaim_count = 0;
+                    malloc_limit = (size_t)((size_t)inc * gc_params.malloc_limit_growth_factor);
+                    if (malloc_limit > gc_params.malloc_limit_max) {
+                        malloc_limit = gc_params.malloc_limit_max;
+                    }
+                }
+                else {
+                    if (objspace->profile.latest_gc_info & GPR_FLAG_MALLOC) {
+                        objspace->flags.malloc_limit_low_reclaim_count = 0;
+                    }
+                    malloc_limit = (size_t)(malloc_limit * 0.98);
+                    if (malloc_limit < gc_params.malloc_limit_min) {
+                        malloc_limit = gc_params.malloc_limit_min;
+                    }
+                }
             }
         }
 
@@ -9004,11 +9051,12 @@ gc_reset_malloc_info(rb_objspace_t *objspace, bool full_mark)
         }
     }
 
-    /* reset oldmalloc info */
-#if RGENGC_ESTIMATE_OLDMALLOC
     MALLOC_COUNTERS_LOCK(objspace);
     gc_counter_store_release(&objspace->malloc_counters.freed_in_gc, 0);
     MALLOC_COUNTERS_UNLOCK(objspace);
+
+    /* reset oldmalloc info */
+#if RGENGC_ESTIMATE_OLDMALLOC
     if (full_mark) {
         RUBY_ATOMIC_SIZE_EXCHANGE(objspace->malloc_counters.oldmalloc_increase, 0);
 
@@ -10365,13 +10413,15 @@ objspace_absorb(rb_objspace_t *dst, rb_objspace_t *src)
         dheap->total_freed_objects += sheap->total_freed_objects;
         dheap->final_slots_count += sheap->final_slots_count;
 
-        if (dheap->init_slots_scaled && sheap->init_slots_scaled) {
-            dheap->init_slots += sheap->init_slots;
+        if (sheap->total_pages > 0) {
+            if (dheap->init_slots_scaled && sheap->init_slots_scaled) {
+                dheap->init_slots += sheap->init_slots;
+            }
+            else {
+                dheap->init_slots_scaled = false;
+            }
+            dheap->init_slots_starved |= sheap->init_slots_starved;
         }
-        else {
-            dheap->init_slots_scaled = false;
-        }
-        dheap->init_slots_starved |= sheap->init_slots_starved;
     }
 
     /* The objspace-wide page bookkeeping. */
@@ -11939,8 +11989,8 @@ malloc_increase_commit(rb_objspace_t *objspace, size_t new_size, size_t old_size
         size_t delta = old_size - new_size;
         MALLOC_COUNTERS_LOCK(objspace);
         gc_counter_add(&objspace->malloc_counters.counters.free, delta);
-#if RGENGC_ESTIMATE_OLDMALLOC
         if (during_gc) gc_counter_add(&objspace->malloc_counters.freed_in_gc, delta);
+#if RGENGC_ESTIMATE_OLDMALLOC
         atomic_sub_nounderflow(&objspace->malloc_counters.oldmalloc_increase, delta);
 #endif
         MALLOC_COUNTERS_UNLOCK(objspace);

@@ -247,6 +247,29 @@ class TestGc < Test::Unit::TestCase
     RUBY
   end
 
+  def test_retained_malloc_grows_malloc_limit
+    env = {
+      "RUBY_GC_MALLOC_LIMIT" => "#{1024 * 1024}",
+      "RUBY_GC_MALLOC_LIMIT_MAX" => "#{16 * 1024 * 1024}",
+      "RUBY_GC_MALLOC_LIMIT_GROWTH_FACTOR" => "2.0",
+    }
+    assert_in_out_err([env, "-W0", "-e", <<~'RUBY'], "", ["true"], [], "")
+      live_objects = Array.new(250_000) { Object.new }
+      GC.start
+      initial_limit = GC.stat(:malloc_increase_bytes_limit)
+      GC::Profiler.enable
+      buffers = Array.new(16) { "x" * (1024 * 1024) }
+      profile = GC::Profiler.raw_data
+
+      malloc_gcs = profile.count { |row| row[:GC_FLAGS][:gc_by] == :malloc }
+      valid = malloc_gcs >= 2
+      valid &&= GC.stat(:malloc_increase_bytes_limit) > initial_limit
+      valid &&= buffers.sum(&:bytesize) == 16 * 1024 * 1024
+      valid &&= live_objects.length == 250_000
+      puts valid
+    RUBY
+  end
+
   def test_lazy_sweep_malloc_does_not_trigger_oldmalloc_major_gc
     omit 'default GC only' unless GC.config[:implementation] == 'default'
     omit 'stress' if GC.stress
@@ -746,6 +769,31 @@ class TestGc < Test::Unit::TestCase
 
       assert_operator GC.count, :>, gc_count
       assert_operator GC.stat_heap(heap, :heap_eden_slots), :<, init_slots
+    RUBY
+  end
+
+  def test_empty_ractor_does_not_restore_full_init_allowance
+    env = { "RUBY_GC_HEAP_INIT_BYTES" => "#{8 * 1024 * 1024}" }
+    assert_separately([env, "-W0"], __FILE__, __LINE__, <<~'RUBY', timeout: 60)
+      Warning[:experimental] = false
+      require "rbconfig/sizeof"
+      heap = GC::INTERNAL_CONSTANTS[:HEAP_COUNT] - 1
+      slot_size = GC.stat_heap(heap, :slot_size)
+      capa = (slot_size - GC::INTERNAL_CONSTANTS[:RVALUE_OVERHEAD] - (2 * RbConfig::SIZEOF["void*"])) / RbConfig::SIZEOF["void*"]
+      init_slots = 8 * 1024 * 1024 / slot_size
+      anchor = Array.new(capa)
+
+      GC.start
+      GC.start
+      Ractor.new { nil }.value
+
+      gc_count = GC.count
+      objects = []
+      objects << Array.new(capa) while GC.count == gc_count && objects.length < init_slots * 2
+
+      assert_operator objects.length, :<, init_slots / 2,
+            "empty Ractor restored the full init allowance (objects: #{objects.length}, init_slots: #{init_slots})"
+      assert_equal capa, anchor.length
     RUBY
   end
 
