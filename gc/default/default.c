@@ -8975,7 +8975,11 @@ gc_reset_malloc_info(rb_objspace_t *objspace, bool full_mark)
         /* A net-negative `inc` (more freed than malloc'd since last GC) is
          * treated the same as "allocated less than malloc_limit".
          * This matches what we were doing pre-monotonic counters, but is it right? */
-        if (inc > 0 && (size_t)inc > malloc_limit) {
+        /* A GC started by malloc always sees inc > malloc_limit, so growing on
+         * it would ratchet the limit to its maximum even when every malloc'd
+         * byte is garbage.  Only a GC started for another reason measures it. */
+        if (inc > 0 && (size_t)inc > malloc_limit &&
+                !(objspace->profile.latest_gc_info & GPR_FLAG_MALLOC)) {
             malloc_limit = (size_t)((size_t)inc * gc_params.malloc_limit_growth_factor);
             if (malloc_limit > gc_params.malloc_limit_max) {
                 malloc_limit = gc_params.malloc_limit_max;
