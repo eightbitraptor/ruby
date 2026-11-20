@@ -57,6 +57,9 @@ VALUE rb_yarv_opt_empty_p(VALUE recv);
 VALUE rb_yarv_opt_succ(VALUE recv);
 VALUE rb_yarv_opt_regexpmatch2(VALUE recv, VALUE obj);
 
+/* yarv/src/exec.rs. The dispatch loop for OPT_CALL_THREADED_CODE. */
+void rb_yarv_exec_loop(rb_execution_context_t *ec, rb_control_frame_t *cfp);
+
 /* The instruction handlers in yarv/src/insns.rs, generated from insns.def. */
 #include "yarv_insns.h"
 

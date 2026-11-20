@@ -15,6 +15,7 @@
 
 % RubyVM::BareInstruction.all.select(&:rust?).each do |insn|
 <%= insn.rust_c_prototype %>;
+<%= insn.rust_entry_c_prototype %>;
 % end
 
 #endif /* RUBY_YARV_INSNS_H */

@@ -121,16 +121,9 @@ rb_vm_get_insns_address_table(void)
 static VALUE
 vm_exec_core(rb_execution_context_t *ec)
 {
-    register rb_control_frame_t *reg_cfp = ec->cfp;
     rb_thread_t *th;
 
-    while (1) {
-        reg_cfp = ((rb_insn_func_t) (*GET_PC()))(ec, reg_cfp);
-
-        if (UNLIKELY(reg_cfp == 0)) {
-            break;
-        }
-    }
+    rb_yarv_exec_loop(ec, ec->cfp);
 
     if (!UNDEF_P((th = rb_ec_thread_ptr(ec))->retval)) {
         VALUE ret = th->retval;

@@ -34,6 +34,7 @@
 # mkdepend: depends revision.h => {$(VPATH)}revision.h
 # mkdepend: depends vm.inc => {$(VPATH)}vm.inc
 # mkdepend: depends vmtc.inc => {$(VPATH)}vmtc.inc
+# mkdepend: depends yarv_insns.h => {$(VPATH)}yarv_insns.h
 # mkdepend: undef parse.y => RIPPER
 
 .deps/depend update-dependencies: $(REVISION_H) $(srcdir)/depend \

@@ -9,11 +9,13 @@
 #![cfg_attr(not(test), no_std)]
 
 pub mod cruby;
+pub mod exec;
 pub mod insnhelper;
 pub mod insns;
 
 /// The C ABI entry points that tool/ruby_vm/views/yarv_insns.rs.erb
 /// generates from insns.def. The build sets `YARV_INSNS_RS`.
+#[allow(unused_parens)]
 mod generated {
     use crate::cruby::*;
     include!(env!("YARV_INSNS_RS"));

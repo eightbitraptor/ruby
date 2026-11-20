@@ -231,6 +231,57 @@ class RubyVM::BareInstruction
     "#[unsafe(no_mangle)]\n#{sig} {\n    #{body}\n}\n"
   end
 
+  def rust_entry_name
+    "rb_yarv_insn_entry_#{name}"
+  end
+
+  def rust_entry_c_prototype
+    "rb_control_frame_t *#{rust_entry_name}(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp)"
+  end
+
+  # `sp_inc` as a Rust expression. The attribute is C; only operand names,
+  # integers, `(rb_snum_t)` casts, and +/- are translated.
+  def rust_sp_inc
+    expr = @attrs.fetch('sp_inc').expr.expr.sub(/;\s*\z/, '').gsub('(rb_snum_t)', '')
+    names = operands.map {|v| v[:name] }
+    expr.gsub(/[A-Za-z_]\w*/) do |id|
+      raise "#{@name}: cannot translate sp_inc `#{expr}' to Rust" unless names.include?(id)
+      "(#{rust_ident id} as isize)"
+    end
+  end
+
+  # The complete instruction as a call-threaded function. It decodes the
+  # operands, reads the popped values, and pushes the results in the order
+  # that _insn_entry.erb uses.
+  def rust_entry
+    raise "#{@name}: Rust entries do not support handles_sp" if handles_sp?
+    lines = ['let pc = (*cfp).pc;']
+    operands.each_with_index do |v, i|
+      slot = "*pc.add(#{i + 1})"
+      expr = v[:type] == 'VALUE' ? slot : "(#{slot}).0 as #{v[:type]}"
+      lines << "let #{rust_ident v[:name]}: #{v[:type]} = #{expr};"
+    end
+    pops.reverse_each.with_index.reverse_each do |v, i|
+      lines << "let #{rust_ident v[:name]}: VALUE = *(*cfp).sp.sub(#{i + 1});"
+    end
+    lines << "(*cfp).pc = pc.add(#{width});"
+    args = (['ec', 'cfp'] + rust_args.map {|v| rust_ident v[:name] }).join(', ')
+    call = "crate::insns::#{name}(#{args})"
+    names = rust_rets.map {|v| rust_ident v[:name] }
+    case names.size
+    when 0 then lines << "#{call};"
+    when 1 then lines << "let #{names[0]} = #{call};"
+    else lines << "let (#{names.join(', ')}) = #{call};"
+    end
+    lines << "(*cfp).sp = (*cfp).sp.offset(#{rust_sp_inc});"
+    rets.reverse_each.with_index do |v, i|
+      lines << "*(*cfp).sp.sub(#{i + 1}) = #{rust_ident v[:name]};"
+    end
+    lines << 'cfp'
+    body = lines.map {|l| "        #{l}" }.join("\n")
+    "#[unsafe(no_mangle)]\npub unsafe extern \"C\" fn #{rust_entry_name}(ec: EcPtr, cfp: CfpPtr) -> CfpPtr {\n    unsafe {\n#{body}\n    }\n}\n"
+  end
+
   private
 
   def check_attribute_consistency
