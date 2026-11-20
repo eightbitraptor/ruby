@@ -15,6 +15,9 @@
 // threaded code (OPT_CALL_THREADED_CODE). vmtc.inc puts it in the
 // instruction address table in place of the C function.
 
+/// The opcode of opt_send_without_block, for CALL_SIMPLE_METHOD().
+pub const YARVINSN_OPT_SEND_WITHOUT_BLOCK: usize = <%= RubyVM::Instructions.index { _1.name == 'opt_send_without_block' } %>;
+
 % RubyVM::BareInstruction.all.select(&:rust?).each do |insn|
 <%= insn.rust_shim %>
 <%= insn.rust_entry %>

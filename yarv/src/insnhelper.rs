@@ -1,8 +1,8 @@
 //! Ports of the instruction helpers in vm_insnhelper.c.
 //!
-//! Each `rb_yarv_opt_*` function has the contract of the C `vm_opt_*`
-//! function it replaces. It returns `Qundef` when the instruction must fall
-//! back to a method call.
+//! Each `opt_*` function has the contract of the C `vm_opt_*` function it
+//! replaces. It returns `Qundef` when the instruction must fall back to a
+//! method call.
 
 use core::ffi::c_long;
 
@@ -95,8 +95,8 @@ unsafe fn heap_class_p(recv: VALUE, klass: VALUE, bop: ruby_basic_operators, fla
     unsafe { recv.rbasic_class() == klass && basic_op_unredefined_p(bop, flag) }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_plus(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_plus(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_PLUS) {
         Num::Fix => fix_plus_fix(recv, obj),
         Num::Flo(a, b) => dbl2num(a + b),
@@ -117,8 +117,8 @@ pub extern "C" fn rb_yarv_opt_plus(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_minus(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_minus(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_MINUS) {
         Num::Fix => fix_minus_fix(recv, obj),
         Num::Flo(a, b) => dbl2num(a - b),
@@ -126,8 +126,8 @@ pub extern "C" fn rb_yarv_opt_minus(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_mult(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_mult(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_MULT) {
         Num::Fix => fix_mul_fix(recv, obj),
         Num::Flo(a, b) => dbl2num(a * b),
@@ -135,8 +135,8 @@ pub extern "C" fn rb_yarv_opt_mult(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_div(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_div(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_DIV) {
         Num::Fix if obj.fix2long() == 0 => Qundef,
         Num::Fix => fix_divmod_fix(recv, obj).0,
@@ -145,8 +145,8 @@ pub extern "C" fn rb_yarv_opt_div(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_mod(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_mod(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_MOD) {
         Num::Fix if obj.fix2long() == 0 => Qundef,
         Num::Fix => fix_divmod_fix(recv, obj).1,
@@ -157,8 +157,8 @@ pub extern "C" fn rb_yarv_opt_mod(recv: VALUE, obj: VALUE) -> VALUE {
 
 macro_rules! comparison {
     ($name:ident, $bop:expr, $op:tt) => {
-        #[unsafe(no_mangle)]
-        pub extern "C" fn $name(recv: VALUE, obj: VALUE) -> VALUE {
+        #[inline]
+        pub fn $name(recv: VALUE, obj: VALUE) -> VALUE {
             match classify(recv, obj, $bop) {
                 Num::Fix => rbool((recv.0 as isize) $op (obj.0 as isize)),
                 Num::Flo(a, b) => rbool(a $op b),
@@ -168,13 +168,13 @@ macro_rules! comparison {
     };
 }
 
-comparison!(rb_yarv_opt_lt, BOP_LT, <);
-comparison!(rb_yarv_opt_le, BOP_LE, <=);
-comparison!(rb_yarv_opt_gt, BOP_GT, >);
-comparison!(rb_yarv_opt_ge, BOP_GE, >=);
+comparison!(opt_lt, BOP_LT, <);
+comparison!(opt_le, BOP_LE, <=);
+comparison!(opt_gt, BOP_GT, >);
+comparison!(opt_ge, BOP_GE, >=);
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_ltlt(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_ltlt(recv: VALUE, obj: VALUE) -> VALUE {
     if recv.special_const_p() {
         return Qundef;
     }
@@ -193,8 +193,8 @@ pub extern "C" fn rb_yarv_opt_ltlt(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_and(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_and(recv: VALUE, obj: VALUE) -> VALUE {
     // Both tag bits must be 1 for the result to be a Fixnum.
     let ret = VALUE(recv.0 & obj.0);
     if ret.fixnum_p() && basic_op_unredefined_p(BOP_AND, INTEGER_REDEFINED_OP_FLAG) {
@@ -204,8 +204,8 @@ pub extern "C" fn rb_yarv_opt_and(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_or(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_or(recv: VALUE, obj: VALUE) -> VALUE {
     if recv.fixnum_p() && obj.fixnum_p() && basic_op_unredefined_p(BOP_OR, INTEGER_REDEFINED_OP_FLAG) {
         VALUE(recv.0 | obj.0)
     } else {
@@ -233,8 +233,8 @@ unsafe fn ary_entry(ary: VALUE, mut offset: c_long) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_aref(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_aref(recv: VALUE, obj: VALUE) -> VALUE {
     unsafe {
         if recv.special_const_p() {
             if recv.fixnum_p() && obj.fixnum_p() && basic_op_unredefined_p(BOP_AREF, INTEGER_REDEFINED_OP_FLAG) {
@@ -255,8 +255,8 @@ pub extern "C" fn rb_yarv_opt_aref(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_aset(recv: VALUE, obj: VALUE, set: VALUE) -> VALUE {
+#[inline]
+pub fn opt_aset(recv: VALUE, obj: VALUE, set: VALUE) -> VALUE {
     unsafe {
         if recv.special_const_p() {
             Qundef
@@ -273,8 +273,8 @@ pub extern "C" fn rb_yarv_opt_aset(recv: VALUE, obj: VALUE, set: VALUE) -> VALUE
 }
 
 /// `vm_opt_length`. `bop` is `BOP_LENGTH`, `BOP_SIZE`, or `BOP_EMPTY_P`.
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_length(recv: VALUE, bop: ruby_basic_operators) -> VALUE {
+#[inline]
+pub fn opt_length(recv: VALUE, bop: ruby_basic_operators) -> VALUE {
     unsafe {
         if recv.special_const_p() {
             Qundef
@@ -294,9 +294,9 @@ pub extern "C" fn rb_yarv_opt_length(recv: VALUE, bop: ruby_basic_operators) -> 
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_empty_p(recv: VALUE) -> VALUE {
-    match rb_yarv_opt_length(recv, BOP_EMPTY_P) {
+#[inline]
+pub fn opt_empty_p(recv: VALUE) -> VALUE {
+    match opt_length(recv, BOP_EMPTY_P) {
         len if len.undef_p() => len,
         len if len == long2fix(0) => Qtrue,
         _ => Qfalse,
@@ -315,8 +315,8 @@ fn fix_succ(x: VALUE) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_succ(recv: VALUE) -> VALUE {
+#[inline]
+pub fn opt_succ(recv: VALUE) -> VALUE {
     unsafe {
         if recv.fixnum_p() && basic_op_unredefined_p(BOP_SUCC, INTEGER_REDEFINED_OP_FLAG) {
             fix_succ(recv)
@@ -330,8 +330,8 @@ pub extern "C" fn rb_yarv_opt_succ(recv: VALUE) -> VALUE {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn rb_yarv_opt_regexpmatch2(recv: VALUE, obj: VALUE) -> VALUE {
+#[inline]
+pub fn opt_regexpmatch2(recv: VALUE, obj: VALUE) -> VALUE {
     unsafe {
         if recv.special_const_p() {
             Qundef

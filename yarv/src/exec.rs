@@ -17,3 +17,16 @@ pub unsafe extern "C" fn rb_yarv_exec_loop(ec: EcPtr, mut cfp: CfpPtr) {
         }
     }
 }
+
+/// `CALL_SIMPLE_METHOD()` for call-threaded code: runs the C
+/// opt_send_without_block instruction at the rewound PC.
+#[cold]
+#[inline(never)]
+pub unsafe fn call_simple_method(ec: EcPtr, cfp: CfpPtr) -> CfpPtr {
+    unsafe {
+        let table = rb_vm_get_insns_address_table();
+        let insn: InsnFunc =
+            core::mem::transmute(*table.add(crate::generated::YARVINSN_OPT_SEND_WITHOUT_BLOCK));
+        insn(ec, cfp)
+    }
+}

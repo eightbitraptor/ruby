@@ -309,6 +309,7 @@ unsafe extern "C" {
         elts: *const VALUE,
     ) -> VALUE;
     pub static mut ruby_vm_redefined_flag: [core::ffi::c_short; 36usize];
+    pub fn rb_vm_get_insns_address_table() -> *mut *const core::ffi::c_void;
     pub fn rb_flo_div_flo(x: VALUE, y: VALUE) -> VALUE;
     pub fn ruby_float_mod(x: f64, y: f64) -> f64;
     pub fn rb_fix_aref(fix: VALUE, idx: VALUE) -> VALUE;

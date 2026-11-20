@@ -16,6 +16,14 @@ INSN_ENTRY(<%= insn.name %>)
 %     jump_dest = "opt_send_without_block"
 %   end
     <%= 'ADD_PC(1);' if insn.name == 'trace_opt_neq' %>
+% if !jump_dest && insn.rust_entry_destination
+#if OPT_CALL_THREADED_CODE
+    return <%= insn.rust_entry_destination %>(ec, reg_cfp);
+#else
+    DISPATCH_ORIGINAL_INSN(<%= insn.jump_destination %>);
+#endif
+% else
     DISPATCH_ORIGINAL_INSN(<%= jump_dest || insn.jump_destination %>);
+% end
     END_INSN(<%= insn.name %>);
 }

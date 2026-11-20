@@ -55,6 +55,10 @@
          must be empty.  The generator writes the glue on both sides
          (vm.inc, yarv_insns.h, yarv_insns.rs) from the declarations.
 
+       * rust_send_on_undef: If it is true, a Qundef result from the
+         Rust handler calls the method instead, as CALL_SIMPLE_METHOD()
+         does.  The last operand must be the CALL_DATA.
+
    - Attributes can access operands, but not stack (push/pop) variables.
 
    - An instruction's body is a pure C block, copied verbatimly into
@@ -1370,12 +1374,9 @@ opt_plus
 (VALUE recv, VALUE obj)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_plus(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X-Y. */
@@ -1385,12 +1386,9 @@ opt_minus
 (VALUE recv, VALUE obj)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_minus(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X*Y. */
@@ -1400,12 +1398,9 @@ opt_mult
 (VALUE recv, VALUE obj)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_mult(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X/Y. */
@@ -1418,12 +1413,9 @@ opt_div
  * ZeroDivisionError#initialize is called.  */
 // attr bool leaf = false;
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_div(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X%Y. */
@@ -1435,12 +1427,9 @@ opt_mod
 /* Same discussion as opt_div. */
 // attr bool leaf = false;
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_mod(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X==Y. */
@@ -1480,12 +1469,9 @@ opt_lt
 (VALUE recv, VALUE obj)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_lt(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X<=Y. */
@@ -1495,12 +1481,9 @@ opt_le
 (VALUE recv, VALUE obj)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_le(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X>Y. */
@@ -1510,12 +1493,9 @@ opt_gt
 (VALUE recv, VALUE obj)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_gt(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X>=Y. */
@@ -1525,12 +1505,9 @@ opt_ge
 (VALUE recv, VALUE obj)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_ge(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* << */
@@ -1544,12 +1521,9 @@ opt_ltlt
  * string's encoding?  Of course an exception.  That's not a leaf. */
 // attr bool leaf = false; /* has "invalid codepoint" exception */
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_ltlt(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X&Y. */
@@ -1559,12 +1533,9 @@ opt_and
 (VALUE recv, VALUE obj)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_and(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized X|Y. */
@@ -1574,12 +1545,9 @@ opt_or
 (VALUE recv, VALUE obj)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_or(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* [] */
@@ -1588,18 +1556,15 @@ opt_aref
 (CALL_DATA cd)
 (VALUE recv, VALUE obj)
 (VALUE val)
-/* This is complicated.  In case of hash, rb_yarv_opt_aref() resorts to
+/* This is complicated.  In case of hash, insnhelper::opt_aref() resorts to
  * rb_hash_aref().  If `recv` has no `obj`, this function then yields
  * default_proc.  This is a method call.  So opt_aref is
  * (surprisingly) not leaf. */
 // attr bool leaf = false; /* has rb_funcall() */ /* calls #yield */
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_aref(recv, obj);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* recv[obj] = set */
@@ -1608,16 +1573,13 @@ opt_aset
 (CALL_DATA cd)
 (VALUE recv, VALUE obj, VALUE set)
 (VALUE val)
-/* This is another story than opt_aref.  When rb_yarv_opt_aset() resorts
+/* This is another story than opt_aref.  When insnhelper::opt_aset() resorts
  * to rb_hash_aset(), which should call #hash for `obj`. */
 // attr bool leaf = false; /* has rb_funcall() */ /* calls #hash */
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_aset(recv, obj, set);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized length */
@@ -1627,12 +1589,9 @@ opt_length
 (VALUE recv)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_length(recv, BOP_LENGTH);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized size */
@@ -1642,12 +1601,9 @@ opt_size
 (VALUE recv)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_length(recv, BOP_SIZE);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized empty? */
@@ -1657,12 +1613,9 @@ opt_empty_p
 (VALUE recv)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_empty_p(recv);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized succ */
@@ -1672,12 +1625,9 @@ opt_succ
 (VALUE recv)
 (VALUE val)
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_succ(recv);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* optimized not */
@@ -1703,12 +1653,9 @@ opt_regexpmatch2
 (VALUE val)
 // attr bool leaf = false; /* match_at() has rb_thread_check_ints() */
 // attr bool zjit_profile = true;
+// attr bool rust = true;
+// attr bool rust_send_on_undef = true;
 {
-    val = rb_yarv_opt_regexpmatch2(obj2, obj1);
-
-    if (UNDEF_P(val)) {
-        CALL_SIMPLE_METHOD();
-    }
 }
 
 /* call specific function with args */

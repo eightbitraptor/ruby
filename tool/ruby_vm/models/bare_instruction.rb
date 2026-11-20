@@ -151,6 +151,12 @@ class RubyVM::BareInstruction
     @attrs.fetch('rust').expr.expr != 'false;'
   end
 
+  # True when a Qundef result from the Rust handler means "call the method",
+  # as CALL_SIMPLE_METHOD() does in a C body.
+  def rust_send_on_undef?
+    @attrs.fetch('rust_send_on_undef').expr.expr != 'false;'
+  end
+
   def rust_handler_name
     "rb_yarv_insn_#{name}"
   end
@@ -206,6 +212,9 @@ class RubyVM::BareInstruction
     # The handler moves cfp->pc to jump. Copy it back to the PC register.
     if rust_handler_operands.any? {|v| v[:type] == 'OFFSET' }
       lines << "    SET_PC(GET_CFP()->pc);"
+    end
+    if rust_send_on_undef?
+      lines << "    if (UNDEF_P(#{rust_rets[0][:name]})) CALL_SIMPLE_METHOD();"
     end
     lines.join("\n") + "\n"
   end
@@ -273,6 +282,15 @@ class RubyVM::BareInstruction
     when 1 then lines << "let #{names[0]} = #{call};"
     else lines << "let (#{names.join(', ')}) = #{call};"
     end
+    if rust_send_on_undef?
+      # CALL_SIMPLE_METHOD(): rewind the PC so that opt_send_without_block
+      # reads this instruction's last operand as its CALL_DATA.
+      rewind = width - RubyVM::BareInstruction.find('opt_send_without_block').width
+      lines << "if #{names[0]}.undef_p() {"
+      lines << "    (*cfp).pc = pc.add(#{rewind});"
+      lines << "    return crate::exec::call_simple_method(ec, cfp);"
+      lines << "}"
+    end
     lines << "(*cfp).sp = (*cfp).sp.offset(#{rust_sp_inc});"
     rets.reverse_each.with_index do |v, i|
       lines << "*(*cfp).sp.sub(#{i + 1}) = #{rust_ident v[:name]};"
@@ -303,6 +321,12 @@ class RubyVM::BareInstruction
     if rust? and not @expr.blank?
       raise "#{@name} is a Rust instruction; its body in insns.def must be empty"
     end
+    if rust_send_on_undef?
+      unless rust? and rets.size == 1 and operands.last&.fetch(:type) == 'CALL_DATA'
+        raise "#{@name}: rust_send_on_undef needs a Rust instruction with one " \
+              "return value and a CALL_DATA last operand"
+      end
+    end
   end
 
   def generate_attribute t, k, v
@@ -328,6 +352,7 @@ class RubyVM::BareInstruction
     generate_attribute 'bool', 'leaf', default_definition_of_leaf
     generate_attribute 'bool', 'zjit_profile', false
     generate_attribute 'bool', 'rust', false
+    generate_attribute 'bool', 'rust_send_on_undef', false
   end
 
   def default_definition_of_handles_sp

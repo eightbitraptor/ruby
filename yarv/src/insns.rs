@@ -11,6 +11,7 @@
 use core::ffi::{c_int, c_long};
 
 use crate::cruby::*;
+use crate::insnhelper;
 
 #[inline(always)]
 unsafe fn sp(cfp: CfpPtr) -> *mut VALUE {
@@ -199,4 +200,84 @@ pub unsafe fn adjuststack(_ec: EcPtr, _cfp: CfpPtr, _n: rb_num_t) {}
 
 pub unsafe fn checktype(_ec: EcPtr, _cfp: CfpPtr, r#type: rb_num_t, val: VALUE) -> VALUE {
     rbool(rb_type(val) == r#type as ruby_value_type)
+}
+
+// The specialized method call instructions. A handler returns Qundef when
+// the receiver does not qualify for the fast path; the generated glue then
+// calls the method through opt_send_without_block.
+
+pub unsafe fn opt_plus(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_plus(recv, obj)
+}
+
+pub unsafe fn opt_minus(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_minus(recv, obj)
+}
+
+pub unsafe fn opt_mult(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_mult(recv, obj)
+}
+
+pub unsafe fn opt_div(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_div(recv, obj)
+}
+
+pub unsafe fn opt_mod(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_mod(recv, obj)
+}
+
+pub unsafe fn opt_lt(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_lt(recv, obj)
+}
+
+pub unsafe fn opt_le(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_le(recv, obj)
+}
+
+pub unsafe fn opt_gt(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_gt(recv, obj)
+}
+
+pub unsafe fn opt_ge(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_ge(recv, obj)
+}
+
+pub unsafe fn opt_ltlt(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_ltlt(recv, obj)
+}
+
+pub unsafe fn opt_and(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_and(recv, obj)
+}
+
+pub unsafe fn opt_or(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_or(recv, obj)
+}
+
+pub unsafe fn opt_aref(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE) -> VALUE {
+    insnhelper::opt_aref(recv, obj)
+}
+
+pub unsafe fn opt_aset(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE, obj: VALUE, set: VALUE) -> VALUE {
+    insnhelper::opt_aset(recv, obj, set)
+}
+
+pub unsafe fn opt_length(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE) -> VALUE {
+    insnhelper::opt_length(recv, BOP_LENGTH)
+}
+
+pub unsafe fn opt_size(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE) -> VALUE {
+    insnhelper::opt_length(recv, BOP_SIZE)
+}
+
+pub unsafe fn opt_empty_p(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE) -> VALUE {
+    insnhelper::opt_empty_p(recv)
+}
+
+pub unsafe fn opt_succ(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE) -> VALUE {
+    insnhelper::opt_succ(recv)
+}
+
+pub unsafe fn opt_regexpmatch2(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, obj2: VALUE, obj1: VALUE) -> VALUE {
+    insnhelper::opt_regexpmatch2(obj2, obj1)
 }

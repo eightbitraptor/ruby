@@ -34,6 +34,7 @@ fn main() {
         .allowlist_type("rb_len_t")
         .allowlist_type("vm_frame_env_flags")
         .allowlist_function("rb_gc_writebarrier")
+        .allowlist_function("rb_vm_get_insns_address_table")
         .allowlist_function("rb_gc_writebarrier_remember")
         .allowlist_type("rb_float_value_type")
         .allowlist_type("rb_iseq_t")
