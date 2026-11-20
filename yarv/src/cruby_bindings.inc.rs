@@ -248,11 +248,35 @@ pub struct rb_control_frame_struct {
     pub jit_return: *mut core::ffi::c_void,
 }
 pub type rb_control_frame_t = rb_control_frame_struct;
+pub const VM_FRAME_MAGIC_METHOD: vm_frame_env_flags = 286326785;
+pub const VM_FRAME_MAGIC_BLOCK: vm_frame_env_flags = 572653569;
+pub const VM_FRAME_MAGIC_CLASS: vm_frame_env_flags = 858980353;
+pub const VM_FRAME_MAGIC_TOP: vm_frame_env_flags = 1145307137;
+pub const VM_FRAME_MAGIC_CFUNC: vm_frame_env_flags = 1431633921;
+pub const VM_FRAME_MAGIC_IFUNC: vm_frame_env_flags = 1717960705;
+pub const VM_FRAME_MAGIC_EVAL: vm_frame_env_flags = 2004287489;
+pub const VM_FRAME_MAGIC_RESCUE: vm_frame_env_flags = 2022178817;
+pub const VM_FRAME_MAGIC_DUMMY: vm_frame_env_flags = 2040070145;
+pub const VM_FRAME_MAGIC_MASK: vm_frame_env_flags = 2147418113;
+pub const VM_FRAME_FLAG_FINISH: vm_frame_env_flags = 32;
+pub const VM_FRAME_FLAG_BMETHOD: vm_frame_env_flags = 64;
+pub const VM_FRAME_FLAG_CFRAME: vm_frame_env_flags = 128;
+pub const VM_FRAME_FLAG_LAMBDA: vm_frame_env_flags = 256;
+pub const VM_FRAME_FLAG_MODIFIED_BLOCK_PARAM: vm_frame_env_flags = 512;
+pub const VM_FRAME_FLAG_CFRAME_KW: vm_frame_env_flags = 1024;
+pub const VM_FRAME_FLAG_PASSED: vm_frame_env_flags = 2048;
+pub const VM_FRAME_FLAG_BOX_REQUIRE: vm_frame_env_flags = 4096;
+pub const VM_ENV_FLAG_LOCAL: vm_frame_env_flags = 2;
+pub const VM_ENV_FLAG_ESCAPED: vm_frame_env_flags = 4;
+pub const VM_ENV_FLAG_WB_REQUIRED: vm_frame_env_flags = 8;
+pub const VM_ENV_FLAG_ISOLATED: vm_frame_env_flags = 16;
+pub type vm_frame_env_flags = u32;
 unsafe extern "C" {
     pub fn rb_int2big(i: isize) -> VALUE;
     pub fn rb_uint2big(i: usize) -> VALUE;
     pub fn rb_bug(fmt: *const core::ffi::c_char, ...) -> !;
     pub fn rb_float_new_in_heap(d: f64) -> VALUE;
+    pub fn rb_gc_writebarrier(old: VALUE, young: VALUE);
     pub fn rb_hash_size_num(hash: VALUE) -> usize;
     pub static mut rb_cArray: VALUE;
     pub static mut rb_cFalseClass: VALUE;
@@ -305,6 +329,7 @@ unsafe extern "C" {
         th: *mut rb_thread_struct,
         blocking_timing: core::ffi::c_int,
     ) -> core::ffi::c_int;
+    pub fn rb_gc_writebarrier_remember(obj: VALUE);
     pub fn rb_gvar_get(arg1: ID) -> VALUE;
     pub fn rb_gvar_set(arg1: ID, arg2: VALUE) -> VALUE;
 }

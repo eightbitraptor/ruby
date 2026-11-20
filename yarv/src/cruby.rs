@@ -313,3 +313,48 @@ pub unsafe fn vm_check_ints(ec: EcPtr) {
         }
     }
 }
+
+pub const VM_ENV_DATA_INDEX_SPECVAL: isize = -1;
+pub const VM_ENV_DATA_INDEX_FLAGS: isize = 0;
+pub const VM_ENV_DATA_INDEX_ENV: isize = 1;
+
+/// `VM_ENV_PREV_EP`.
+#[inline(always)]
+pub unsafe fn env_prev_ep(ep: *const VALUE) -> *const VALUE {
+    unsafe { ((*ep.offset(VM_ENV_DATA_INDEX_SPECVAL)).0 & !0x03) as *const VALUE }
+}
+
+/// `vm_env_write`.
+#[inline(always)]
+pub unsafe fn env_write(ep: *const VALUE, index: isize, v: VALUE) {
+    unsafe {
+        let flags = (*ep.offset(VM_ENV_DATA_INDEX_FLAGS)).0;
+        if flags & VM_ENV_FLAG_WB_REQUIRED as usize == 0 {
+            *(ep.offset(index) as *mut VALUE) = v;
+        } else {
+            env_write_slowpath(ep, index, v);
+        }
+    }
+}
+
+/// `vm_env_write_slowpath`.
+#[inline(never)]
+unsafe fn env_write_slowpath(ep: *const VALUE, index: isize, v: VALUE) {
+    unsafe {
+        let envval = *ep.offset(VM_ENV_DATA_INDEX_ENV);
+        let slot = ep.offset(index) as *mut VALUE;
+        if (*envval.as_rbasic()).flags.0 & RUBY_FL_SHAREABLE as usize != 0 {
+            // A write to a shareable env needs the full barrier. The env
+            // keeps WB_REQUIRED for later writes.
+            if !v.special_const_p() {
+                rb_gc_writebarrier(envval, v);
+            }
+            *slot = v;
+        } else {
+            rb_gc_writebarrier_remember(envval);
+            *slot = v;
+            let flags = ep.offset(VM_ENV_DATA_INDEX_FLAGS) as *mut VALUE;
+            *flags = VALUE((*flags).0 & !(VM_ENV_FLAG_WB_REQUIRED as usize));
+        }
+    }
+}

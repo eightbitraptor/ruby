@@ -83,10 +83,8 @@ getlocal
 (lindex_t idx, rb_num_t level)
 ()
 (VALUE val)
+// attr bool rust = true;
 {
-    val = *(vm_get_ep(GET_EP(), level) - idx);
-    RB_DEBUG_COUNTER_INC(lvar_get);
-    (void)RB_DEBUG_COUNTER_INC_IF(lvar_get_dynamic, level > 0);
 }
 
 /* Set a local variable (pointed to by 'idx') as val.
@@ -97,10 +95,8 @@ setlocal
 (lindex_t idx, rb_num_t level)
 (VALUE val)
 ()
+// attr bool rust = true;
 {
-    vm_env_write(vm_get_ep(GET_EP(), level), -(int)idx, val);
-    RB_DEBUG_COUNTER_INC(lvar_set);
-    (void)RB_DEBUG_COUNTER_INC_IF(lvar_set_dynamic, level > 0);
 }
 
 /* Get a block parameter. */
@@ -1251,9 +1247,8 @@ jump
 ()
 /* Same discussion as leave. */
 // attr bool leaf = false; /* has rb_threadptr_execute_interrupts() */
+// attr bool rust = true;
 {
-    RUBY_VM_CHECK_INTS(ec);
-    JUMP(dst);
 }
 
 /* if val is not false or nil, set PC to (PC + dst). */
@@ -1264,11 +1259,8 @@ branchif
 ()
 /* Same discussion as jump. */
 // attr bool leaf = false; /* has rb_threadptr_execute_interrupts() */
+// attr bool rust = true;
 {
-    if (RTEST(val)) {
-        RUBY_VM_CHECK_INTS(ec);
-        JUMP(dst);
-    }
 }
 
 /* if val is false or nil, set PC to (PC + dst). */
@@ -1279,11 +1271,8 @@ branchunless
 ()
 /* Same discussion as jump. */
 // attr bool leaf = false; /* has rb_threadptr_execute_interrupts() */
+// attr bool rust = true;
 {
-    if (!RTEST(val)) {
-        RUBY_VM_CHECK_INTS(ec);
-        JUMP(dst);
-    }
 }
 
 /* if val is nil, set PC to (PC + dst). */
@@ -1294,11 +1283,8 @@ branchnil
 ()
 /* Same discussion as jump. */
 // attr bool leaf = false; /* has rb_threadptr_execute_interrupts() */
+// attr bool rust = true;
 {
-    if (NIL_P(val)) {
-        RUBY_VM_CHECK_INTS(ec);
-        JUMP(dst);
-    }
 }
 
 /* same as jump, but without interrupt check */
@@ -1308,8 +1294,8 @@ jump_without_ints
 ()
 ()
 // attr bool leaf = true;
+// attr bool rust = true;
 {
-    JUMP(dst);
 }
 
 /* same as branchif, but without interrupt check */
@@ -1319,10 +1305,8 @@ branchif_without_ints
 (VALUE val)
 ()
 // attr bool leaf = true;
+// attr bool rust = true;
 {
-    if (RTEST(val)) {
-        JUMP(dst);
-    }
 }
 
 /* same as branchunless, but without interrupt check */
@@ -1332,10 +1316,8 @@ branchunless_without_ints
 (VALUE val)
 ()
 // attr bool leaf = true;
+// attr bool rust = true;
 {
-    if (!RTEST(val)) {
-        JUMP(dst);
-    }
 }
 
 /* same as branchnil, but without interrupt check */
@@ -1345,10 +1327,8 @@ branchnil_without_ints
 (VALUE val)
 ()
 // attr bool leaf = true;
+// attr bool rust = true;
 {
-    if (NIL_P(val)) {
-        JUMP(dst);
-    }
 }
 
 /**********************************************************/

@@ -31,6 +31,77 @@ unsafe fn stack_addr_from_top(cfp: CfpPtr, n: usize) -> *mut VALUE {
 
 pub unsafe fn nop(_ec: EcPtr, _cfp: CfpPtr) {}
 
+/// `vm_get_ep`. Walks `lv` levels up the environment chain.
+#[inline(always)]
+unsafe fn get_ep(ep: *const VALUE, lv: rb_num_t) -> *const VALUE {
+    let mut ep = ep;
+    for _ in 0..lv {
+        ep = unsafe { env_prev_ep(ep) };
+    }
+    ep
+}
+
+pub unsafe fn getlocal(_ec: EcPtr, cfp: CfpPtr, idx: lindex_t, level: rb_num_t) -> VALUE {
+    unsafe { *get_ep((*cfp).ep, level).sub(idx) }
+}
+
+pub unsafe fn setlocal(_ec: EcPtr, cfp: CfpPtr, idx: lindex_t, level: rb_num_t, val: VALUE) {
+    unsafe { env_write(get_ep((*cfp).ep, level), -(idx as isize), val) }
+}
+
+/// `JUMP(dst)`. The C side copies `cfp.pc` back to its PC register.
+#[inline(always)]
+unsafe fn jump_to(cfp: CfpPtr, dst: OFFSET) {
+    unsafe { (*cfp).pc = (*cfp).pc.offset(dst) }
+}
+
+pub unsafe fn jump(ec: EcPtr, cfp: CfpPtr, dst: OFFSET) {
+    unsafe {
+        vm_check_ints(ec);
+        jump_to(cfp, dst);
+    }
+}
+
+pub unsafe fn branchif(ec: EcPtr, cfp: CfpPtr, dst: OFFSET, val: VALUE) {
+    if val.test() {
+        unsafe { jump(ec, cfp, dst) }
+    }
+}
+
+pub unsafe fn branchunless(ec: EcPtr, cfp: CfpPtr, dst: OFFSET, val: VALUE) {
+    if !val.test() {
+        unsafe { jump(ec, cfp, dst) }
+    }
+}
+
+pub unsafe fn branchnil(ec: EcPtr, cfp: CfpPtr, dst: OFFSET, val: VALUE) {
+    if val.nil_p() {
+        unsafe { jump(ec, cfp, dst) }
+    }
+}
+
+pub unsafe fn jump_without_ints(_ec: EcPtr, cfp: CfpPtr, dst: OFFSET) {
+    unsafe { jump_to(cfp, dst) }
+}
+
+pub unsafe fn branchif_without_ints(_ec: EcPtr, cfp: CfpPtr, dst: OFFSET, val: VALUE) {
+    if val.test() {
+        unsafe { jump_to(cfp, dst) }
+    }
+}
+
+pub unsafe fn branchunless_without_ints(_ec: EcPtr, cfp: CfpPtr, dst: OFFSET, val: VALUE) {
+    if !val.test() {
+        unsafe { jump_to(cfp, dst) }
+    }
+}
+
+pub unsafe fn branchnil_without_ints(_ec: EcPtr, cfp: CfpPtr, dst: OFFSET, val: VALUE) {
+    if val.nil_p() {
+        unsafe { jump_to(cfp, dst) }
+    }
+}
+
 pub unsafe fn getglobal(_ec: EcPtr, _cfp: CfpPtr, gid: ID) -> VALUE {
     unsafe { rb_gvar_get(gid) }
 }
