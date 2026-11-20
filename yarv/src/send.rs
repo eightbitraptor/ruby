@@ -24,21 +24,25 @@ unsafe fn ci_flag_argc(ci: *const c_void) -> (u32, u32) {
     }
 }
 
-/// Pushes the frame of a Ruby method that takes only required parameters,
-/// as vm_call_iseq_setup_normal() does after vm_sendish() finds the method
-/// in the inline cache. Returns false, with no change, when the call does
-/// not qualify.
+/// The fast paths of `vm_sendish()` for a call through a valid inline
+/// cache with ARGS_SIMPLE call info:
+///
+/// - a Ruby method with only required parameters: pushes its frame as
+///   vm_call_iseq_setup_normal() does and returns Qundef;
+/// - attr_reader and attr_writer: vm_call_ivar() and vm_call_attrset().
+///
+/// Returns None, with no change, when the C version must run.
 #[inline(always)]
-unsafe fn push_simple_method_frame(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> bool {
+unsafe fn fast_send(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> Option<VALUE> {
     unsafe {
         if jit_enabled() {
-            return false;
+            return None;
         }
         let cd = cd as *const c_void;
         let (flag, argc) = ci_flag_argc(field(cd, l::CD_CI));
         let simple = (l::VM_CALL_ARGS_SIMPLE | l::VM_CALL_FCALL | l::VM_CALL_VCALL) as u32;
         if flag & !simple != 0 || flag & l::VM_CALL_ARGS_SIMPLE as u32 == 0 {
-            return false;
+            return None;
         }
 
         // vm_search_method_fastpath(): the inline cache must hit.
@@ -46,15 +50,15 @@ unsafe fn push_simple_method_frame(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> boo
         let recv = *argv.sub(1);
         let cc: *const c_void = field(cd, l::CD_CC);
         if field::<VALUE>(cc, l::CC_KLASS) != recv.class_of() {
-            return false;
+            return None;
         }
         let cme: *const c_void = field(cc, l::CC_CME);
         if cme.is_null() {
-            return false;
+            return None;
         }
         let cme_flags: usize = field(cme, l::CME_FLAGS);
         if cme_flags & l::CME_FLAG_INVALIDATED as usize != 0 {
-            return false;
+            return None;
         }
 
         // vm_call_method(): visibility.
@@ -62,21 +66,54 @@ unsafe fn push_simple_method_frame(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> boo
         if !(visi == l::METHOD_VISI_PUBLIC
             || (visi == l::METHOD_VISI_PRIVATE && flag & l::VM_CALL_FCALL as u32 != 0))
         {
-            return false;
+            return None;
         }
 
-        // vm_callee_setup_arg(): a Ruby method with only required parameters.
         let def: *const c_void = field(cme, l::CME_DEF);
-        if field::<u32>(def, 0) & l::DEF_TYPE_MASK as u32 != l::VM_METHOD_TYPE_ISEQ as u32 {
-            return false;
+        match (field::<u32>(def, 0) & l::DEF_TYPE_MASK as u32) as i64 {
+            l::VM_METHOD_TYPE_ISEQ => push_method_frame(ec, cfp, cme, def, recv, argv, argc),
+            // VM_CALL_METHOD_ATTR(): c_call/c_return hooks need the C path.
+            _ if ruby_vm_c_events_enabled != 0 => None,
+            l::VM_METHOD_TYPE_IVAR if argc == 0 => {
+                let val = crate::ivar::get_fast(recv, cc.cast::<u8>().add(l::CC_AUX as usize).cast())?;
+                (*cfp).sp = argv.sub(1);
+                Some(val)
+            }
+            l::VM_METHOD_TYPE_ATTRSET if argc == 1 => {
+                let val = *argv;
+                if !crate::ivar::set_fast(recv, val, cc.cast::<u8>().add(l::CC_AUX as usize).cast()) {
+                    return None;
+                }
+                (*cfp).sp = argv.sub(1);
+                Some(val)
+            }
+            _ => None,
         }
+    }
+}
+
+/// Pushes the frame of a Ruby method that takes only required parameters,
+/// as vm_call_iseq_setup_normal() does. Returns None, with no change, when
+/// the method does not qualify.
+#[inline(always)]
+unsafe fn push_method_frame(
+    ec: EcPtr,
+    cfp: CfpPtr,
+    cme: *const c_void,
+    def: *const c_void,
+    recv: VALUE,
+    argv: *mut VALUE,
+    argc: u32,
+) -> Option<VALUE> {
+    unsafe {
+        // vm_callee_setup_arg(): only required parameters.
         let iseq: *const rb_iseq_t = field(def, l::DEF_ISEQPTR);
         let body: *const c_void = field(iseq.cast(), l::ISEQ_BODY);
         if field::<u32>(body, l::BODY_PARAM_FLAGS) & l::PARAM_FLAGS_NOT_SIMPLE as u32 != 0
             || field::<i32>(body, l::BODY_PARAM_LEAD_NUM) as u32 != argc
             || field::<u32>(body, l::BODY_BUILTIN_ATTRS) & l::BUILTIN_ATTR_SINGLE_NOARG_LEAF as u32 != 0
         {
-            return false;
+            return None;
         }
         let param_size = field::<u32>(body, l::BODY_PARAM_SIZE) as usize;
         let local_size = field::<u32>(body, l::BODY_LOCAL_TABLE_SIZE) as usize - param_size;
@@ -87,7 +124,7 @@ unsafe fn push_simple_method_frame(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> boo
         let new_cfp = cfp.sub(1);
         let bound = sp.add(local_size + stack_max).cast::<rb_control_frame_t>();
         if new_cfp.cast_const() <= bound.add(1).cast_const() {
-            return false;
+            return None;
         }
 
         (*cfp).sp = argv.sub(1);
@@ -111,7 +148,7 @@ unsafe fn push_simple_method_frame(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> boo
         // vm_push_frame() orders the frame stores before the ec->cfp store.
         core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
         (*ec).cfp = new_cfp;
-        true
+        Some(Qundef)
     }
 }
 
@@ -120,10 +157,10 @@ unsafe fn push_simple_method_frame(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> boo
 #[inline(always)]
 pub unsafe fn send_without_block(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> VALUE {
     unsafe {
-        if push_simple_method_frame(ec, cfp, cd) {
-            return Qundef;
+        match fast_send(ec, cfp, cd) {
+            Some(val) => val,
+            None => rb_yarv_send_without_block(ec, cfp, cd),
         }
-        rb_yarv_send_without_block(ec, cfp, cd)
     }
 }
 

@@ -331,3 +331,11 @@ pub unsafe fn opt_send_without_block(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> V
 pub unsafe fn leave(ec: EcPtr, cfp: CfpPtr, _val: VALUE) -> bool {
     unsafe { crate::send::leave(ec, cfp) }
 }
+
+pub unsafe fn getinstancevariable(_ec: EcPtr, cfp: CfpPtr, id: ID, ic: IVC) -> VALUE {
+    unsafe { crate::ivar::get(cfp, id, ic) }
+}
+
+pub unsafe fn setinstancevariable(_ec: EcPtr, cfp: CfpPtr, id: ID, ic: IVC, val: VALUE) {
+    unsafe { crate::ivar::set(cfp, id, val, ic) }
+}

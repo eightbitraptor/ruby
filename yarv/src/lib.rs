@@ -14,6 +14,7 @@ pub mod cruby;
 pub mod exec;
 pub mod insnhelper;
 pub mod insns;
+pub mod ivar;
 pub mod send;
 
 /// The C ABI entry points that tool/ruby_vm/views/yarv_insns.rs.erb

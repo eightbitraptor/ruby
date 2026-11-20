@@ -19,6 +19,9 @@ STATIC_ASSERT(yarv_sizeof_double, SIZEOF_DOUBLE <= SIZEOF_VALUE);
 #if defined(USE_VM_CLOCK) && USE_VM_CLOCK
 # error "yarv/src/cruby.rs: vm_check_ints() does not support USE_VM_CLOCK"
 #endif
+#ifdef WORDS_BIGENDIAN
+# error "yarv/src/ivar.rs reads the packed inline caches as little-endian words"
+#endif
 
 /* yarv/src/cruby.rs declares these layouts by hand. */
 #define YARV_ASSERT_OFFSET(type, field, off) \
@@ -52,6 +55,8 @@ NORETURN(void rb_yarv_set_retval(rb_execution_context_t *ec, VALUE val));
 VALUE rb_yarv_send(rb_execution_context_t *ec, rb_control_frame_t *cfp, CALL_DATA cd, ISEQ blockiseq);
 VALUE rb_yarv_send_without_block(rb_execution_context_t *ec, rb_control_frame_t *cfp, CALL_DATA cd);
 bool rb_yarv_leave(rb_execution_context_t *ec, rb_control_frame_t *cfp);
+VALUE rb_vm_getinstancevariable(const rb_iseq_t *iseq, VALUE obj, ID id, IVC ic);
+void rb_vm_setinstancevariable(const rb_iseq_t *iseq, VALUE obj, ID id, VALUE val, IVC ic);
 
 /* The instruction handlers in yarv/src/insns.rs, generated from insns.def. */
 #include "yarv_insns.h"

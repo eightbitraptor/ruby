@@ -88,6 +88,11 @@ unsafe extern "C" {
     pub fn rb_yarv_send(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA, blockiseq: ISEQ) -> VALUE;
     pub fn rb_yarv_send_without_block(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> VALUE;
     pub fn rb_yarv_leave(ec: EcPtr, cfp: CfpPtr) -> bool;
+    pub fn rb_vm_getinstancevariable(iseq: *const rb_iseq_t, obj: VALUE, id: ID, ic: IVC) -> VALUE;
+    pub fn rb_vm_setinstancevariable(iseq: *const rb_iseq_t, obj: VALUE, id: ID, val: VALUE, ic: IVC);
+
+    // vm_core.h: nonzero while a c_call or c_return hook is enabled.
+    pub static ruby_vm_c_events_enabled: core::ffi::c_uint;
 }
 
 #[cfg(yarv_yjit)]
