@@ -202,6 +202,41 @@ pub unsafe fn checktype(_ec: EcPtr, _cfp: CfpPtr, r#type: rb_num_t, val: VALUE) 
     rbool(rb_type(val) == r#type as ruby_value_type)
 }
 
+/// `vm_check_keyword`. Returns Qfalse when the caller passed the keyword.
+pub unsafe fn checkkeyword(
+    _ec: EcPtr,
+    cfp: CfpPtr,
+    kw_bits_index: lindex_t,
+    keyword_index: lindex_t,
+) -> VALUE {
+    unsafe {
+        let kw_bits = *(*cfp).ep.sub(kw_bits_index);
+        if kw_bits.fixnum_p() {
+            let bits = kw_bits.fix2long() as u32;
+            if keyword_index < VM_KW_SPECIFIED_BITS_MAX as usize && bits & (1 << keyword_index) != 0 {
+                return Qfalse;
+            }
+        } else if rb_set_lookup(kw_bits, long2fix(keyword_index as c_long)) {
+            return Qfalse;
+        }
+        Qtrue
+    }
+}
+
+pub unsafe fn splatkw(_ec: EcPtr, _cfp: CfpPtr, hash: VALUE, block: VALUE) -> (VALUE, VALUE) {
+    let obj = if hash.nil_p() { Qnil } else { unsafe { rb_to_hash_type(hash) } };
+    (obj, block)
+}
+
+unsafe extern "C" {
+    // vm_insnhelper.c exports it without a header declaration.
+    fn rb_vm_opt_getconstant_path(ec: EcPtr, cfp: CfpPtr, ic: IC) -> VALUE;
+}
+
+pub unsafe fn opt_getconstant_path(ec: EcPtr, cfp: CfpPtr, ic: IC) -> VALUE {
+    unsafe { rb_vm_opt_getconstant_path(ec, cfp, ic) }
+}
+
 // The specialized method call instructions. A handler returns Qundef when
 // the receiver does not qualify for the fast path; the generated glue then
 // calls the method through opt_send_without_block.

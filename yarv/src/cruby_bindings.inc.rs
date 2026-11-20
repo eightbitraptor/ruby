@@ -56,6 +56,7 @@ pub const TRUE_REDEFINED_OP_FLAG: u32 = 1024;
 pub const FALSE_REDEFINED_OP_FLAG: u32 = 2048;
 pub const PROC_REDEFINED_OP_FLAG: u32 = 4096;
 pub const ANY_REDEFINED_OP_FLAG: u32 = 8192;
+pub const VM_KW_SPECIFIED_BITS_MAX: u32 = 31;
 pub type rb_len_t = core::ffi::c_long;
 pub const RUBY_Qfalse: ruby_special_consts = 0;
 pub const RUBY_Qnil: ruby_special_consts = 4;
@@ -297,6 +298,7 @@ unsafe extern "C" {
     pub fn rb_big_mul(x: VALUE, y: VALUE) -> VALUE;
     pub fn rb_range_new(beg: VALUE, end: VALUE, excl: core::ffi::c_int) -> VALUE;
     pub fn rb_reg_match(re: VALUE, str_: VALUE) -> VALUE;
+    pub fn rb_set_lookup(set: VALUE, element: VALUE) -> bool;
     pub fn rb_str_buf_append(dst: VALUE, src: VALUE) -> VALUE;
     pub fn rb_str_concat(dst: VALUE, src: VALUE) -> VALUE;
     pub fn rb_str_intern(str_: VALUE) -> VALUE;
@@ -326,6 +328,7 @@ unsafe extern "C" {
         str_: VALUE,
         chilled: bool,
     ) -> VALUE;
+    pub fn rb_to_hash_type(obj: VALUE) -> VALUE;
     pub fn rb_threadptr_execute_interrupts(
         th: *mut rb_thread_struct,
         blocking_timing: core::ffi::c_int,

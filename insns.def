@@ -266,8 +266,8 @@ opt_getconstant_path
 ()
 (VALUE val)
 // attr bool leaf = false; /* may autoload or raise */
+// attr bool rust = true;
 {
-    val = rb_vm_opt_getconstant_path(ec, GET_CFP(), ic);
 }
 
 /* Get constant variable id. If klass is Qnil and allow_nil is Qtrue, constants
@@ -572,13 +572,8 @@ splatkw
 (VALUE hash, VALUE block)
 (VALUE obj, VALUE block)
 // attr bool leaf = false; /* has rb_to_hash_type() */
+// attr bool rust = true;
 {
-    if (NIL_P(hash)) {
-        obj = Qnil;
-    }
-    else {
-        obj = rb_to_hash_type(hash);
-    }
 }
 
 /* put new Hash from n elements. n must be an even number. */
@@ -769,8 +764,8 @@ checkkeyword
 (lindex_t kw_bits_index, lindex_t keyword_index)
 ()
 (VALUE ret)
+// attr bool rust = true;
 {
-    ret = vm_check_keyword(kw_bits_index, keyword_index, GET_EP());
 }
 
 /* check if val is type. */

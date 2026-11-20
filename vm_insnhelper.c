@@ -6102,23 +6102,6 @@ rb_vm_check_match(rb_execution_context_t *ec, VALUE target, VALUE pattern, rb_nu
     return vm_check_match(ec, target, pattern, flag);
 }
 
-static VALUE
-vm_check_keyword(lindex_t bits, lindex_t idx, const VALUE *ep)
-{
-    const VALUE kw_bits = *(ep - bits);
-
-    if (FIXNUM_P(kw_bits)) {
-        unsigned int b = (unsigned int)FIX2ULONG(kw_bits);
-        if ((idx < VM_KW_SPECIFIED_BITS_MAX) && (b & (0x01 << idx)))
-            return Qfalse;
-    }
-    else {
-        VM_ASSERT(rb_set_p(kw_bits), "%s", rb_obj_info(kw_bits));
-        if (rb_set_lookup(kw_bits, INT2FIX(idx))) return Qfalse;
-    }
-    return Qtrue;
-}
-
 static void
 vm_dtrace(rb_event_flag_t flag, rb_execution_context_t *ec)
 {
