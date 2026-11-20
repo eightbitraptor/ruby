@@ -167,6 +167,23 @@ class RubyVM::BareInstruction
     operands
   end
 
+  # The function in yarv/src/insns.rs that implements the instruction.
+  def rust_handler_fn
+    name
+  end
+
+  # `let` statements that bind the handler operands in a Rust entry.
+  def rust_operand_lets
+    operands.each_with_index.map do |v, i|
+      "let #{rust_ident v[:name]}: #{v[:type]} = #{rust_operand_slot v, i + 1};"
+    end
+  end
+
+  def rust_operand_slot v, index
+    slot = "*pc.add(#{index})"
+    v[:type] == 'VALUE' ? slot : "(#{slot}).0 as #{v[:type]}"
+  end
+
   # The C types that yarv/src/cruby.rs defines with the same name.
   RUST_TYPES = %w[VALUE ID rb_num_t lindex_t OFFSET ISEQ CALL_DATA IC IVC].freeze
   RUST_KEYWORDS = %w[type ref match fn mod use loop in as box move self super].freeze
@@ -245,14 +262,14 @@ class RubyVM::BareInstruction
   end
 
   def rust_entry_c_prototype
-    "rb_control_frame_t *#{rust_entry_name}(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp)"
+    "rb_control_frame_t *#{rust_entry_name}(INSN_FUNC_PARAMS)"
   end
 
   # `sp_inc` as a Rust expression. The attribute is C; only operand names,
   # integers, `(rb_snum_t)` casts, and +/- are translated.
   def rust_sp_inc
     expr = @attrs.fetch('sp_inc').expr.expr.sub(/;\s*\z/, '').gsub('(rb_snum_t)', '')
-    names = operands.map {|v| v[:name] }
+    names = rust_handler_operands.map {|v| v[:name] }
     expr.gsub(/[A-Za-z_]\w*/) do |id|
       raise "#{@name}: cannot translate sp_inc `#{expr}' to Rust" unless names.include?(id)
       "(#{rust_ident id} as isize)"
@@ -261,21 +278,19 @@ class RubyVM::BareInstruction
 
   # The complete instruction as a call-threaded function. It decodes the
   # operands, reads the popped values, and pushes the results in the order
-  # that _insn_entry.erb uses.
+  # that _insn_entry.erb uses. In tail-call mode the PC is a parameter and
+  # goes to the next instruction in a register; cfp->pc stays in sync.
   def rust_entry
     raise "#{@name}: Rust entries do not support handles_sp" if handles_sp?
-    lines = ['let pc = (*cfp).pc;']
-    operands.each_with_index do |v, i|
-      slot = "*pc.add(#{i + 1})"
-      expr = v[:type] == 'VALUE' ? slot : "(#{slot}).0 as #{v[:type]}"
-      lines << "let #{rust_ident v[:name]}: #{v[:type]} = #{expr};"
-    end
+    lines = ['#[cfg(not(yarv_tailcall))]', 'let pc = (*cfp).pc;']
+    lines.concat rust_operand_lets
     pops.reverse_each.with_index.reverse_each do |v, i|
       lines << "let #{rust_ident v[:name]}: VALUE = *(*cfp).sp.sub(#{i + 1});"
     end
-    lines << "(*cfp).pc = pc.add(#{width});"
+    lines << "let next_pc = pc.add(#{width});"
+    lines << "(*cfp).pc = next_pc;"
     args = (['ec', 'cfp'] + rust_args.map {|v| rust_ident v[:name] }).join(', ')
-    call = "crate::insns::#{name}(#{args})"
+    call = "crate::insns::#{rust_handler_fn}(#{args})"
     names = rust_rets.map {|v| rust_ident v[:name] }
     case names.size
     when 0 then lines << "#{call};"
@@ -287,17 +302,21 @@ class RubyVM::BareInstruction
       # reads this instruction's last operand as its CALL_DATA.
       rewind = width - RubyVM::BareInstruction.find('opt_send_without_block').width
       lines << "if #{names[0]}.undef_p() {"
-      lines << "    (*cfp).pc = pc.add(#{rewind});"
-      lines << "    crate::call_insn_func!(crate::exec::send_without_block_func(), ec, cfp);"
+      lines << "    let send_pc = pc.add(#{rewind});"
+      lines << "    (*cfp).pc = send_pc;"
+      lines << "    crate::call_insn_func!(crate::exec::send_without_block_func(), ec, cfp, send_pc);"
       lines << "}"
     end
     lines << "(*cfp).sp = (*cfp).sp.offset(#{rust_sp_inc});"
     rets.reverse_each.with_index do |v, i|
       lines << "*(*cfp).sp.sub(#{i + 1}) = #{rust_ident v[:name]};"
     end
-    lines << 'crate::next_insn!(ec, cfp)'
+    # A handler with an OFFSET operand may move cfp->pc to jump.
+    jumps = rust_handler_operands.any? {|v| v[:type] == 'OFFSET' }
+    lines << "crate::next_insn!(ec, cfp, #{jumps ? '(*cfp).pc' : 'next_pc'})"
     body = lines.map {|l| "        #{l}" }.join("\n")
-    "#[unsafe(no_mangle)]\npub unsafe extern \"C\" fn #{rust_entry_name}(ec: EcPtr, cfp: CfpPtr) -> CfpPtr {\n    unsafe {\n#{body}\n    }\n}\n"
+    params = "ec: EcPtr, cfp: CfpPtr, #[cfg(yarv_tailcall)] pc: *const VALUE"
+    "#[unsafe(no_mangle)]\npub unsafe extern \"C\" fn #{rust_entry_name}(#{params}) -> CfpPtr {\n    unsafe {\n#{body}\n    }\n}\n"
   end
 
   private

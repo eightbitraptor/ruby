@@ -33,7 +33,7 @@ class RubyVM::TraceInstruction
   # The Rust entry that replaces the C function of the original instruction
   # in call-threaded code, or nil.
   def rust_entry_destination
-    @orig.rust_entry_name if @orig.instance_of?(RubyVM::BareInstruction) && @orig.rust?
+    @orig.rust_entry_name if @orig.is_a?(RubyVM::BareInstruction) && @orig.rust?
   end
 
   def bin

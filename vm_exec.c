@@ -109,6 +109,22 @@ rb_vm_get_insns_address_table(void)
 
 #else /* OPT_CALL_THREADED_CODE */
 
+#if OPT_TAILCALL_THREADED_CODE
+/* reg_pc is a parameter of every instruction function, as the PC register
+ * of vm_exec_core in direct threaded code.  SET_PC keeps cfp->pc in sync. */
+#undef  RESTORE_REGS
+#define RESTORE_REGS() \
+{ \
+  VM_REG_CFP = ec->cfp; \
+  reg_pc = reg_cfp->pc; \
+}
+
+#undef  VM_REG_PC
+#define VM_REG_PC reg_pc
+#undef  SET_PC
+#define SET_PC(x) (reg_cfp->pc = VM_REG_PC = (x))
+#endif
+
 #include "vm.inc"
 #include "vmtc.inc"
 

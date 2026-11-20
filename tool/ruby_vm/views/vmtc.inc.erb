@@ -17,7 +17,7 @@
 
 static const void *const insns_address_table[] = {
 % insns.each do |i|
-%   if i.instance_of?(RubyVM::BareInstruction) && i.rust?
+%   if i.is_a?(RubyVM::BareInstruction) && i.rust?
 #if OPT_CALL_THREADED_CODE
     (const void *)<%= i.rust_entry_name %>,
 #else

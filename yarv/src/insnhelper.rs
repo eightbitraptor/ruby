@@ -9,13 +9,13 @@ use core::ffi::c_long;
 use crate::cruby::*;
 
 /// `rb_overflowed_fix_to_int`.
-#[inline]
+#[inline(always)]
 fn overflowed_fix_to_int(x: isize) -> isize {
     (((x >> 1) as usize) ^ (1usize << (usize::BITS - 1))) as isize
 }
 
 /// `rb_fix_plus_fix`.
-#[inline]
+#[inline(always)]
 fn fix_plus_fix(x: VALUE, y: VALUE) -> VALUE {
     match (x.0 as isize).overflowing_add(y.0 as isize - 1) {
         (z, false) => VALUE(z as usize),
@@ -24,7 +24,7 @@ fn fix_plus_fix(x: VALUE, y: VALUE) -> VALUE {
 }
 
 /// `rb_fix_minus_fix`.
-#[inline]
+#[inline(always)]
 fn fix_minus_fix(x: VALUE, y: VALUE) -> VALUE {
     match (x.0 as isize).overflowing_sub(y.0 as isize - 1) {
         (z, false) => VALUE(z as usize),
@@ -33,7 +33,7 @@ fn fix_minus_fix(x: VALUE, y: VALUE) -> VALUE {
 }
 
 /// `rb_fix_mul_fix`.
-#[inline]
+#[inline(always)]
 fn fix_mul_fix(x: VALUE, y: VALUE) -> VALUE {
     let (lx, ly) = (x.fix2long(), y.fix2long());
     let product = lx as i128 * ly as i128;
@@ -46,7 +46,7 @@ fn fix_mul_fix(x: VALUE, y: VALUE) -> VALUE {
 
 /// `rb_fix_divmod_fix`. Ruby rounds the quotient toward negative infinity.
 /// The divisor must not be zero.
-#[inline]
+#[inline(always)]
 fn fix_divmod_fix(a: VALUE, b: VALUE) -> (VALUE, VALUE) {
     let (x, y) = (a.fix2long(), b.fix2long());
     if x == FIXNUM_MIN && y == -1 {
@@ -95,7 +95,7 @@ unsafe fn heap_class_p(recv: VALUE, klass: VALUE, bop: ruby_basic_operators, fla
     unsafe { recv.rbasic_class() == klass && basic_op_unredefined_p(bop, flag) }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_plus(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_PLUS) {
         Num::Fix => fix_plus_fix(recv, obj),
@@ -117,7 +117,7 @@ pub fn opt_plus(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_minus(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_MINUS) {
         Num::Fix => fix_minus_fix(recv, obj),
@@ -126,7 +126,7 @@ pub fn opt_minus(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_mult(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_MULT) {
         Num::Fix => fix_mul_fix(recv, obj),
@@ -135,7 +135,7 @@ pub fn opt_mult(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_div(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_DIV) {
         Num::Fix if obj.fix2long() == 0 => Qundef,
@@ -145,7 +145,7 @@ pub fn opt_div(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_mod(recv: VALUE, obj: VALUE) -> VALUE {
     match classify(recv, obj, BOP_MOD) {
         Num::Fix if obj.fix2long() == 0 => Qundef,
@@ -157,7 +157,7 @@ pub fn opt_mod(recv: VALUE, obj: VALUE) -> VALUE {
 
 macro_rules! comparison {
     ($name:ident, $bop:expr, $op:tt) => {
-        #[inline]
+        #[inline(always)]
         pub fn $name(recv: VALUE, obj: VALUE) -> VALUE {
             match classify(recv, obj, $bop) {
                 Num::Fix => rbool((recv.0 as isize) $op (obj.0 as isize)),
@@ -173,7 +173,7 @@ comparison!(opt_le, BOP_LE, <=);
 comparison!(opt_gt, BOP_GT, >);
 comparison!(opt_ge, BOP_GE, >=);
 
-#[inline]
+#[inline(always)]
 pub fn opt_ltlt(recv: VALUE, obj: VALUE) -> VALUE {
     if recv.special_const_p() {
         return Qundef;
@@ -193,7 +193,7 @@ pub fn opt_ltlt(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_and(recv: VALUE, obj: VALUE) -> VALUE {
     // Both tag bits must be 1 for the result to be a Fixnum.
     let ret = VALUE(recv.0 & obj.0);
@@ -204,7 +204,7 @@ pub fn opt_and(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_or(recv: VALUE, obj: VALUE) -> VALUE {
     if recv.fixnum_p() && obj.fixnum_p() && basic_op_unredefined_p(BOP_OR, INTEGER_REDEFINED_OP_FLAG) {
         VALUE(recv.0 | obj.0)
@@ -214,7 +214,7 @@ pub fn opt_or(recv: VALUE, obj: VALUE) -> VALUE {
 }
 
 /// `rb_ary_entry_internal`.
-#[inline]
+#[inline(always)]
 unsafe fn ary_entry(ary: VALUE, mut offset: c_long) -> VALUE {
     unsafe {
         let len = rarray_len(ary);
@@ -233,7 +233,7 @@ unsafe fn ary_entry(ary: VALUE, mut offset: c_long) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_aref(recv: VALUE, obj: VALUE) -> VALUE {
     unsafe {
         if recv.special_const_p() {
@@ -255,7 +255,7 @@ pub fn opt_aref(recv: VALUE, obj: VALUE) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_aset(recv: VALUE, obj: VALUE, set: VALUE) -> VALUE {
     unsafe {
         if recv.special_const_p() {
@@ -273,7 +273,7 @@ pub fn opt_aset(recv: VALUE, obj: VALUE, set: VALUE) -> VALUE {
 }
 
 /// `vm_opt_length`. `bop` is `BOP_LENGTH`, `BOP_SIZE`, or `BOP_EMPTY_P`.
-#[inline]
+#[inline(always)]
 pub fn opt_length(recv: VALUE, bop: ruby_basic_operators) -> VALUE {
     unsafe {
         if recv.special_const_p() {
@@ -294,7 +294,7 @@ pub fn opt_length(recv: VALUE, bop: ruby_basic_operators) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_empty_p(recv: VALUE) -> VALUE {
     match opt_length(recv, BOP_EMPTY_P) {
         len if len.undef_p() => len,
@@ -304,7 +304,7 @@ pub fn opt_empty_p(recv: VALUE) -> VALUE {
 }
 
 /// `fix_succ`.
-#[inline]
+#[inline(always)]
 fn fix_succ(x: VALUE) -> VALUE {
     if x.0 == !0 {
         long2fix(0)
@@ -315,7 +315,7 @@ fn fix_succ(x: VALUE) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_succ(recv: VALUE) -> VALUE {
     unsafe {
         if recv.fixnum_p() && basic_op_unredefined_p(BOP_SUCC, INTEGER_REDEFINED_OP_FLAG) {
@@ -330,7 +330,7 @@ pub fn opt_succ(recv: VALUE) -> VALUE {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn opt_regexpmatch2(recv: VALUE, obj: VALUE) -> VALUE {
     unsafe {
         if recv.special_const_p() {

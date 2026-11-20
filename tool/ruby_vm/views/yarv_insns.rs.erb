@@ -22,3 +22,6 @@ pub const YARVINSN_OPT_SEND_WITHOUT_BLOCK: usize = <%= RubyVM::Instructions.inde
 <%= insn.rust_shim %>
 <%= insn.rust_entry %>
 % end
+% RubyVM::OperandsUnification.all.select(&:rust?).each do |insn|
+<%= insn.rust_entry %>
+% end

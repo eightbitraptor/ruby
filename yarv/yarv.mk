@@ -9,9 +9,11 @@ YARV_SRC_FILES = $(wildcard \
 	$(top_srcdir)/yarv/src/*/*.rs \
 	)
 
+# Overflow checks stay off as in the C interpreter; the Fixnum code uses
+# explicit overflowing arithmetic.
 YARV_RUSTC_FLAGS = --edition=2024 --crate-name=yarv --crate-type=staticlib \
 	-C panic=abort -C opt-level=3 -C codegen-units=1 -C lto -g \
-	-C overflow-checks=on --check-cfg 'cfg(test)' --check-cfg 'cfg(yarv_tailcall)'
+	--check-cfg 'cfg(test)' --check-cfg 'cfg(yarv_tailcall)'
 
 # OPT_THREADED_CODE=3 (tail-call threaded code) needs explicit tail calls,
 # which only nightly Rust has.

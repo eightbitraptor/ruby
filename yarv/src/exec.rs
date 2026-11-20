@@ -2,13 +2,16 @@
 //!
 //! With `OPT_THREADED_CODE=2`, each instruction returns the control frame of
 //! the next instruction to `rb_yarv_exec_loop`. With `OPT_THREADED_CODE=3`
-//! (`--cfg yarv_tailcall`), each instruction tail calls the next one, and
-//! the loop only starts the chain.
+//! (`--cfg yarv_tailcall`), each instruction tail calls the next one and
+//! passes the PC as an argument, and the loop only starts the chain.
 
 use crate::cruby::*;
 
-/// `rb_insn_func_t`.
+/// `rb_insn_func_t` (mode 2) or `rb_tc_insn_func_t` (mode 3) of vm_exec.h.
+#[cfg(not(yarv_tailcall))]
 pub type InsnFunc = unsafe extern "C" fn(EcPtr, CfpPtr) -> CfpPtr;
+#[cfg(yarv_tailcall)]
+pub type InsnFunc = unsafe extern "C" fn(EcPtr, CfpPtr, *const VALUE) -> CfpPtr;
 
 /// Runs instructions from `cfp` until an instruction returns null. The
 /// caller reads the result from the thread (`retval`) or `ec->errinfo`.
@@ -16,8 +19,16 @@ pub type InsnFunc = unsafe extern "C" fn(EcPtr, CfpPtr) -> CfpPtr;
 pub unsafe extern "C" fn rb_yarv_exec_loop(ec: EcPtr, mut cfp: CfpPtr) {
     unsafe {
         while !cfp.is_null() {
-            let insn: InsnFunc = core::mem::transmute((*(*cfp).pc).0);
-            cfp = insn(ec, cfp);
+            let pc = (*cfp).pc;
+            let insn: InsnFunc = core::mem::transmute((*pc).0);
+            #[cfg(not(yarv_tailcall))]
+            {
+                cfp = insn(ec, cfp);
+            }
+            #[cfg(yarv_tailcall)]
+            {
+                cfp = insn(ec, cfp, pc);
+            }
         }
     }
 }
@@ -26,38 +37,40 @@ pub unsafe extern "C" fn rb_yarv_exec_loop(ec: EcPtr, mut cfp: CfpPtr) {
 // stable Rust even in code that `#[cfg]` removes.
 
 /// `CALL_INSN_FUNC(f)` of vm_exec.h: leaves this instruction for the
-/// instruction function `f`.
+/// instruction function `f`, which runs the instruction at `pc`.
 #[cfg(yarv_tailcall)]
 #[macro_export]
 macro_rules! call_insn_func {
-    ($f:expr, $ec:expr, $cfp:expr) => {{
+    ($f:expr, $ec:expr, $cfp:expr, $pc:expr) => {{
         let f: $crate::exec::InsnFunc = $f;
-        become f($ec, $cfp)
+        become f($ec, $cfp, $pc)
     }};
 }
 
 #[cfg(not(yarv_tailcall))]
 #[macro_export]
 macro_rules! call_insn_func {
-    ($f:expr, $ec:expr, $cfp:expr) => {{
+    ($f:expr, $ec:expr, $cfp:expr, $pc:expr) => {{
         let f: $crate::exec::InsnFunc = $f;
         return f($ec, $cfp)
     }};
 }
 
-/// `END_INSN()` of vm_exec.h: continues with the instruction at `cfp->pc`.
+/// `END_INSN()` of vm_exec.h: continues with the instruction at `pc`, which
+/// is also `cfp->pc`.
 #[cfg(yarv_tailcall)]
 #[macro_export]
 macro_rules! next_insn {
-    ($ec:expr, $cfp:expr) => {
-        $crate::call_insn_func!(core::mem::transmute((*(*$cfp).pc).0), $ec, $cfp)
-    };
+    ($ec:expr, $cfp:expr, $pc:expr) => {{
+        let pc: *const VALUE = $pc;
+        $crate::call_insn_func!(core::mem::transmute((*pc).0), $ec, $cfp, pc)
+    }};
 }
 
 #[cfg(not(yarv_tailcall))]
 #[macro_export]
 macro_rules! next_insn {
-    ($ec:expr, $cfp:expr) => {
+    ($ec:expr, $cfp:expr, $pc:expr) => {
         $cfp
     };
 }

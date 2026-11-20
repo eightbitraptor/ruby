@@ -71,6 +71,33 @@ class RubyVM::OperandsUnification < RubyVM::BareInstruction
     @original.operands
   end
 
+  def rust_handler_fn
+    @original.rust_handler_fn
+  end
+
+  # Operands that come from the instruction sequence are decoded from the
+  # PC; unified operands are constants.
+  def rust_operand_lets
+    index = 0
+    @spec.map do |(var, val)|
+      if val == '*'
+        index += 1
+        expr = rust_operand_slot var, index
+      else
+        expr = rust_constant var, val
+      end
+      "let #{rust_ident var[:name]}: #{var[:type]} = #{expr};"
+    end
+  end
+
+  def rust_constant var, val
+    case val
+    when /\A\d+\z/ then return val unless var[:type] == 'VALUE'
+    when /\AINT2FIX\((-?\d+)\)\z/ then return "long2fix(#{$1})" if var[:type] == 'VALUE'
+    end
+    raise "#{@name}: cannot translate operand #{var[:name]} = #{val} to Rust"
+  end
+
   def has_ope? var
     super or @konsts.any? {|i| i[:name] == var[:name] }
   end

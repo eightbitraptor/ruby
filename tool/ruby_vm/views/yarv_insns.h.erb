@@ -13,9 +13,15 @@
 #ifndef RUBY_YARV_INSNS_H
 #define RUBY_YARV_INSNS_H 1
 
-% RubyVM::BareInstruction.all.select(&:rust?).each do |insn|
+% rust_insns = RubyVM::BareInstruction.all.select(&:rust?)
+% rust_insns.each do |insn|
 <%= insn.rust_c_prototype %>;
+% end
+
+#if OPT_CALL_THREADED_CODE
+% (rust_insns + RubyVM::OperandsUnification.all.select(&:rust?)).each do |insn|
 <%= insn.rust_entry_c_prototype %>;
 % end
+#endif
 
 #endif /* RUBY_YARV_INSNS_H */

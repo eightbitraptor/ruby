@@ -13,7 +13,7 @@
 } -%>
 
 #include "vm_insnhelper.h"
-% RubyVM::BareInstruction.all.each do |insn|
+% (RubyVM::BareInstruction.all + RubyVM::OperandsUnification.all).each do |insn|
 %   if insn.rust?
 %# Call-threaded code runs rb_yarv_insn_entry_* from yarv_insns.rs instead.
 #if !OPT_CALL_THREADED_CODE
@@ -22,10 +22,6 @@
 %   else
 <%= render 'insn_entry', locals: { insn: insn } -%>
 %   end
-% end
-%
-% RubyVM::OperandsUnification.all.each do |insn|
-<%= render 'insn_entry', locals: { insn: insn } -%>
 % end
 %
 % RubyVM::InstructionsUnification.all.each do |insn|

@@ -46,20 +46,26 @@ error !
 #define ELABEL(x)
 #define LABEL_PTR(x) &LABEL(x)
 
-#define INSN_ENTRY(insn) \
-  static rb_control_frame_t * \
-    FUNC_FASTCALL(LABEL(insn))(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp) {
-
 #if OPT_TAILCALL_THREADED_CODE
-/* Each instruction tail calls the next one; only `return 0` ends the chain. */
-#define CALL_INSN_FUNC(f) __attribute__((musttail)) return (f)(ec, reg_cfp)
-#define END_INSN(insn) CALL_INSN_FUNC((rb_insn_func_t)*reg_cfp->pc);}
-#define NEXT_INSN() CALL_INSN_FUNC((rb_insn_func_t)*reg_cfp->pc);
+/* Each instruction tail calls the next one and passes the PC in a
+ * register; only `return 0` ends the chain.  vm_exec.c redefines the PC
+ * macros to use reg_pc, as in direct threaded code. */
+#define INSN_FUNC_PARAMS \
+  rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, const VALUE *reg_pc
+typedef rb_control_frame_t *rb_tc_insn_func_t(INSN_FUNC_PARAMS);
+#define CALL_INSN_FUNC(f) __attribute__((musttail)) return (f)(ec, reg_cfp, reg_pc)
+#define END_INSN(insn) CALL_INSN_FUNC((rb_tc_insn_func_t *)*reg_pc);}
+#define NEXT_INSN() CALL_INSN_FUNC((rb_tc_insn_func_t *)*reg_pc);
 #else
+#define INSN_FUNC_PARAMS rb_execution_context_t *ec, rb_control_frame_t *reg_cfp
 #define CALL_INSN_FUNC(f) return (f)(ec, reg_cfp)
 #define END_INSN(insn) return reg_cfp;}
 #define NEXT_INSN() return reg_cfp;
 #endif
+
+#define INSN_ENTRY(insn) \
+  static rb_control_frame_t * \
+    FUNC_FASTCALL(LABEL(insn))(INSN_FUNC_PARAMS) {
 
 #define START_OF_ORIGINAL_INSN(x) /* ignore */
 #define DISPATCH_ORIGINAL_INSN(x) CALL_INSN_FUNC(LABEL(x));
