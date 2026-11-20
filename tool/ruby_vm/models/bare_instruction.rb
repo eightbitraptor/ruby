@@ -157,6 +157,20 @@ class RubyVM::BareInstruction
     @attrs.fetch('rust_send_on_undef').expr.expr != 'false;'
   end
 
+  # True when a Qundef result from the Rust handler means "the handler
+  # pushed a frame": the glue runs JIT_EXEC (C only), then RESTORE_REGS()
+  # and continues in the new frame, as the send instructions do in C.
+  def rust_restore_on_undef?
+    @attrs.fetch('rust_restore_on_undef').expr.expr != 'false;'
+  end
+
+  # True for `leave`: the handler pops the frame and returns true when the
+  # frame was a FINISH frame. Otherwise the glue continues in the caller
+  # and pushes the popped value there.
+  def rust_leave?
+    @attrs.fetch('rust_leave').expr.expr != 'false;'
+  end
+
   def rust_handler_name
     "rb_yarv_insn_#{name}"
   end
@@ -199,8 +213,10 @@ class RubyVM::BareInstruction
   end
 
   # A return value that has the name of an operand pushes the operand
-  # unchanged, so the handler does not return it.
+  # unchanged, so the handler does not return it. A `leave` handler
+  # returns whether the frame finished instead.
   def rust_rets
+    return [] if rust_leave?
     names = rust_handler_operands.map {|v| v[:name] }
     rets.reject {|v| names.include?(v[:name]) }.each do |v|
       raise "#{@name}: no Rust type for #{v[:type]} #{v[:name]}" unless v[:type] == 'VALUE'
@@ -216,14 +232,19 @@ class RubyVM::BareInstruction
     params = ['rb_execution_context_t *ec', 'rb_control_frame_t *reg_cfp']
     params += rust_args.map {|v| v[:decl] }
     params += rust_rets.map {|v| "VALUE *#{v[:name]}_out" } if rust_rets.size > 1
-    ret = rust_rets.size == 1 ? 'VALUE' : 'void'
+    ret = rust_leave? ? 'bool' : rust_rets.size == 1 ? 'VALUE' : 'void'
     "#{ret} #{rust_handler_name}(#{params.join(', ')})"
   end
 
   def rust_c_call
     args = ['ec', 'GET_CFP()'] + rust_args.map {|v| v[:name] }
     args += rust_rets.map {|v| "&#{v[:name]}" } if rust_rets.size > 1
-    call = "#{rust_handler_name}(#{args.join(', ')});"
+    call = "#{rust_handler_name}(#{args.join(', ')})"
+    if rust_leave?
+      ret = pops[0][:name]
+      return "    if (#{call}) {\n        return #{ret};\n    }\n    RESTORE_REGS();\n"
+    end
+    call += ';'
     call = "#{rust_rets[0][:name]} = #{call}" if rust_rets.size == 1
     lines = ["    #{call}"]
     # The handler moves cfp->pc to jump. Copy it back to the PC register.
@@ -232,6 +253,14 @@ class RubyVM::BareInstruction
     end
     if rust_send_on_undef?
       lines << "    if (UNDEF_P(#{rust_rets[0][:name]})) CALL_SIMPLE_METHOD();"
+    end
+    if rust_restore_on_undef?
+      val = rust_rets[0][:name]
+      lines << "    JIT_EXEC(ec, #{val});"
+      lines << "    if (UNDEF_P(#{val})) {"
+      lines << "        RESTORE_REGS();"
+      lines << "        NEXT_INSN();"
+      lines << "    }"
     end
     lines.join("\n") + "\n"
   end
@@ -245,6 +274,7 @@ class RubyVM::BareInstruction
     sig = "pub unsafe extern \"C\" fn #{rust_handler_name}(#{params.join(', ')})"
     case rust_rets.size
     when 0
+      sig += ' -> bool' if rust_leave?
       body = "unsafe { #{call} }"
     when 1
       sig += ' -> VALUE'
@@ -281,17 +311,29 @@ class RubyVM::BareInstruction
   # that _insn_entry.erb uses. In tail-call mode the PC is a parameter and
   # goes to the next instruction in a register; cfp->pc stays in sync.
   def rust_entry
-    raise "#{@name}: Rust entries do not support handles_sp" if handles_sp?
     lines = ['#[cfg(not(yarv_tailcall))]', 'let pc = (*cfp).pc;']
     lines.concat rust_operand_lets
     pops.reverse_each.with_index.reverse_each do |v, i|
       lines << "let #{rust_ident v[:name]}: VALUE = *(*cfp).sp.sub(#{i + 1});"
     end
+    # An instruction that handles sp pops before its body, as POPN() in C.
+    lines << "(*cfp).sp = (*cfp).sp.sub(#{pops.size});" if handles_sp? and pops.size > 0
     lines << "let next_pc = pc.add(#{width});"
     lines << "(*cfp).pc = next_pc;"
     args = (['ec', 'cfp'] + rust_args.map {|v| rust_ident v[:name] }).join(', ')
     call = "crate::insns::#{rust_handler_fn}(#{args})"
     names = rust_rets.map {|v| rust_ident v[:name] }
+    if rust_leave?
+      val = rust_ident pops[0][:name]
+      lines << "if #{call} {"
+      lines << "    return crate::exec::finish(ec, #{val});"
+      lines << "}"
+      lines << "let cfp = (*ec).cfp;"
+      lines << "*(*cfp).sp = #{val};"
+      lines << "(*cfp).sp = (*cfp).sp.add(1);"
+      lines << "crate::next_insn!(ec, cfp, (*cfp).pc)"
+      return rust_entry_fn(lines)
+    end
     case names.size
     when 0 then lines << "#{call};"
     when 1 then lines << "let #{names[0]} = #{call};"
@@ -307,13 +349,30 @@ class RubyVM::BareInstruction
       lines << "    crate::call_insn_func!(crate::exec::send_without_block_func(), ec, cfp, send_pc);"
       lines << "}"
     end
-    lines << "(*cfp).sp = (*cfp).sp.offset(#{rust_sp_inc});"
-    rets.reverse_each.with_index do |v, i|
-      lines << "*(*cfp).sp.sub(#{i + 1}) = #{rust_ident v[:name]};"
+    if rust_restore_on_undef?
+      lines << "if #{names[0]}.undef_p() {"
+      lines << "    let cfp = (*ec).cfp;"
+      lines << "    crate::next_insn!(ec, cfp, (*cfp).pc);"
+      lines << "}"
+    end
+    if handles_sp?
+      rets.reverse_each do |v|
+        lines << "*(*cfp).sp = #{rust_ident v[:name]};"
+        lines << "(*cfp).sp = (*cfp).sp.add(1);"
+      end
+    else
+      lines << "(*cfp).sp = (*cfp).sp.offset(#{rust_sp_inc});"
+      rets.reverse_each.with_index do |v, i|
+        lines << "*(*cfp).sp.sub(#{i + 1}) = #{rust_ident v[:name]};"
+      end
     end
     # A handler with an OFFSET operand may move cfp->pc to jump.
     jumps = rust_handler_operands.any? {|v| v[:type] == 'OFFSET' }
     lines << "crate::next_insn!(ec, cfp, #{jumps ? '(*cfp).pc' : 'next_pc'})"
+    rust_entry_fn(lines)
+  end
+
+  def rust_entry_fn lines
     body = lines.map {|l| "        #{l}" }.join("\n")
     params = "ec: EcPtr, cfp: CfpPtr, #[cfg(yarv_tailcall)] pc: *const VALUE"
     "#[unsafe(no_mangle)]\npub unsafe extern \"C\" fn #{rust_entry_name}(#{params}) -> CfpPtr {\n    unsafe {\n#{body}\n    }\n}\n"
@@ -346,6 +405,18 @@ class RubyVM::BareInstruction
               "return value and a CALL_DATA last operand"
       end
     end
+    if rust_restore_on_undef?
+      unless rust? and handles_sp? and rets.size == 1
+        raise "#{@name}: rust_restore_on_undef needs a Rust instruction that " \
+              "handles sp and has one return value"
+      end
+    end
+    if rust_leave?
+      unless rust? and handles_sp? and pops.size == 1 and rets == pops
+        raise "#{@name}: rust_leave needs a Rust instruction that handles sp " \
+              "and pushes the value that it pops"
+      end
+    end
   end
 
   def generate_attribute t, k, v
@@ -372,6 +443,8 @@ class RubyVM::BareInstruction
     generate_attribute 'bool', 'zjit_profile', false
     generate_attribute 'bool', 'rust', false
     generate_attribute 'bool', 'rust_send_on_undef', false
+    generate_attribute 'bool', 'rust_restore_on_undef', false
+    generate_attribute 'bool', 'rust_leave', false
   end
 
   def default_definition_of_handles_sp

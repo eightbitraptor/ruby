@@ -22,6 +22,13 @@
 % (rust_insns + RubyVM::OperandsUnification.all.select(&:rust?)).each do |insn|
 <%= insn.rust_entry_c_prototype %>;
 % end
+
+/* Call-threaded code has no C function for a Rust instruction.  These
+ * names make LABEL() (vm_exec.h), and so the address table,
+ * DISPATCH_ORIGINAL_INSN() and the trace instructions, use the Rust entry. */
+% (rust_insns + RubyVM::OperandsUnification.all.select(&:rust?)).each do |insn|
+#define insn_func_<%= insn.name %> <%= insn.rust_entry_name %>
+% end
 #endif
 
 #endif /* RUBY_YARV_INSNS_H */

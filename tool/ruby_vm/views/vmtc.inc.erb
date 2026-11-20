@@ -17,15 +17,7 @@
 
 static const void *const insns_address_table[] = {
 % insns.each do |i|
-%   if i.is_a?(RubyVM::BareInstruction) && i.rust?
-#if OPT_CALL_THREADED_CODE
-    (const void *)<%= i.rust_entry_name %>,
-#else
     LABEL_PTR(<%= i.name %>),
-#endif
-%   else
-    LABEL_PTR(<%= i.name %>),
-%   end
 % end
 #if USE_ZJIT
 % zjit_insns.each do |i|

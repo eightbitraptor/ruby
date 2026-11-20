@@ -71,8 +71,22 @@ macro_rules! next_insn {
 #[macro_export]
 macro_rules! next_insn {
     ($ec:expr, $cfp:expr, $pc:expr) => {
-        $cfp
+        return $cfp
     };
+}
+
+unsafe extern "C" {
+    // vm_exec.c: stores the result of vm_exec_core in the thread.
+    fn rb_yarv_set_retval(ec: EcPtr, val: VALUE);
+}
+
+/// `leave` of a FINISH frame: ends the dispatch chain with `val` as the
+/// result of vm_exec_core.
+#[cold]
+#[inline(never)]
+pub unsafe fn finish(ec: EcPtr, val: VALUE) -> CfpPtr {
+    unsafe { rb_yarv_set_retval(ec, val) };
+    core::ptr::null_mut()
 }
 
 /// The C opt_send_without_block instruction, for `CALL_SIMPLE_METHOD()`.

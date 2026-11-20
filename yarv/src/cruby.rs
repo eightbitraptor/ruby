@@ -72,6 +72,48 @@ mod autogened {
 }
 pub use autogened::*;
 
+/// Offsets and constants from yarv/layout.c for this configuration.
+pub mod layout {
+    include!(env!("YARV_LAYOUT_RS"));
+}
+
+/// Reads a field at byte offset `off` (a `layout` constant) of `base`.
+#[inline(always)]
+pub unsafe fn field<T: Copy>(base: *const core::ffi::c_void, off: i64) -> T {
+    unsafe { base.cast::<u8>().add(off as usize).cast::<T>().read() }
+}
+
+// C functions that yarv.h declares for this crate.
+unsafe extern "C" {
+    pub fn rb_yarv_send(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA, blockiseq: ISEQ) -> VALUE;
+    pub fn rb_yarv_send_without_block(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> VALUE;
+    pub fn rb_yarv_leave(ec: EcPtr, cfp: CfpPtr) -> bool;
+}
+
+#[cfg(yarv_yjit)]
+unsafe extern "C" {
+    static rb_yjit_enabled_p: bool;
+}
+#[cfg(yarv_zjit)]
+unsafe extern "C" {
+    static rb_zjit_entry: *mut core::ffi::c_void;
+}
+
+/// True when YJIT or ZJIT runs. The Rust fast paths for calls and returns
+/// then step aside, so that JIT_EXEC and the JIT frame rules still apply.
+#[inline(always)]
+pub fn jit_enabled() -> bool {
+    #[cfg(yarv_yjit)]
+    if unsafe { rb_yjit_enabled_p } {
+        return true;
+    }
+    #[cfg(yarv_zjit)]
+    if unsafe { !rb_zjit_entry.is_null() } {
+        return true;
+    }
+    false
+}
+
 pub const Qfalse: VALUE = VALUE(RUBY_Qfalse as usize);
 pub const Qtrue: VALUE = VALUE(RUBY_Qtrue as usize);
 pub const Qnil: VALUE = VALUE(RUBY_Qnil as usize);

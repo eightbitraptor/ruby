@@ -316,3 +316,18 @@ pub unsafe fn opt_succ(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, recv: VALUE) ->
 pub unsafe fn opt_regexpmatch2(_ec: EcPtr, _cfp: CfpPtr, _cd: CALL_DATA, obj2: VALUE, obj1: VALUE) -> VALUE {
     insnhelper::opt_regexpmatch2(obj2, obj1)
 }
+
+// Method calls and returns. yarv/src/send.rs has the Rust fast paths. The
+// C functions in vm_insnhelper.c handle every other case.
+
+pub unsafe fn send(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA, blockiseq: ISEQ) -> VALUE {
+    unsafe { rb_yarv_send(ec, cfp, cd, blockiseq) }
+}
+
+pub unsafe fn opt_send_without_block(ec: EcPtr, cfp: CfpPtr, cd: CALL_DATA) -> VALUE {
+    unsafe { crate::send::send_without_block(ec, cfp, cd) }
+}
+
+pub unsafe fn leave(ec: EcPtr, cfp: CfpPtr, _val: VALUE) -> bool {
+    unsafe { crate::send::leave(ec, cfp) }
+}

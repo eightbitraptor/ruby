@@ -107,6 +107,13 @@ rb_vm_get_insns_address_table(void)
     return (const void **)vm_exec_core(0);
 }
 
+void
+rb_yarv_set_retval(rb_execution_context_t *ec, VALUE val)
+{
+    /* Only the call-threaded Rust entries finish through here. */
+    rb_bug("rb_yarv_set_retval: not call threaded code");
+}
+
 #else /* OPT_CALL_THREADED_CODE */
 
 #if OPT_TAILCALL_THREADED_CODE
@@ -151,5 +158,11 @@ vm_exec_core(rb_execution_context_t *ec)
         ec->errinfo = Qnil;
         return err;
     }
+}
+
+void
+rb_yarv_set_retval(rb_execution_context_t *ec, VALUE val)
+{
+    rb_ec_thread_ptr(ec)->retval = val;
 }
 #endif

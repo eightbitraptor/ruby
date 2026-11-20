@@ -13,7 +13,8 @@ YARV_SRC_FILES = $(wildcard \
 # explicit overflowing arithmetic.
 YARV_RUSTC_FLAGS = --edition=2024 --crate-name=yarv --crate-type=staticlib \
 	-C panic=abort -C opt-level=3 -C codegen-units=1 -C lto -g \
-	--check-cfg 'cfg(test)' --check-cfg 'cfg(yarv_tailcall)'
+	--check-cfg 'cfg(test)' --check-cfg 'cfg(yarv_tailcall)' \
+	--check-cfg 'cfg(yarv_yjit)' --check-cfg 'cfg(yarv_zjit)'
 
 # OPT_THREADED_CODE=3 (tail-call threaded code) needs explicit tail calls,
 # which only nightly Rust has.
@@ -25,11 +26,28 @@ else
 YARV_RUSTC = $(RUSTC)
 endif
 
-$(YARV_LIB): $(YARV_SRC_FILES) yarv_insns.rs target/.rustc-version
+# The Rust fast paths step aside when a JIT is enabled at run time.
+ifneq ($(YJIT_SUPPORT),no)
+YARV_RUSTC_FLAGS += --cfg yarv_yjit
+endif
+ifneq ($(ZJIT_SUPPORT),no)
+YARV_RUSTC_FLAGS += --cfg yarv_zjit
+endif
+
+# Struct offsets and constants that depend on the configuration. vm.o
+# needs the same headers, so its prerequisites also cover this file.
+yarv_layout.rs: $(top_srcdir)/yarv/layout.c vm.$(OBJEXT)
+	$(ECHO) generating $@
+	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) -S -o $(@:.rs=.s) $(top_srcdir)/yarv/layout.c
+	$(Q) sed -n 's/.*@@yarv \([A-Z_0-9]*\) \(-*[0-9][0-9]*\).*/pub const \1: i64 = \2;/p' $(@:.rs=.s) > $@
+	$(Q) $(RM) $(@:.rs=.s)
+
+$(YARV_LIB): $(YARV_SRC_FILES) yarv_insns.rs yarv_layout.rs target/.rustc-version
 	$(ECHO) 'building $(@F)'
 	$(Q) $(MAKEDIRS) $(@D)
 	$(gnumake_recursive)$(Q) MACOSX_DEPLOYMENT_TARGET=11.0 \
 	    YARV_INSNS_RS='$(abspath $(filter %yarv_insns.rs,$^))' \
+	    YARV_LAYOUT_RS='$(abspath yarv_layout.rs)' \
 	    $(YARV_RUSTC) $(YARV_RUSTC_FLAGS) '--out-dir=$(@D)' '$(top_srcdir)/yarv/src/lib.rs'
 
 YARV_LIB_SYMBOLS = $(YARV_LIB:.a=).symbols

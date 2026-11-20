@@ -6477,6 +6477,21 @@ rb_vm_opt_send_without_block(rb_execution_context_t *ec, rb_control_frame_t *reg
     return val;
 }
 
+/* The bodies of the send and opt_send_without_block instructions for
+ * yarv/src/insns.rs.  They return Qundef after they push an iseq frame. */
+VALUE
+rb_yarv_send(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd, ISEQ blockiseq)
+{
+    VALUE bh = vm_caller_setup_arg_block(ec, GET_CFP(), cd->ci, blockiseq, false);
+    return vm_sendish(ec, GET_CFP(), cd, bh, mexp_search_method);
+}
+
+VALUE
+rb_yarv_send_without_block(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd)
+{
+    return vm_sendish(ec, GET_CFP(), cd, VM_BLOCK_HANDLER_NONE, mexp_search_method);
+}
+
 VALUE
 rb_vm_invokesuper(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp, CALL_DATA cd, ISEQ blockiseq)
 {
@@ -7051,6 +7066,19 @@ vm_stack_consistency_error(const rb_execution_context_t *ec,
 #else
     rb_bug(stack_consistency_error, nsp, nbp);
 #endif
+}
+
+/* The body of the leave instruction.  Returns true for a FINISH frame. */
+bool
+rb_yarv_leave(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp)
+{
+    if (OPT_CHECKED_RUN) {
+        const VALUE *const bp = vm_base_ptr(GET_CFP());
+        if (GET_SP() != bp) {
+            vm_stack_consistency_error(ec, GET_CFP(), bp);
+        }
+    }
+    return vm_pop_frame(ec, GET_CFP(), GET_EP());
 }
 
 static VALUE

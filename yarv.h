@@ -36,8 +36,22 @@ YARV_ASSERT_OFFSET(rb_execution_context_t, thread_ptr, 48);
 /* yarv/src/cruby_bindings.inc.rs has no conditional fields. */
 STATIC_ASSERT(yarv_sizeof_control_frame, sizeof(rb_control_frame_t) == 7 * SIZEOF_VALUE);
 
+#if OPT_CALL_THREADED_CODE && (USE_YJIT || USE_ZJIT)
+# error "call threaded code runs the Rust entries, which do not run JIT code; configure with --disable-yjit --disable-zjit"
+#endif
+
 /* yarv/src/exec.rs. The dispatch loop for OPT_CALL_THREADED_CODE. */
 void rb_yarv_exec_loop(rb_execution_context_t *ec, rb_control_frame_t *cfp);
+
+/* C functions that yarv/src calls. */
+#if OPT_CALL_THREADED_CODE
+void rb_yarv_set_retval(rb_execution_context_t *ec, VALUE val);
+#else
+NORETURN(void rb_yarv_set_retval(rb_execution_context_t *ec, VALUE val));
+#endif
+VALUE rb_yarv_send(rb_execution_context_t *ec, rb_control_frame_t *cfp, CALL_DATA cd, ISEQ blockiseq);
+VALUE rb_yarv_send_without_block(rb_execution_context_t *ec, rb_control_frame_t *cfp, CALL_DATA cd);
+bool rb_yarv_leave(rb_execution_context_t *ec, rb_control_frame_t *cfp);
 
 /* The instruction handlers in yarv/src/insns.rs, generated from insns.def. */
 #include "yarv_insns.h"
