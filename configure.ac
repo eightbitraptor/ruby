@@ -3880,6 +3880,9 @@ AC_SUBST(INSTALL_STATIC_LIBRARY)
 
 [begin]_group "JIT section" && {
 AC_CHECK_PROG(RUSTC, [rustc], [rustc], [no]) dnl no ac_tool_prefix
+AS_IF([test "$RUSTC" = "no"],
+    AC_MSG_ERROR([rustc is required to build the Rust port of the YARV interpreter. Installation instructions available at https://www.rust-lang.org/tools/install])
+)
 
 dnl check if rustc is recent enough to build YJIT (rustc >= 1.58.0)
 JIT_RUSTC_OK=no

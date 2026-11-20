@@ -1401,7 +1401,7 @@ opt_plus
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_plus(recv, obj);
+    val = rb_yarv_opt_plus(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();

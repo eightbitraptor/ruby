@@ -7071,40 +7071,6 @@ vm_stack_consistency_error(const rb_execution_context_t *ec,
 }
 
 static VALUE
-vm_opt_plus(VALUE recv, VALUE obj)
-{
-    if (FIXNUM_2_P(recv, obj) &&
-        OP_UNREDEFINED_P(PLUS, INTEGER)) {
-        return rb_fix_plus_fix(recv, obj);
-    }
-    else if (FLONUM_2_P(recv, obj) &&
-             OP_UNREDEFINED_P(PLUS, FLOAT)) {
-        return DBL2NUM(RFLOAT_VALUE(recv) + RFLOAT_VALUE(obj));
-    }
-    else if (SPECIAL_CONST_P(recv) || SPECIAL_CONST_P(obj)) {
-        return Qundef;
-    }
-    else if (RBASIC_CLASS(recv) == rb_cFloat &&
-             RBASIC_CLASS(obj)  == rb_cFloat &&
-             OP_UNREDEFINED_P(PLUS, FLOAT)) {
-        return DBL2NUM(RFLOAT_VALUE(recv) + RFLOAT_VALUE(obj));
-    }
-    else if (RBASIC_CLASS(recv) == rb_cString &&
-             RBASIC_CLASS(obj) == rb_cString &&
-             OP_UNREDEFINED_P(PLUS, STRING)) {
-        return rb_str_opt_plus(recv, obj);
-    }
-    else if (RBASIC_CLASS(recv) == rb_cArray &&
-             RBASIC_CLASS(obj) == rb_cArray &&
-             OP_UNREDEFINED_P(PLUS, ARRAY)) {
-        return rb_ary_plus(recv, obj);
-    }
-    else {
-        return Qundef;
-    }
-}
-
-static VALUE
 vm_opt_minus(VALUE recv, VALUE obj)
 {
     if (FIXNUM_2_P(recv, obj) &&

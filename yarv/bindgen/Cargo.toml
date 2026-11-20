@@ -1,0 +1,10 @@
+[package]
+name = "yarv-bindgen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bindgen = "0.71.1"
+env_logger = "0.11.5"
+
+[workspace]

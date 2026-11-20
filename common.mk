@@ -221,6 +221,7 @@ COMMONOBJS    = \
 		$(ZJIT_OBJ) \
 		$(JIT_OBJ) \
 		$(RUST_LIBOBJ) \
+		$(YARV_LIBOBJ) \
 		$(COROUTINE_OBJ) \
 		$(DTRACE_OBJ) \
 		$(BUILTIN_ENCOBJS) \

@@ -40,6 +40,7 @@
 #include "yjit.h"
 #include "insns.inc"
 #include "zjit.h"
+#include "yarv.h"
 #include "ruby/st.h"
 #include "ruby/vm.h"
 #include "vm_core.h"
