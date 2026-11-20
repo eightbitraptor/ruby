@@ -187,3 +187,38 @@ pub fn basic_op_unredefined_p(op: ruby_basic_operators, klass: u32) -> bool {
     };
     (flag as u32 & klass) == 0
 }
+
+/// `RARRAY_LEN`. The value must be an Array.
+#[inline]
+pub unsafe fn rarray_len(ary: VALUE) -> c_long {
+    unsafe {
+        let flags = (*ary.as_rbasic()).flags.0;
+        if flags & RARRAY_EMBED_FLAG as usize != 0 {
+            ((flags & RARRAY_EMBED_LEN_MASK as usize) >> RARRAY_EMBED_LEN_SHIFT) as c_long
+        } else {
+            let heap = (&raw const (*(ary.0 as *const RArray)).as_)
+                .cast::<RArray__bindgen_ty_1__bindgen_ty_1>();
+            (*heap).len
+        }
+    }
+}
+
+/// `RARRAY_CONST_PTR`. The value must be an Array.
+#[inline]
+pub unsafe fn rarray_const_ptr(ary: VALUE) -> *const VALUE {
+    unsafe {
+        let flags = (*ary.as_rbasic()).flags.0;
+        let as_ = &raw const (*(ary.0 as *const RArray)).as_;
+        if flags & RARRAY_EMBED_FLAG as usize != 0 {
+            as_.cast::<VALUE>()
+        } else {
+            (*as_.cast::<RArray__bindgen_ty_1__bindgen_ty_1>()).ptr
+        }
+    }
+}
+
+/// `RSTRING_LEN`. The value must be a String.
+#[inline]
+pub unsafe fn rstring_len(s: VALUE) -> c_long {
+    unsafe { (*(s.0 as *const RString)).len }
+}

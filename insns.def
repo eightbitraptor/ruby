@@ -1416,7 +1416,7 @@ opt_minus
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_minus(recv, obj);
+    val = rb_yarv_opt_minus(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1431,7 +1431,7 @@ opt_mult
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_mult(recv, obj);
+    val = rb_yarv_opt_mult(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1449,7 +1449,7 @@ opt_div
 // attr bool leaf = false;
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_div(recv, obj);
+    val = rb_yarv_opt_div(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1466,7 +1466,7 @@ opt_mod
 // attr bool leaf = false;
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_mod(recv, obj);
+    val = rb_yarv_opt_mod(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1511,7 +1511,7 @@ opt_lt
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_lt(recv, obj);
+    val = rb_yarv_opt_lt(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1526,7 +1526,7 @@ opt_le
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_le(recv, obj);
+    val = rb_yarv_opt_le(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1541,7 +1541,7 @@ opt_gt
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_gt(recv, obj);
+    val = rb_yarv_opt_gt(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1556,7 +1556,7 @@ opt_ge
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_ge(recv, obj);
+    val = rb_yarv_opt_ge(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1575,7 +1575,7 @@ opt_ltlt
 // attr bool leaf = false; /* has "invalid codepoint" exception */
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_ltlt(recv, obj);
+    val = rb_yarv_opt_ltlt(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1590,7 +1590,7 @@ opt_and
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_and(recv, obj);
+    val = rb_yarv_opt_and(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1605,7 +1605,7 @@ opt_or
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_or(recv, obj);
+    val = rb_yarv_opt_or(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1618,14 +1618,14 @@ opt_aref
 (CALL_DATA cd)
 (VALUE recv, VALUE obj)
 (VALUE val)
-/* This is complicated.  In case of hash, vm_opt_aref() resorts to
+/* This is complicated.  In case of hash, rb_yarv_opt_aref() resorts to
  * rb_hash_aref().  If `recv` has no `obj`, this function then yields
  * default_proc.  This is a method call.  So opt_aref is
  * (surprisingly) not leaf. */
 // attr bool leaf = false; /* has rb_funcall() */ /* calls #yield */
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_aref(recv, obj);
+    val = rb_yarv_opt_aref(recv, obj);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1638,12 +1638,12 @@ opt_aset
 (CALL_DATA cd)
 (VALUE recv, VALUE obj, VALUE set)
 (VALUE val)
-/* This is another story than opt_aref.  When vm_opt_aset() resorts
+/* This is another story than opt_aref.  When rb_yarv_opt_aset() resorts
  * to rb_hash_aset(), which should call #hash for `obj`. */
 // attr bool leaf = false; /* has rb_funcall() */ /* calls #hash */
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_aset(recv, obj, set);
+    val = rb_yarv_opt_aset(recv, obj, set);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1658,7 +1658,7 @@ opt_length
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_length(recv, BOP_LENGTH);
+    val = rb_yarv_opt_length(recv, BOP_LENGTH);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1673,7 +1673,7 @@ opt_size
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_length(recv, BOP_SIZE);
+    val = rb_yarv_opt_length(recv, BOP_SIZE);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1688,7 +1688,7 @@ opt_empty_p
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_empty_p(recv);
+    val = rb_yarv_opt_empty_p(recv);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1703,7 +1703,7 @@ opt_succ
 (VALUE val)
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_succ(recv);
+    val = rb_yarv_opt_succ(recv);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
@@ -1734,7 +1734,7 @@ opt_regexpmatch2
 // attr bool leaf = false; /* match_at() has rb_thread_check_ints() */
 // attr bool zjit_profile = true;
 {
-    val = vm_opt_regexpmatch2(obj2, obj1);
+    val = rb_yarv_opt_regexpmatch2(obj2, obj1);
 
     if (UNDEF_P(val)) {
         CALL_SIMPLE_METHOD();
