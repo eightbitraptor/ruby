@@ -5011,6 +5011,8 @@ Init_VM(void)
     rb_ary_push(opts, rb_str_new2("direct threaded code"));
 #elif OPT_TOKEN_THREADED_CODE
     rb_ary_push(opts, rb_str_new2("token threaded code"));
+#elif OPT_TAILCALL_THREADED_CODE
+    rb_ary_push(opts, rb_str_new2("tail call threaded code"));
 #elif OPT_CALL_THREADED_CODE
     rb_ary_push(opts, rb_str_new2("call threaded code"));
 #endif

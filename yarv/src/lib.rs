@@ -7,6 +7,8 @@
 //! rule easy to follow.
 
 #![cfg_attr(not(test), no_std)]
+#![cfg_attr(yarv_tailcall, feature(explicit_tail_calls))]
+#![cfg_attr(yarv_tailcall, allow(incomplete_features))]
 
 pub mod cruby;
 pub mod exec;

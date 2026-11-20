@@ -50,12 +50,19 @@ error !
   static rb_control_frame_t * \
     FUNC_FASTCALL(LABEL(insn))(rb_execution_context_t *ec, rb_control_frame_t *reg_cfp) {
 
+#if OPT_TAILCALL_THREADED_CODE
+/* Each instruction tail calls the next one; only `return 0` ends the chain. */
+#define CALL_INSN_FUNC(f) __attribute__((musttail)) return (f)(ec, reg_cfp)
+#define END_INSN(insn) CALL_INSN_FUNC((rb_insn_func_t)*reg_cfp->pc);}
+#define NEXT_INSN() CALL_INSN_FUNC((rb_insn_func_t)*reg_cfp->pc);
+#else
+#define CALL_INSN_FUNC(f) return (f)(ec, reg_cfp)
 #define END_INSN(insn) return reg_cfp;}
-
 #define NEXT_INSN() return reg_cfp;
+#endif
 
 #define START_OF_ORIGINAL_INSN(x) /* ignore */
-#define DISPATCH_ORIGINAL_INSN(x) return LABEL(x)(ec, reg_cfp);
+#define DISPATCH_ORIGINAL_INSN(x) CALL_INSN_FUNC(LABEL(x));
 
 /************************************************/
 #elif OPT_TOKEN_THREADED_CODE || OPT_DIRECT_THREADED_CODE

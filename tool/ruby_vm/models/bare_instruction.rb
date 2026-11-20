@@ -288,14 +288,14 @@ class RubyVM::BareInstruction
       rewind = width - RubyVM::BareInstruction.find('opt_send_without_block').width
       lines << "if #{names[0]}.undef_p() {"
       lines << "    (*cfp).pc = pc.add(#{rewind});"
-      lines << "    return crate::exec::call_simple_method(ec, cfp);"
+      lines << "    crate::call_insn_func!(crate::exec::send_without_block_func(), ec, cfp);"
       lines << "}"
     end
     lines << "(*cfp).sp = (*cfp).sp.offset(#{rust_sp_inc});"
     rets.reverse_each.with_index do |v, i|
       lines << "*(*cfp).sp.sub(#{i + 1}) = #{rust_ident v[:name]};"
     end
-    lines << 'cfp'
+    lines << 'crate::next_insn!(ec, cfp)'
     body = lines.map {|l| "        #{l}" }.join("\n")
     "#[unsafe(no_mangle)]\npub unsafe extern \"C\" fn #{rust_entry_name}(ec: EcPtr, cfp: CfpPtr) -> CfpPtr {\n    unsafe {\n#{body}\n    }\n}\n"
   end

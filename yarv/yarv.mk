@@ -11,14 +11,24 @@ YARV_SRC_FILES = $(wildcard \
 
 YARV_RUSTC_FLAGS = --edition=2024 --crate-name=yarv --crate-type=staticlib \
 	-C panic=abort -C opt-level=3 -C codegen-units=1 -C lto -g \
-	-C overflow-checks=on
+	-C overflow-checks=on --check-cfg 'cfg(test)' --check-cfg 'cfg(yarv_tailcall)'
+
+# OPT_THREADED_CODE=3 (tail-call threaded code) needs explicit tail calls,
+# which only nightly Rust has.
+YARV_NIGHTLY_RUSTC = rustup run nightly rustc
+ifneq ($(findstring -DOPT_THREADED_CODE=3,$(CPPFLAGS)),)
+YARV_RUSTC = $(YARV_NIGHTLY_RUSTC)
+YARV_RUSTC_FLAGS += --cfg yarv_tailcall
+else
+YARV_RUSTC = $(RUSTC)
+endif
 
 $(YARV_LIB): $(YARV_SRC_FILES) yarv_insns.rs target/.rustc-version
 	$(ECHO) 'building $(@F)'
 	$(Q) $(MAKEDIRS) $(@D)
 	$(gnumake_recursive)$(Q) MACOSX_DEPLOYMENT_TARGET=11.0 \
 	    YARV_INSNS_RS='$(abspath $(filter %yarv_insns.rs,$^))' \
-	    $(RUSTC) $(YARV_RUSTC_FLAGS) '--out-dir=$(@D)' '$(top_srcdir)/yarv/src/lib.rs'
+	    $(YARV_RUSTC) $(YARV_RUSTC_FLAGS) '--out-dir=$(@D)' '$(top_srcdir)/yarv/src/lib.rs'
 
 YARV_LIB_SYMBOLS = $(YARV_LIB:.a=).symbols
 $(YARV_LIBOBJ): $(YARV_LIB)

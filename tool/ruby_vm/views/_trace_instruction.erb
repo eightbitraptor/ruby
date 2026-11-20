@@ -18,7 +18,7 @@ INSN_ENTRY(<%= insn.name %>)
     <%= 'ADD_PC(1);' if insn.name == 'trace_opt_neq' %>
 % if !jump_dest && insn.rust_entry_destination
 #if OPT_CALL_THREADED_CODE
-    return <%= insn.rust_entry_destination %>(ec, reg_cfp);
+    CALL_INSN_FUNC(<%= insn.rust_entry_destination %>);
 #else
     DISPATCH_ORIGINAL_INSN(<%= insn.jump_destination %>);
 #endif
