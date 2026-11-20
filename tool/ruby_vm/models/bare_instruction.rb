@@ -34,6 +34,7 @@ class RubyVM::BareInstruction
     @attrs_orig = @attrs.dup
     check_attribute_consistency
     predefine_attributes
+    check_rust_body
   end
 
   def pretty_name
@@ -119,7 +120,7 @@ class RubyVM::BareInstruction
     #
     # So we skip canary for those cases.
     return '' if @sig[:ret].any? {|i| i == '...' }
-    return '' if @expr.blank?
+    return '' if @expr.blank? and not rust?
     return "    #{stmt};\n"
   end
 
@@ -144,6 +145,92 @@ class RubyVM::BareInstruction
     @attrs.fetch('zjit_profile').expr.expr != 'false;'
   end
 
+  # True when yarv/src/insns.rs implements the body. vm.inc then calls
+  # the Rust handler that yarv_insns.rs exports.
+  def rust?
+    @attrs.fetch('rust').expr.expr != 'false;'
+  end
+
+  def rust_handler_name
+    "rb_yarv_insn_#{name}"
+  end
+
+  # The operands that the Rust handler takes. These are the operands of
+  # the instruction before operand unification.
+  def rust_handler_operands
+    operands
+  end
+
+  # The C types that yarv/src/cruby.rs defines with the same name.
+  RUST_TYPES = %w[VALUE ID rb_num_t lindex_t OFFSET ISEQ CALL_DATA IC IVC].freeze
+  RUST_KEYWORDS = %w[type ref match fn mod use loop in as box move self super].freeze
+
+  def rust_args
+    vars = rust_handler_operands + pops
+    vars.each do |v|
+      unless RUST_TYPES.include?(v[:type])
+        raise "#{@name}: no Rust type for #{v[:type]} #{v[:name]}"
+      end
+    end
+    vars
+  end
+
+  # A return value that has the name of an operand pushes the operand
+  # unchanged, so the handler does not return it.
+  def rust_rets
+    names = rust_handler_operands.map {|v| v[:name] }
+    rets.reject {|v| names.include?(v[:name]) }.each do |v|
+      raise "#{@name}: no Rust type for #{v[:type]} #{v[:name]}" unless v[:type] == 'VALUE'
+    end
+  end
+
+  def rust_ident name
+    RUST_KEYWORDS.include?(name) ? "r##{name}" : name
+  end
+
+  # Multiple return values go through out-parameters.
+  def rust_c_prototype
+    params = ['rb_execution_context_t *ec', 'rb_control_frame_t *reg_cfp']
+    params += rust_args.map {|v| v[:decl] }
+    params += rust_rets.map {|v| "VALUE *#{v[:name]}_out" } if rust_rets.size > 1
+    ret = rust_rets.size == 1 ? 'VALUE' : 'void'
+    "#{ret} #{rust_handler_name}(#{params.join(', ')})"
+  end
+
+  def rust_c_call
+    args = ['ec', 'GET_CFP()'] + rust_args.map {|v| v[:name] }
+    args += rust_rets.map {|v| "&#{v[:name]}" } if rust_rets.size > 1
+    call = "#{rust_handler_name}(#{args.join(', ')});"
+    call = "#{rust_rets[0][:name]} = #{call}" if rust_rets.size == 1
+    lines = ["    #{call}"]
+    # The handler moves cfp->pc to jump. Copy it back to the PC register.
+    if rust_handler_operands.any? {|v| v[:type] == 'OFFSET' }
+      lines << "    SET_PC(GET_CFP()->pc);"
+    end
+    lines.join("\n") + "\n"
+  end
+
+  def rust_shim
+    params = ['ec: EcPtr', 'cfp: CfpPtr']
+    params += rust_args.map {|v| "#{rust_ident v[:name]}: #{v[:type]}" }
+    params += rust_rets.map {|v| "#{v[:name]}_out: *mut VALUE" } if rust_rets.size > 1
+    args = ['ec', 'cfp'] + rust_args.map {|v| rust_ident v[:name] }
+    call = "crate::insns::#{name}(#{args.join(', ')})"
+    sig = "pub unsafe extern \"C\" fn #{rust_handler_name}(#{params.join(', ')})"
+    case rust_rets.size
+    when 0
+      body = "unsafe { #{call} }"
+    when 1
+      sig += ' -> VALUE'
+      body = "unsafe { #{call} }"
+    else
+      names = rust_rets.map {|v| v[:name] }
+      stores = names.map {|n| "*#{n}_out = #{n};" }.join(' ')
+      body = "unsafe {\n        let (#{names.join(', ')}) = #{call};\n        #{stores}\n    }"
+    end
+    "#[unsafe(no_mangle)]\n#{sig} {\n    #{body}\n}\n"
+  end
+
   private
 
   def check_attribute_consistency
@@ -158,6 +245,12 @@ class RubyVM::BareInstruction
       # are mapped to their call info counterpart. Additionally, all mentions
       # of `cd` in the operand name are replaced with `ci`.
       raise "Please define attribute `comptime_sp_inc` for `#{@name}`"
+    end
+  end
+
+  def check_rust_body
+    if rust? and not @expr.blank?
+      raise "#{@name} is a Rust instruction; its body in insns.def must be empty"
     end
   end
 
@@ -183,6 +276,7 @@ class RubyVM::BareInstruction
     generate_attribute 'bool', 'handles_sp', default_definition_of_handles_sp
     generate_attribute 'bool', 'leaf', default_definition_of_leaf
     generate_attribute 'bool', 'zjit_profile', false
+    generate_attribute 'bool', 'rust', false
   end
 
   def default_definition_of_handles_sp

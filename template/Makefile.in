@@ -687,7 +687,7 @@ update-known-errors:
 	$(IFCHANGE) $(srcdir)/defs/known_errors.def -
 
 INSNS	= optinsn.inc optunifs.inc insns.inc insns_info.inc \
-	  vmtc.inc vm.inc
+	  vmtc.inc vm.inc yarv_insns.h yarv_insns.rs
 
 $(INSNS): $(srcdir)/insns.def vm_opts.h \
 	  $(srcdir)/defs/opt_operand.def $(srcdir)/defs/opt_insn_unif.def \
@@ -731,7 +731,9 @@ $(INSNS): $(srcdir)/insns.def vm_opts.h \
 	  $(tooldir)/ruby_vm/views/optinsn.inc.erb \
 	  $(tooldir)/ruby_vm/views/optunifs.inc.erb \
 	  $(tooldir)/ruby_vm/views/vm.inc.erb \
-	  $(tooldir)/ruby_vm/views/vmtc.inc.erb
+	  $(tooldir)/ruby_vm/views/vmtc.inc.erb \
+	  $(tooldir)/ruby_vm/views/yarv_insns.h.erb \
+	  $(tooldir)/ruby_vm/views/yarv_insns.rs.erb
 	$(ECHO) generating $@
 	$(Q) $(BASERUBY) -Ku $(tooldir)/insns2vm.rb $(INSNS2VMOPT) $@
 

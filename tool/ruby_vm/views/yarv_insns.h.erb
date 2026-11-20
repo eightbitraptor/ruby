@@ -1,0 +1,20 @@
+/* -*- C -*- */
+
+%# This file is a part of  the programming language Ruby.  Permission is hereby
+%# granted, to either  redistribute and/or modify this file,  provided that the
+%# conditions mentioned  in the  file COPYING  are met.   Consult the  file for
+%# details.
+<%= render 'copyright' %>
+<%= render 'notice', locals: {
+    this_file: 'declares the instruction handlers in yarv/src/insns.rs',
+    edit: __FILE__,
+} -%>
+
+#ifndef RUBY_YARV_INSNS_H
+#define RUBY_YARV_INSNS_H 1
+
+% RubyVM::BareInstruction.all.select(&:rust?).each do |insn|
+<%= insn.rust_c_prototype %>;
+% end
+
+#endif /* RUBY_YARV_INSNS_H */

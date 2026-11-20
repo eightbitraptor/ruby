@@ -13,10 +13,11 @@ YARV_RUSTC_FLAGS = --edition=2024 --crate-name=yarv --crate-type=staticlib \
 	-C panic=abort -C opt-level=3 -C codegen-units=1 -C lto -g \
 	-C overflow-checks=on
 
-$(YARV_LIB): $(YARV_SRC_FILES) target/.rustc-version
+$(YARV_LIB): $(YARV_SRC_FILES) yarv_insns.rs target/.rustc-version
 	$(ECHO) 'building $(@F)'
 	$(Q) $(MAKEDIRS) $(@D)
 	$(gnumake_recursive)$(Q) MACOSX_DEPLOYMENT_TARGET=11.0 \
+	    YARV_INSNS_RS='$(abspath $(filter %yarv_insns.rs,$^))' \
 	    $(RUSTC) $(YARV_RUSTC_FLAGS) '--out-dir=$(@D)' '$(top_srcdir)/yarv/src/lib.rs'
 
 YARV_LIB_SYMBOLS = $(YARV_LIB:.a=).symbols

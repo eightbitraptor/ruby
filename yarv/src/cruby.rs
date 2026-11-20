@@ -15,6 +15,56 @@ pub struct VALUE(pub usize);
 pub type ID = usize;
 pub type size_t = usize;
 
+/// The leading fields of `rb_execution_context_t`. The struct continues
+/// past them; yarv.h asserts the offsets.
+#[repr(C)]
+pub struct rb_execution_context_struct {
+    pub vm_stack: *mut VALUE,
+    pub vm_stack_size: usize,
+    pub cfp: *mut rb_control_frame_t,
+    pub tag: *mut core::ffi::c_void,
+    pub interrupt_flag: u32,
+    pub interrupt_mask: u32,
+    pub fiber_ptr: *mut core::ffi::c_void,
+    pub thread_ptr: *mut rb_thread_struct,
+}
+pub type rb_execution_context_t = rb_execution_context_struct;
+
+/// Opaque C structs. Rust code only holds pointers to them.
+#[repr(C)]
+pub struct rb_iseq_struct {
+    _private: [u8; 0],
+}
+#[repr(C)]
+pub struct rb_thread_struct {
+    _private: [u8; 0],
+}
+#[repr(C)]
+pub struct rb_call_data {
+    _private: [u8; 0],
+}
+#[repr(C)]
+pub struct iseq_inline_constant_cache {
+    _private: [u8; 0],
+}
+#[repr(C)]
+pub struct iseq_inline_iv_cache_entry {
+    _private: [u8; 0],
+}
+
+pub type EcPtr = *mut rb_execution_context_t;
+pub type CfpPtr = *mut rb_control_frame_t;
+
+/// Operand types of insns.def. tool/ruby_vm/models/bare_instruction.rb
+/// lists the names that the generated code may use.
+pub type rb_num_t = usize;
+pub type lindex_t = usize;
+pub type OFFSET = isize;
+pub type ISEQ = *const rb_iseq_t;
+pub type CALL_DATA = *mut rb_call_data;
+pub type IC = *mut iseq_inline_constant_cache;
+pub type IVC = *mut iseq_inline_iv_cache_entry;
+
 #[allow(unsafe_op_in_unsafe_fn)]
 mod autogened {
     use super::*;
@@ -221,4 +271,45 @@ pub unsafe fn rarray_const_ptr(ary: VALUE) -> *const VALUE {
 #[inline]
 pub unsafe fn rstring_len(s: VALUE) -> c_long {
     unsafe { (*(s.0 as *const RString)).len }
+}
+
+/// `RHASH_SIZE`. The value must be a Hash.
+#[inline]
+pub unsafe fn rhash_size(h: VALUE) -> usize {
+    unsafe { rb_hash_size_num(h) }
+}
+
+/// `rb_type`, which `TYPE()` expands to.
+#[inline]
+pub fn rb_type(v: VALUE) -> ruby_value_type {
+    if !v.special_const_p() {
+        unsafe { v.builtin_type() }
+    } else if v == Qfalse {
+        RUBY_T_FALSE
+    } else if v == Qnil {
+        RUBY_T_NIL
+    } else if v == Qtrue {
+        RUBY_T_TRUE
+    } else if v == Qundef {
+        RUBY_T_UNDEF
+    } else if v.fixnum_p() {
+        RUBY_T_FIXNUM
+    } else if v.0 & 0xff == RUBY_SYMBOL_FLAG as usize {
+        RUBY_T_SYMBOL
+    } else {
+        RUBY_T_FLOAT
+    }
+}
+
+/// `RUBY_VM_CHECK_INTS`. yarv.h asserts that `USE_VM_CLOCK` is off, so the
+/// check only reads the interrupt flag and mask.
+#[inline(always)]
+pub unsafe fn vm_check_ints(ec: EcPtr) {
+    unsafe {
+        let flag = core::sync::atomic::AtomicU32::from_ptr(&raw mut (*ec).interrupt_flag)
+            .load(core::sync::atomic::Ordering::Relaxed);
+        if flag & !(*ec).interrupt_mask != 0 {
+            rb_threadptr_execute_interrupts((*ec).thread_ptr, 0);
+        }
+    }
 }

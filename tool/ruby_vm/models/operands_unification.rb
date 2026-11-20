@@ -63,6 +63,14 @@ class RubyVM::OperandsUnification < RubyVM::BareInstruction
     end
   end
 
+  def rust_handler_name
+    @original.rust_handler_name
+  end
+
+  def rust_handler_operands
+    @original.operands
+  end
+
   def has_ope? var
     super or @konsts.any? {|i| i[:name] == var[:name] }
   end

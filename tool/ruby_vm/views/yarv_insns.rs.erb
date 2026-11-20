@@ -1,0 +1,15 @@
+%# -*- Rust -*-
+%# This file is a part of  the programming language Ruby.  Permission is hereby
+%# granted, to either  redistribute and/or modify this file,  provided that the
+%# conditions mentioned  in the  file COPYING  are met.   Consult the  file for
+%# details.
+// This file is generated from insns.def by tool/insns2vm.rb. Do not edit it;
+// edit <%= File.basename(__FILE__) %> instead.
+//
+// Each function is the C ABI entry point of one instruction. vm.inc calls it
+// with the operands and the popped values that insns.def declares. The
+// function calls the handler of the same name in yarv/src/insns.rs.
+
+% RubyVM::BareInstruction.all.select(&:rust?).each do |insn|
+<%= insn.rust_shim %>
+% end

@@ -236,6 +236,18 @@ pub struct RFloat {
     pub basic: RBasic,
     pub float_value: rb_float_value_type,
 }
+pub type rb_iseq_t = rb_iseq_struct;
+#[repr(C)]
+pub struct rb_control_frame_struct {
+    pub pc: *const VALUE,
+    pub sp: *mut VALUE,
+    pub _iseq: *const rb_iseq_t,
+    pub self_: VALUE,
+    pub ep: *const VALUE,
+    pub block_code: *const core::ffi::c_void,
+    pub jit_return: *mut core::ffi::c_void,
+}
+pub type rb_control_frame_t = rb_control_frame_struct;
 unsafe extern "C" {
     pub fn rb_int2big(i: isize) -> VALUE;
     pub fn rb_uint2big(i: usize) -> VALUE;
@@ -253,20 +265,46 @@ unsafe extern "C" {
     pub static mut rb_cSymbol: VALUE;
     pub static mut rb_cTrueClass: VALUE;
     pub fn rb_ary_store(ary: VALUE, key: rb_len_t, val: VALUE);
+    pub fn rb_ary_cat(ary: VALUE, train: *const VALUE, len: rb_len_t) -> VALUE;
     pub fn rb_ary_push(ary: VALUE, elem: VALUE) -> VALUE;
     pub fn rb_ary_plus(lhs: VALUE, rhs: VALUE) -> VALUE;
     pub fn rb_hash_aref(hash: VALUE, key: VALUE) -> VALUE;
     pub fn rb_hash_aset(hash: VALUE, key: VALUE, val: VALUE) -> VALUE;
     pub fn rb_big_mul(x: VALUE, y: VALUE) -> VALUE;
+    pub fn rb_range_new(beg: VALUE, end: VALUE, excl: core::ffi::c_int) -> VALUE;
     pub fn rb_reg_match(re: VALUE, str_: VALUE) -> VALUE;
     pub fn rb_str_buf_append(dst: VALUE, src: VALUE) -> VALUE;
     pub fn rb_str_concat(dst: VALUE, src: VALUE) -> VALUE;
+    pub fn rb_str_intern(str_: VALUE) -> VALUE;
     pub fn rb_str_length(arg1: VALUE) -> VALUE;
     pub fn rb_str_succ(orig: VALUE) -> VALUE;
     pub fn rb_ary_aref1(ary: VALUE, i: VALUE) -> VALUE;
+    pub fn rb_ec_ary_new_from_values(
+        ec: *mut rb_execution_context_struct,
+        n: rb_len_t,
+        elts: *const VALUE,
+    ) -> VALUE;
     pub static mut ruby_vm_redefined_flag: [core::ffi::c_short; 36usize];
     pub fn rb_flo_div_flo(x: VALUE, y: VALUE) -> VALUE;
     pub fn ruby_float_mod(x: f64, y: f64) -> f64;
     pub fn rb_fix_aref(fix: VALUE, idx: VALUE) -> VALUE;
+    pub fn rb_reg_new_from_values(
+        cnt: rb_len_t,
+        elements: *const VALUE,
+        opt: core::ffi::c_int,
+    ) -> VALUE;
+    pub fn rb_obj_as_string_result(str_: VALUE, obj: VALUE) -> VALUE;
     pub fn rb_str_opt_plus(x: VALUE, y: VALUE) -> VALUE;
+    pub fn rb_str_concat_literals(num: usize, strary: *const VALUE) -> VALUE;
+    pub fn rb_ec_str_resurrect(
+        ec: *mut rb_execution_context_struct,
+        str_: VALUE,
+        chilled: bool,
+    ) -> VALUE;
+    pub fn rb_threadptr_execute_interrupts(
+        th: *mut rb_thread_struct,
+        blocking_timing: core::ffi::c_int,
+    ) -> core::ffi::c_int;
+    pub fn rb_gvar_get(arg1: ID) -> VALUE;
+    pub fn rb_gvar_set(arg1: ID, arg2: VALUE) -> VALUE;
 }

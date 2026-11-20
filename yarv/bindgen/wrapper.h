@@ -6,5 +6,7 @@
 #include "internal/re.h"
 #include "internal/string.h"
 #include "internal/hash.h"
+#include "internal/thread.h"
+#include "internal/variable.h"
 #include "vm_core.h"
 #include "vm_callinfo.h"
