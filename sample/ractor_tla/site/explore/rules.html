@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rule cards · Ractor models</title>
+<link rel="stylesheet" href="rx.css">
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="rules.css">
+<style>
+  .rules-title { margin: 0 0 .4rem; font-size: 1.7rem; }
+  .rules-hint { font-size: 13px; margin: -.4rem 0 1.2rem; }
+</style>
+</head>
+<body>
+<header class="rx-top">
+  <a class="brand" href="index.html">Ractor models</a>
+  <nav>
+    <a href="index.html">Overview</a>
+    <a href="theatre.html">Theatre</a>
+    <a href="explorer.html">Explorer</a>
+    <a href="multiverse.html">Multiverse</a>
+    <a href="rules.html" class="here">Rules</a>
+    <a href="timeline.html">Timelines</a>
+  </nav>
+</header>
+
+<main class="rx-page">
+  <p class="rx-kicker">Sixteen rules, one loop each</p>
+  <h1 class="rules-title">Rule cards</h1>
+  <p class="rx-lede">Each card shows one rule of Ruby's Ractors as a short loop: a Ractor is a room, a port is a mailbox on its wall, a message is an envelope, and a thread is a dot. The rule is a step in a TLA+ model, and the TLC model checker visited every state the bounded model can reach. A Ruby harness then replayed every transition on CRuby, and every replay passed.</p>
+  <p class="rules-hint rx-muted">Hover a card to see its restart button. A grey tag shows what the Ruby documentation says about the rule.</p>
+
+<!-- rx:rules:start -->
+<div class="rx-rules" data-rx-widget="rules">
+  <div class="legend rx-panel" aria-label="Legend">
+    <div class="item"><div class="mini"><div class="room rx-ractor main"><span class="nm">main</span></div></div>Ractor</div>
+    <div class="item"><div class="mini"><div class="port" style="--x:50%;--y:22px"></div></div>open port</div>
+    <div class="item"><div class="mini"><div class="port" style="--x:50%;--y:22px"><span class="lock"></span></div></div>closed port</div>
+    <div class="item"><div class="mini"><span class="env rx-ractor worker" style="--x:50%;--y:22px"></span></div>message</div>
+    <div class="item"><div class="mini"><span class="call" style="--x:50%;--y:22px">p.send</span></div>call</div>
+    <div class="item"><div class="mini"><div class="thr rx-ractor main" style="--x:50%;--y:22px"><span class="fill"></span></div></div>idle thread</div>
+    <div class="item"><div class="mini"><div class="thr rx-ractor main" style="--x:40%;--y:22px"><span class="fill off"></span><span class="blk on"><span class="ring"></span><i class="zz">z z</i></span></div></div>blocked thread</div>
+    <div class="item"><div class="mini"><div class="thr rx-ractor main" style="--x:50%;--y:22px"><span class="fill off"></span><span class="dead ap"></span></div></div>killed thread</div>
+    <div class="item"><div class="mini"><span class="res ok" style="--x:50%;--y:22px">ok</span></div>result</div>
+    <div class="item"><div class="mini"><span class="res err" style="--x:50%;--y:22px">Error</span></div>exception</div>
+  </div>
+
+  <div class="toolbar" role="group" aria-label="Filter by topic">
+    <button type="button" class="chip" data-topic="all" aria-pressed="true">All</button>
+    <button type="button" class="chip" data-topic="ports" aria-pressed="false">Ports</button>
+    <button type="button" class="chip" data-topic="select" aria-pressed="false">Select</button>
+    <button type="button" class="chip" data-topic="blocking" aria-pressed="false">Blocking</button>
+    <button type="button" class="chip" data-topic="order" aria-pressed="false">Order</button>
+    <button type="button" class="chip" data-topic="termination" aria-pressed="false">Termination</button>
+    <button type="button" class="chip" data-topic="transfer" aria-pressed="false">Transfer</button>
+    <button type="button" class="chip" data-topic="process" aria-pressed="false">Process</button>
+    <button type="button" class="chip" data-topic="fixed" aria-pressed="false">Changed in this work</button>
+    <span class="spacer"></span>
+    <span class="shown">16 of 16 rules</span>
+    <button type="button" class="rx-btn all-ruby" aria-pressed="false">Show Ruby on every card</button>
+  </div>
+  <p class="totals">Checked by TLC and replayed on CRuby; every replay passed.</p>
+
+  <section class="cards">
+
+    <!-- Ports -->
+    <article class="card rx-panel" data-topic="ports" data-module="RactorPorts">
+      <header><span class="topic">Ports</span><span class="status stated">stated</span></header>
+      <p class="rule">Anyone can send to a port. Only the Ractor that created it can receive from it.</p>
+      <div class="stage" style="--dur:6s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="nm">worker</span></div>
+        <div class="port" style="--x:47%;--y:62px"><span class="lb">P1</span></div>
+        <div class="thr rx-ractor worker" style="--x:75%;--y:88px"><span class="fill"></span><span class="lb">T1</span></div>
+        <span class="call w show20" style="--x:75%;--y:48px;--s:.02">P1.send(:hi)</span>
+        <span class="env rx-ractor worker w fly fly20" style="--x0:75%;--y0:88px;--x1:47%;--y1:62px;--s:.05"></span>
+        <span class="env rx-ractor worker ap ap25" style="--x:47%;--y:54px"></span>
+        <span class="call ap ap45" style="--x:75%;--y:48px">P1.receive</span>
+        <span class="beam ap ap50" style="--x0:75%;--x1:48%;--y:80px;--c:var(--o-err)"></span>
+        <span class="res err ap ap60" style="--x:75%;--y:124px">Ractor::Error</span>
+        <div class="strip"><span class="rx-badge ok ap ap25">send ok</span><span class="rx-badge err ap ap60">receive Ractor::Error</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge ok">ok</span><span class="rx-badge err">Ractor::Error</span></div>
+        <div class="where"><code>RactorPorts</code> · <code>Send</code>, <code>Receive</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>port = Ractor::Port.new                     <span class="c"># created by main</span>
+r = Ractor.new(port) { |p| p.send(:hi); p.receive }
+r.value   <span class="c"># raises Ractor::RemoteError, cause: Ractor::Error</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <article class="card rx-panel" data-topic="ports" data-module="RactorPorts">
+      <header><span class="topic">Ports</span><span class="status stated">stated</span></header>
+      <p class="rule">Sending to an open port never blocks. Sending to a closed port raises Ractor::ClosedError.</p>
+      <div class="stage" style="--dur:6s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="nm">worker</span></div>
+        <div class="port" style="--x:47%;--y:62px"><span class="lb">P1</span><span class="lock ap ap40"></span></div>
+        <div class="thr rx-ractor worker" style="--x:75%;--y:88px"><span class="fill"></span><span class="lb">T1</span></div>
+        <span class="call w show20" style="--x:75%;--y:48px;--s:.02">P1.send(:a)</span>
+        <span class="env rx-ractor worker w fly fly20" style="--x0:75%;--y0:88px;--x1:47%;--y1:62px;--s:.04"></span>
+        <span class="env rx-ractor worker ap ap25" style="--x:47%;--y:54px"></span>
+        <span class="call w show15" style="--x:22%;--y:48px;--s:.30">P1.close</span>
+        <span class="call ap ap50" style="--x:75%;--y:48px">P1.send(:b)</span>
+        <span class="env rx-ractor worker w fly fly12" style="--x0:75%;--y0:88px;--x1:51%;--y1:66px;--s:.52"></span>
+        <span class="env rx-ractor worker w fly fly12" style="--x0:51%;--y0:66px;--x1:75%;--y1:88px;--s:.64"></span>
+        <span class="res err ap ap80" style="--x:75%;--y:124px">Ractor::ClosedError</span>
+        <div class="strip"><span class="rx-badge ok ap ap25">send :a ok</span><span class="rx-badge ok ap ap40">close ok</span><span class="rx-badge err ap ap80">send :b ClosedError</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge ok">ok</span><span class="rx-badge err">Ractor::ClosedError</span></div>
+        <div class="where"><code>RactorPorts</code> · <code>Send</code>, <code>Close</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>port = Ractor::Port.new
+port.send(:a)    <span class="c"># returns at once</span>
+port.close
+port.send(:b)    <span class="c"># raises Ractor::ClosedError</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <article class="card rx-panel" data-topic="ports" data-module="RactorOrder">
+      <header><span class="topic">Ports</span><span class="status stated">stated</span></header>
+      <p class="rule">A closed port still hands out the messages it holds. Once it is empty, receive raises Ractor::ClosedError.</p>
+      <div class="stage" style="--dur:7s">
+        <div class="room rx-ractor main wide"><span class="nm">main</span></div>
+        <div class="port" style="--x:93%;--y:70px"><span class="lb">P1</span><span class="lock ap ap10"></span></div>
+        <div class="thr rx-ractor main" style="--x:30%;--y:90px"><span class="fill"></span><span class="lb">T1</span></div>
+        <span class="env rx-ractor worker vn vn20" data-n="1" style="--x:88%;--y:70px"></span>
+        <span class="env rx-ractor worker vn vn45" data-n="2" style="--x:80%;--y:70px"></span>
+        <span class="call w show12" style="--x:60%;--y:40px;--s:0">P1.close</span>
+        <span class="call w show18" style="--x:30%;--y:50px;--s:.20">P1.receive</span>
+        <span class="env rx-ractor worker w fly fly15" data-n="1" style="--x0:88%;--y0:70px;--x1:30%;--y1:90px;--s:.21"></span>
+        <span class="call w show18" style="--x:30%;--y:50px;--s:.42">P1.receive</span>
+        <span class="env rx-ractor worker w fly fly15" data-n="2" style="--x0:80%;--y0:70px;--x1:30%;--y1:90px;--s:.46"></span>
+        <span class="call ap ap65" style="--x:30%;--y:50px">P1.receive</span>
+        <span class="res err ap ap80" style="--x:30%;--y:122px">Ractor::ClosedError</span>
+        <div class="strip"><span class="rx-badge ok ap ap10">close ok</span><span class="rx-badge ok ap ap35">receive 1</span><span class="rx-badge ok ap ap60">receive 2</span><span class="rx-badge err ap ap80">ClosedError</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge ok">ok</span><span class="rx-badge err">Ractor::ClosedError</span></div>
+        <div class="where"><code>RactorOrder</code> · <code>Close</code>, <code>Poll</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>port = Ractor::Port.new
+port.send(:a); port.send(:b)
+port.close
+port.receive     <span class="c"># => :a</span>
+port.receive     <span class="c"># => :b</span>
+port.receive     <span class="c"># raises Ractor::ClosedError</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <!-- Select -->
+    <article class="card rx-panel" data-topic="select" data-module="RactorPorts" data-fixed="1">
+      <header><span class="topic">Select</span><span class="status silent">silent</span><span class="status fixed">fixed in this work</span></header>
+      <p class="rule">Ractor.select refuses a port that another Ractor created, just as receive does.</p>
+      <p class="note">Before this fix, CRuby looked the port up in the caller's own table and could return a message of a different port.</p>
+      <div class="stage" style="--dur:6s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="nm">worker</span></div>
+        <div class="port" style="--x:47%;--y:62px"><span class="lb">P1</span></div>
+        <span class="env rx-ractor main" style="--x:47%;--y:54px"></span>
+        <div class="thr rx-ractor worker" style="--x:75%;--y:88px"><span class="fill"></span><span class="lb">T1</span></div>
+        <span class="call ap ap15" style="--x:75%;--y:48px">Ractor.select(P1)</span>
+        <span class="beam w show35" style="--x0:75%;--x1:48%;--y:80px;--s:.20"></span>
+        <span class="beam ap ap55" style="--x0:75%;--x1:48%;--y:80px;--c:var(--o-err)"></span>
+        <span class="res err ap ap60" style="--x:75%;--y:124px">Ractor::Error</span>
+        <div class="strip"><span class="rx-badge err ap ap60">select Ractor::Error</span><span class="rx-badge nil ap ap75">P1 keeps its message</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge err">Ractor::Error</span></div>
+        <div class="where"><code>RactorPorts</code> · <code>Select</code>, <code>SelectPoll</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>port = Ractor::Port.new                     <span class="c"># created by main</span>
+r = Ractor.new(port) { |p| Ractor.select(p) }
+r.value   <span class="c"># raises Ractor::RemoteError, cause: Ractor::Error</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <article class="card rx-panel" data-topic="select" data-module="RactorPorts" data-fixed="1">
+      <header><span class="topic">Select</span><span class="status stated">stated</span><span class="status fixed">made deterministic in this work</span></header>
+      <p class="rule">In Ractor.select, a closed and empty port raises Ractor::ClosedError even when another port has a message ready.</p>
+      <p class="note">Before this change, the result depended on whether the pending message had already been moved into the port's queue.</p>
+      <div class="stage" style="--dur:7s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="nm">worker</span></div>
+        <div class="port" style="--x:47%;--y:44px"><span class="lb">P1</span><span class="lock ap ap35"></span></div>
+        <div class="port" style="--x:47%;--y:98px"><span class="lb">P2</span></div>
+        <div class="thr rx-ractor main" style="--x:20%;--y:78px"><span class="fill"></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor worker" style="--x:75%;--y:78px"><span class="fill"></span><span class="lb">T1</span></div>
+        <span class="call w show18" style="--x:75%;--y:42px;--s:.02">P2.send(:x)</span>
+        <span class="env rx-ractor worker w fly fly18" style="--x0:75%;--y0:78px;--x1:47%;--y1:98px;--s:.04"></span>
+        <span class="env rx-ractor worker ap ap20" style="--x:47%;--y:90px"></span>
+        <span class="call w show15" style="--x:20%;--y:120px;--s:.26">P1.close</span>
+        <span class="call ap ap45" style="--x:22%;--y:42px">Ractor.select(P1, P2)</span>
+        <span class="res err ap ap70" style="--x:22%;--y:118px">Ractor::ClosedError</span>
+        <div class="strip"><span class="rx-badge ok ap ap20">send ok</span><span class="rx-badge ok ap ap35">close ok</span><span class="rx-badge err ap ap70">select Ractor::ClosedError</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge err">Ractor::ClosedError</span></div>
+        <div class="where"><code>RactorPorts</code> · <code>Select</code>, <code>SelectPoll</code> · <code>RactorBlocking</code> · <code>Select</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>p1 = Ractor::Port.new; p2 = Ractor::Port.new
+p2.send(:x)              <span class="c"># P2 is ready</span>
+p1.close                 <span class="c"># P1 is closed and empty</span>
+Ractor.select(p1, p2)    <span class="c"># raises Ractor::ClosedError</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <!-- Blocking -->
+    <article class="card rx-panel" data-topic="blocking" data-module="RactorBlocking">
+      <header><span class="topic">Blocking</span><span class="status stated">stated</span></header>
+      <p class="rule">receive on an empty port puts the thread to sleep. A message from another Ractor wakes it and is returned.</p>
+      <div class="stage" style="--dur:6s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="nm">worker</span></div>
+        <div class="port" style="--x:47%;--y:62px"><span class="lb">P1</span></div>
+        <div class="thr rx-ractor main" style="--x:22%;--y:88px"><span class="fill wh hide60" style="--s:.10"></span><span class="blk w show60" style="--s:.10"><span class="ring"></span><i class="zz">z z</i><b class="cap">P1.receive</b></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor worker" style="--x:75%;--y:88px"><span class="fill"></span><span class="lb">T3</span></div>
+        <span class="call w show20" style="--x:75%;--y:48px;--s:.40">P1.send(:hi)</span>
+        <span class="env rx-ractor worker w fly fly18" style="--x0:75%;--y0:88px;--x1:47%;--y1:62px;--s:.42"></span>
+        <span class="env rx-ractor worker w fly fly10" style="--x0:47%;--y0:62px;--x1:22%;--y1:88px;--s:.60"></span>
+        <span class="res ok ap ap70" style="--x:22%;--y:48px">:hi</span>
+        <div class="strip"><span class="rx-badge blocks ap ap10">receive blocks</span><span class="rx-badge ok ap ap70">wakes with :hi</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge blocks">blocks</span><span class="rx-badge ok">ok</span></div>
+        <div class="where"><code>RactorBlocking</code> · <code>Receive</code>, <code>Send</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>port = Ractor::Port.new
+Ractor.new(port) { |p| sleep 1; p.send(:hi) }
+port.receive     <span class="c"># sleeps about a second, then => :hi</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <article class="card rx-panel" data-topic="blocking" data-module="RactorBlocking">
+      <header><span class="topic">Blocking</span><span class="status silent">silent</span></header>
+      <p class="rule">One message wakes one waiting thread. When several threads wait, any of them may get it.</p>
+      <p class="note">The model allows either thread. CRuby replayed one of the two choices.</p>
+      <div class="stage" style="--dur:6s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="nm">worker</span></div>
+        <div class="port" style="--x:47%;--y:62px"><span class="lb">P1</span></div>
+        <div class="thr rx-ractor main" style="--x:14%;--y:88px"><span class="fill wh hide55" style="--s:.05"></span><span class="blk w show55" style="--s:.05"><span class="ring"></span><i class="zz">z z</i><b class="cap">P1.receive</b></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor main" style="--x:33%;--y:88px"><span class="fill vn vn5"></span><span class="blk ap ap5"><span class="ring"></span><i class="zz">z z</i><b class="cap">P1.receive</b></span><span class="lb">T2</span></div>
+        <div class="thr rx-ractor worker" style="--x:75%;--y:88px"><span class="fill"></span><span class="lb">T3</span></div>
+        <span class="call w show20" style="--x:75%;--y:48px;--s:.30">P1.send(:hi)</span>
+        <span class="env rx-ractor worker w fly fly18" style="--x0:75%;--y0:88px;--x1:47%;--y1:62px;--s:.32"></span>
+        <span class="env rx-ractor worker w fly fly10" style="--x0:47%;--y0:62px;--x1:14%;--y1:88px;--s:.50"></span>
+        <span class="res ok ap ap60" style="--x:14%;--y:48px">:hi</span>
+        <div class="strip"><span class="rx-badge blocks ap ap5">T1, T2 block</span><span class="rx-badge ok ap ap60">T1 wakes</span><span class="rx-badge blocks ap ap70">T2 keeps waiting</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge blocks">blocks</span><span class="rx-badge ok">ok</span></div>
+        <div class="where"><code>RactorBlocking</code> · <code>Send</code> (a choice)</div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>port = Ractor::Port.new
+t1 = Thread.new { port.receive }
+t2 = Thread.new { port.receive }
+port.send(:hi)   <span class="c"># wakes t1 or t2; the other keeps waiting</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <article class="card rx-panel" data-topic="blocking" data-module="RactorBlocking">
+      <header><span class="topic">Blocking</span><span class="status stated">stated</span></header>
+      <p class="rule">Closing a port wakes every thread waiting on it. Each gets Ractor::ClosedError, in receive and in Ractor.select alike.</p>
+      <div class="stage" style="--dur:6s">
+        <div class="room rx-ractor main wide"><span class="nm">main</span></div>
+        <div class="port" style="--x:93%;--y:50px"><span class="lb">P1</span><span class="lock ap ap45"></span></div>
+        <div class="port" style="--x:93%;--y:104px"><span class="lb">P2</span></div>
+        <div class="thr rx-ractor main" style="--x:28%;--y:88px"><span class="fill wh hide60" style="--s:.05"></span><span class="blk w show60" style="--s:.05"><span class="ring"></span><i class="zz">z z</i><b class="cap">Ractor.select(P1, P2)</b></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor main" style="--x:62%;--y:88px"><span class="fill"></span><span class="lb">T2</span></div>
+        <span class="call w show25" style="--x:62%;--y:48px;--s:.35">P1.close</span>
+        <span class="res err ap ap65" style="--x:28%;--y:48px">Ractor::ClosedError</span>
+        <div class="strip"><span class="rx-badge blocks ap ap5">T1 blocks</span><span class="rx-badge ok ap ap45">T2 close ok</span><span class="rx-badge err ap ap65">T1 wakes: ClosedError</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge blocks">blocks</span><span class="rx-badge err">Ractor::ClosedError</span></div>
+        <div class="where"><code>RactorBlocking</code> · <code>Close</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>p1 = Ractor::Port.new; p2 = Ractor::Port.new
+t = Thread.new { Ractor.select(p1, p2) }   <span class="c"># blocks</span>
+p1.close
+t.value          <span class="c"># raises Ractor::ClosedError from the select</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <article class="card rx-panel" data-topic="blocking" data-module="RactorBlocking">
+      <header><span class="topic">Blocking</span><span class="status silent">silent</span></header>
+      <p class="rule">Thread#wakeup does not end a blocked receive. The thread keeps waiting. Thread#raise does end it.</p>
+      <div class="stage" style="--dur:7s">
+        <div class="room rx-ractor main wide"><span class="nm">main</span></div>
+        <div class="port" style="--x:93%;--y:70px"><span class="lb">P1</span></div>
+        <div class="thr rx-ractor main" style="--x:28%;--y:88px"><span class="fill ap ap75"></span><span class="blk vn vn75"><span class="ring"></span><i class="zz">z z</i><b class="cap">P1.receive</b></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor main" style="--x:62%;--y:88px"><span class="fill"></span><span class="lb">T2</span></div>
+        <span class="call w show20" style="--x:62%;--y:48px;--s:.18">T1.wakeup</span>
+        <span class="ping rx-ractor main w fly fly12" style="--x0:62%;--y0:88px;--x1:28%;--y1:88px;--s:.22"></span>
+        <span class="res blocks w show25" style="--x:28%;--y:48px;--s:.38">still waiting</span>
+        <span class="call ap ap60" style="--x:62%;--y:48px">T1.raise "stop"</span>
+        <span class="ping w fly fly10" style="--x0:62%;--y0:88px;--x1:28%;--y1:88px;--s:.65;--c:var(--o-err)"></span>
+        <span class="res err ap ap75" style="--x:28%;--y:48px">RuntimeError</span>
+        <div class="strip"><span class="rx-badge ok ap ap35">wakeup ok</span><span class="rx-badge blocks ap ap40">T1 keeps waiting</span><span class="rx-badge err ap ap75">raise: RuntimeError</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge ok">ok</span><span class="rx-badge blocks">blocks</span><span class="rx-badge err">RuntimeError</span></div>
+        <div class="where"><code>RactorBlocking</code> · <code>Wakeup</code>, <code>Raise</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>port = Ractor::Port.new
+t = Thread.new { port.receive }
+t.wakeup          <span class="c"># returns t; the receive keeps waiting</span>
+t.raise "stop"    <span class="c"># ends the receive with RuntimeError</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <article class="card rx-panel" data-topic="blocking" data-module="RactorBlocking">
+      <header><span class="topic">Blocking</span><span class="status silent">silent</span></header>
+      <p class="rule">When a worker's block returns, its remaining threads are killed, their ensure clauses run, and its default port closes.</p>
+      <div class="stage" style="--dur:6s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="veil ap ap55"></span><span class="nm">worker</span></div>
+        <div class="port" style="--x:53%;--y:62px"><span class="lb">D</span><span class="lock ap ap55"></span></div>
+        <div class="thr rx-ractor main" style="--x:22%;--y:88px"><span class="fill"></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor worker" style="--x:68%;--y:88px"><span class="fill off"></span><span class="blk vn vn55"><span class="ring"></span><i class="zz">z z</i><b class="cap">Ractor.receive</b></span><span class="dead ap ap55"></span><span class="lb">T3</span></div>
+        <div class="thr rx-ractor worker" style="--x:88%;--y:88px"><span class="fill vn vn55"></span><span class="dead ap ap55"></span><span class="lb">T4</span></div>
+        <span class="call w show20" style="--x:78%;--y:44px;--s:.35">block returns :done</span>
+        <span class="call ap ap60" style="--x:22%;--y:120px">r.value</span>
+        <span class="res ok ap ap75" style="--x:22%;--y:48px">:done</span>
+        <div class="strip"><span class="rx-badge killed ap ap55">killed · ensure ran</span><span class="rx-badge nil ap ap65">D closed</span><span class="rx-badge ok ap ap75">value :done</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge killed">killed</span><span class="rx-badge ok">ok</span></div>
+        <div class="where"><code>RactorBlocking</code> · <code>FinishWorker</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>r = Ractor.new do
+  Thread.new { begin; Ractor.receive; ensure; puts "ensure ran"; end }
+  :done          <span class="c"># the block returns while the thread still waits</span>
+end
+r.value          <span class="c"># => :done, after "ensure ran" was printed</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <!-- Order -->
+    <article class="card rx-panel" data-topic="order" data-module="RactorOrder">
+      <header><span class="topic">Order</span><span class="status silent">silent</span></header>
+      <p class="rule">A port hands out messages in the order they were sent, whichever Ractor sent them.</p>
+      <div class="stage" style="--dur:8s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r top"><span class="nm">worker 1</span></div>
+        <div class="room rx-ractor worker2 r bot"><span class="nm">worker 2</span></div>
+        <div class="port" style="--x:47%;--y:70px"><span class="lb">P1</span></div>
+        <div class="thr rx-ractor main" style="--x:18%;--y:96px"><span class="fill"></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor worker" style="--x:78%;--y:40px"><span class="fill"></span></div>
+        <div class="thr rx-ractor worker2" style="--x:78%;--y:104px"><span class="fill"></span></div>
+        <span class="env rx-ractor main w fly fly10" data-n="1" style="--x0:18%;--y0:96px;--x1:47%;--y1:70px;--s:.04"></span>
+        <span class="env rx-ractor main w show40 still" data-n="1" style="--x:40%;--y:60px;--s:.14"></span>
+        <span class="env rx-ractor worker w fly fly10" data-n="2" style="--x0:78%;--y0:40px;--x1:47%;--y1:70px;--s:.20"></span>
+        <span class="env rx-ractor worker w show35 still" data-n="2" style="--x:33%;--y:60px;--s:.30"></span>
+        <span class="env rx-ractor worker2 w fly fly10" data-n="3" style="--x0:78%;--y0:104px;--x1:47%;--y1:70px;--s:.36"></span>
+        <span class="env rx-ractor worker2 w show30 still" data-n="3" style="--x:26%;--y:60px;--s:.46"></span>
+        <span class="call ap ap50" style="--x:24%;--y:124px">P1.receive ×3</span>
+        <span class="env rx-ractor main w fly fly10" data-n="1" style="--x0:40%;--y0:60px;--x1:18%;--y1:96px;--s:.54"></span>
+        <span class="env rx-ractor worker w fly fly10" data-n="2" style="--x0:33%;--y0:60px;--x1:18%;--y1:96px;--s:.66"></span>
+        <span class="env rx-ractor worker2 w fly fly10" data-n="3" style="--x0:26%;--y0:60px;--x1:18%;--y1:96px;--s:.78"></span>
+        <div class="strip"><span class="rx-badge ok ap ap65">1 from main</span><span class="rx-badge ok ap ap75">2 from worker 1</span><span class="rx-badge ok ap ap90">3 from worker 2</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge ok">ok</span></div>
+        <div class="where"><code>RactorOrder</code> · <code>Send</code>, <code>Poll</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>port = Ractor::Port.new
+port.send(:m1)
+Ractor.new(port) { |p| p.send(:w1) }.join
+Ractor.new(port) { |p| p.send(:w2) }.join
+3.times.map { port.receive }    <span class="c"># => [:m1, :w1, :w2]</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <!-- Termination -->
+    <article class="card rx-panel" data-topic="termination" data-module="RactorTermination">
+      <header><span class="topic">Termination</span><span class="status stated">stated</span></header>
+      <p class="rule">After a worker raises, the first value call gets Ractor::RemoteError. The next call from that Ractor raises taken.</p>
+      <div class="stage" style="--dur:7s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="veil ap ap20"></span><span class="nm">worker</span></div>
+        <div class="thr rx-ractor main" style="--x:22%;--y:88px"><span class="fill"></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor worker" style="--x:75%;--y:88px"><span class="fill vn vn20"></span><span class="dead ap ap20"></span></div>
+        <span class="call w show18" style="--x:75%;--y:48px;--s:.02">raise "boom"</span>
+        <span class="call w show20" style="--x:22%;--y:48px;--s:.28">w.value</span>
+        <span class="res err w show25" style="--x:22%;--y:120px;--s:.45">Ractor::RemoteError</span>
+        <span class="call ap ap70" style="--x:22%;--y:48px">w.value</span>
+        <span class="res err ap ap85" style="--x:22%;--y:120px">Ractor::Error</span>
+        <div class="strip"><span class="rx-badge killed ap ap20">worker aborted</span><span class="rx-badge err ap ap45">value RemoteError</span><span class="rx-badge err ap ap85">value taken</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge err">Ractor::RemoteError</span><span class="rx-badge err">Ractor::Error</span></div>
+        <div class="where"><code>RactorTermination</code> · <code>Value</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>w = Ractor.new { raise "boom" }
+w.value rescue p $!   <span class="c"># Ractor::RemoteError, cause: RuntimeError "boom"</span>
+w.value               <span class="c"># raises Ractor::Error: the value was already taken</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <!-- Transfer -->
+    <article class="card rx-panel" data-topic="transfer" data-module="RactorTransfer">
+      <header><span class="topic">Transfer</span><span class="status stated">stated</span></header>
+      <p class="rule">A shareable object, such as a frozen string, travels by reference. Both Ractors hold the same object.</p>
+      <div class="stage" style="--dur:6s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="nm">worker</span></div>
+        <div class="port" style="--x:53%;--y:62px"><span class="lb">D</span></div>
+        <div class="thr rx-ractor main" style="--x:11%;--y:70px"><span class="fill"></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor worker" style="--x:90%;--y:70px"><span class="fill"></span></div>
+        <span class="obj rx-ractor main" style="--x:30%;--y:70px">str<span class="lb">frozen</span></span>
+        <span class="call w show18" style="--x:25%;--y:120px;--s:.02">r.send(str)</span>
+        <span class="env rx-ractor main w fly fly18" style="--x0:30%;--y0:70px;--x1:53%;--y1:62px;--s:.20"></span>
+        <span class="env rx-ractor main w fly fly10" style="--x0:53%;--y0:62px;--x1:76%;--y1:70px;--s:.40"></span>
+        <span class="obj rx-ractor main ap ap50" style="--x:76%;--y:70px">str</span>
+        <span class="beam ap ap55" style="--x0:30%;--x1:76%;--y:104px;--c:var(--r-main)"><span class="lbl">the same object</span></span>
+        <div class="strip"><span class="rx-badge ok ap ap40">send ok</span><span class="rx-badge ok ap ap55">worker holds the sender's object</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge ok">ok</span></div>
+        <div class="where"><code>RactorTransfer</code> · <code>SendCopy</code>, <code>Receive</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>str = "hello".freeze                 <span class="c"># shareable</span>
+r = Ractor.new { Ractor.receive.object_id }
+r.send(str)
+r.value == str.object_id             <span class="c"># => true</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <article class="card rx-panel" data-topic="transfer" data-module="RactorTransfer">
+      <header><span class="topic">Transfer</span><span class="status stated">stated</span></header>
+      <p class="rule">move: true gives the receiver the object itself. The sender keeps a moved shell; any method on it raises Ractor::MovedError.</p>
+      <div class="stage" style="--dur:7s">
+        <div class="room rx-ractor main l"><span class="nm">main</span></div>
+        <div class="room rx-ractor worker r"><span class="nm">worker</span></div>
+        <div class="port" style="--x:53%;--y:62px"><span class="lb">D</span></div>
+        <div class="thr rx-ractor main" style="--x:11%;--y:70px"><span class="fill"></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor worker" style="--x:90%;--y:70px"><span class="fill"></span></div>
+        <span class="obj rx-ractor main vn vn20" style="--x:30%;--y:70px">str</span>
+        <span class="obj shell ap ap20" style="--x:30%;--y:70px">moved</span>
+        <span class="call w show18" style="--x:27%;--y:120px;--s:.02">send(str, move: true)</span>
+        <span class="obj rx-ractor main w fly fly18" style="--x0:30%;--y0:70px;--x1:53%;--y1:62px;--s:.20">str</span>
+        <span class="obj rx-ractor main w fly fly10" style="--x0:53%;--y0:62px;--x1:76%;--y1:70px;--s:.40">str</span>
+        <span class="obj rx-ractor main ap ap50" style="--x:76%;--y:70px">str</span>
+        <span class="call ap ap60" style="--x:25%;--y:120px">str.size</span>
+        <span class="res err ap ap75" style="--x:27%;--y:42px">Ractor::MovedError</span>
+        <div class="strip"><span class="rx-badge ok ap ap40">send ok</span><span class="rx-badge ok ap ap50">worker has str</span><span class="rx-badge err ap ap75">str.size MovedError</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge ok">ok</span><span class="rx-badge err">Ractor::MovedError</span></div>
+        <div class="where"><code>RactorTransfer</code> · <code>SendMove</code>, <code>Touch</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>r = Ractor.new { Ractor.receive.upcase }
+str = +"hello"
+r.send(str, move: true)
+r.value          <span class="c"># => "HELLO"</span>
+str.size         <span class="c"># raises Ractor::MovedError</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <!-- Process -->
+    <article class="card rx-panel" data-topic="process" data-module="RactorProcess">
+      <header><span class="topic">Process</span><span class="status silent">silent</span></header>
+      <p class="rule">exit in main runs at_exit handlers and unwinds waiting threads, so ensure clauses run. exit! skips both.</p>
+      <div class="stage" style="--dur:7s">
+        <div class="room rx-ractor main l"><span class="nm">main · exit 3</span></div>
+        <div class="room rx-ractor main r"><span class="veil gone ap ap65"></span><span class="nm">main · exit! 3</span></div>
+        <div class="port" style="--x:36%;--y:10px"><span class="lb">P1</span></div>
+        <div class="port" style="--x:86%;--y:10px"><span class="lb">P1</span></div>
+        <div class="thr rx-ractor main" style="--x:22%;--y:88px"><span class="fill off"></span><span class="blk vn vn30"><span class="ring"></span><i class="zz">z z</i><b class="cap">P1.receive</b></span><span class="dead ap ap30"></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor main" style="--x:72%;--y:88px"><span class="fill off"></span><span class="blk on"><span class="ring"></span><i class="zz">z z</i><b class="cap">P1.receive</b></span><span class="lb">T1</span></div>
+        <span class="call w show20" style="--x:22%;--y:44px;--s:.08">exit 3</span>
+        <span class="res ok ap ap30" style="--x:22%;--y:120px">ensure ran</span>
+        <span class="res exit ap ap35" style="--x:22%;--y:44px">at_exit ran · status 3</span>
+        <span class="call w show15" style="--x:72%;--y:44px;--s:.50">exit! 3</span>
+        <span class="res exit ap ap65" style="--x:72%;--y:44px">status 3 · nothing ran</span>
+        <div class="strip"><span class="rx-badge exit ap ap35">exit: ensure and at_exit ran</span><span class="rx-badge exit ap ap65">exit!: neither ran</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge exit">exit</span></div>
+        <div class="where"><code>RactorProcess</code> · <code>MainExit</code>, <code>MainExitBang</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>at_exit { puts "at_exit ran" }
+Thread.new { begin; Ractor::Port.new.receive; ensure; puts "ensure ran"; end }
+sleep 0.1
+exit 3     <span class="c"># prints both lines; status 3</span>
+<span class="c"># exit! 3 would print nothing and end at once</span></code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+    <article class="card rx-panel" data-topic="process" data-module="RactorProcess">
+      <header><span class="topic">Process</span><span class="status silent">silent</span></header>
+      <p class="rule">After fork, the child sees every worker as terminated: send raises Ractor::ClosedError and value returns nil once.</p>
+      <p class="note">The worker never returned nil. The model records what CRuby does; the README lists this as a possible defect.</p>
+      <div class="stage" style="--dur:8s">
+        <div class="room rx-ractor main l"><span class="nm">main<span class="ap ap15"> · child process</span></span></div>
+        <div class="room rx-ractor worker r"><span class="veil ap ap15"></span><span class="nm">worker</span></div>
+        <div class="port" style="--x:53%;--y:62px"><span class="lb">D</span><span class="lock ap ap15"></span></div>
+        <div class="thr rx-ractor main" style="--x:22%;--y:88px"><span class="fill"></span><span class="lb">T1</span></div>
+        <div class="thr rx-ractor worker" style="--x:75%;--y:88px"><span class="fill off"></span><span class="blk vn vn15"><span class="ring"></span><i class="zz">z z</i><b class="cap">Ractor.receive</b></span><span class="dead ap ap15"></span></div>
+        <span class="call w show12" style="--x:22%;--y:48px;--s:.02">fork</span>
+        <span class="res ok w show15" style="--x:22%;--y:48px;--s:.16">Ractor.count → 1</span>
+        <span class="call w show15" style="--x:22%;--y:48px;--s:.34">w.send(:go)</span>
+        <span class="env rx-ractor main w fly fly8" style="--x0:22%;--y0:88px;--x1:49%;--y1:66px;--s:.36"></span>
+        <span class="res err w show15" style="--x:22%;--y:120px;--s:.47">Ractor::ClosedError</span>
+        <span class="call w show12" style="--x:22%;--y:48px;--s:.62">w.value</span>
+        <span class="res nil w show12" style="--x:22%;--y:120px;--s:.70">nil</span>
+        <span class="call ap ap85" style="--x:22%;--y:48px">w.value</span>
+        <span class="res err ap ap90" style="--x:22%;--y:120px">Ractor::Error</span>
+        <div class="strip"><span class="rx-badge ok ap ap15">count 1</span><span class="rx-badge err ap ap45">send ClosedError</span><span class="rx-badge nil ap ap70">nil</span><span class="rx-badge err ap ap90">taken</span></div>
+      </div>
+      <div class="meta">
+        <div class="badges"><span class="rx-badge ok">ok</span><span class="rx-badge err">Ractor::ClosedError</span><span class="rx-badge nil">nil</span><span class="rx-badge err">Ractor::Error</span></div>
+        <div class="where"><code>RactorProcess</code> · <code>Fork</code>, <code>Count</code>, <code>SendWorker</code>, <code>Value</code></div>
+      </div>
+      <div class="ruby-row"><button class="rx-btn toggle" aria-expanded="false">Ruby</button></div>
+<pre class="ruby" hidden><code>w = Ractor.new { Ractor.receive }   <span class="c"># still running</span>
+fork do
+  Ractor.count                      <span class="c"># => 1</span>
+  w.send(:go) rescue p $!           <span class="c"># Ractor::ClosedError</span>
+  w.value                           <span class="c"># => nil; a second call raises Ractor::Error</span>
+end</code></pre>
+      <footer><span>Checked by TLC · replayed on CRuby</span><span class="count"></span></footer>
+    </article>
+
+  </section>
+</div>
+<!-- rx:rules:end -->
+</main>
+
+<script src="data/RactorPorts.js"></script>
+<script src="data/RactorTermination.js"></script>
+<script src="data/RactorTransfer.js"></script>
+<script src="data/RactorIsolation.js"></script>
+<script src="data/RactorLocal.js"></script>
+<script src="data/RactorBlocking.js"></script>
+<script src="data/RactorOrder.js"></script>
+<script src="data/RactorProcess.js"></script>
+<script src="common.js"></script>
+<script src="rules.js"></script>
+<script src="widgets.js"></script>
+</body>
+</html>

@@ -1,0 +1,178 @@
+/* Rule cards widget.  Every rule is scoped under .rx-rules; the host page
+   provides --bg --surface --fg --muted --border --accent, rx.css the rest. */
+
+.rx-rules { --stage: color-mix(in srgb, var(--surface), var(--fg) 6%); --tint: color-mix(in srgb, var(--fg) 8%, transparent); font-size: 15px; line-height: 1.55; color: var(--fg); }
+.rx-rules, .rx-rules *, .rx-rules *::before, .rx-rules *::after { box-sizing: border-box; }
+.rx-rules code { font: 11.5px/1.4 var(--mono); background: var(--tint); color: inherit; padding: .05rem .35rem; border-radius: 5px; }
+.rx-rules button { font-family: inherit; }
+
+.rx-rules .legend { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem .6rem; padding: .7rem .9rem; margin-bottom: .9rem; }
+.rx-rules .legend .item { display: flex; flex-direction: column; align-items: center; gap: .25rem; font-size: 11px; color: var(--muted); text-align: center; }
+.rx-rules .legend .mini { position: relative; width: 60px; height: 44px; background: var(--stage); border-radius: 8px; overflow: visible; --dur: 4s; }
+.rx-rules .legend .mini .room { top: 6px; height: 32px; left: 10%; width: 80%; }
+.rx-rules .legend .mini .room .nm { font-size: 9px; top: 1px; left: 5px; }
+
+.rx-rules .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: 0 0 .5rem; }
+.rx-rules .toolbar .spacer { flex: 1; }
+.rx-rules .toolbar .shown { font-size: 13px; color: var(--muted); }
+.rx-rules .totals { font-size: 13px; color: var(--muted); margin: 0 0 1.1rem; }
+.rx-rules .chip { font-size: 13px; line-height: 1.4; padding: .25rem .75rem; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer; }
+.rx-rules .chip:hover { border-color: var(--accent); }
+.rx-rules .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.rx-rules .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.1rem; }
+.rx-rules .card { position: relative; z-index: 0; display: flex; flex-direction: column; gap: .55rem; padding: .85rem 1rem .9rem; min-width: 0; }
+.rx-rules .card[hidden] { display: none; }
+.rx-rules .card header { position: static; z-index: auto; display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; padding: 0; margin: 0; background: none; border: 0; }
+.rx-rules .card .topic { font: 600 11px/1.6 var(--sans); text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-right: auto; }
+.rx-rules .status { font: 11px/1.7 var(--mono); padding: 0 .55rem; border-radius: 999px; background: var(--tint); color: var(--muted); }
+.rx-rules .status.differs { color: var(--o-err); }
+.rx-rules .status.fixed { background: color-mix(in srgb, var(--o-ok) 16%, transparent); color: var(--o-ok); }
+.rx-rules .card .rule { margin: 0; font-size: 15.5px; font-weight: 600; line-height: 1.35; }
+.rx-rules .card .note { margin: -.2rem 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+.rx-rules .card .meta { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+.rx-rules .card .badges { display: flex; gap: .3rem; flex-wrap: wrap; }
+.rx-rules .card .where { font-size: 12px; color: var(--muted); }
+.rx-rules .card .ruby-row { display: flex; align-items: center; gap: .6rem; }
+.rx-rules .card .ruby { margin: 0; padding: .6rem .8rem; border: 0; background: var(--stage); border-radius: 9px; overflow-x: auto; font: 12.5px/1.5 var(--mono); color: var(--fg); }
+.rx-rules .card .ruby code { font: inherit; background: none; padding: 0; }
+.rx-rules .card .ruby[hidden] { display: none; }
+.rx-rules .card .ruby .c { color: var(--muted); font-style: normal; }
+.rx-rules .card footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .2rem .5rem; font-size: 11.5px; color: var(--muted); border: 0; border-top: 1px solid var(--border); padding: .5rem 0 0; margin: auto 0 0; max-width: none; }
+.rx-rules .card footer span { white-space: nowrap; }
+
+.rx-rules .stage { position: relative; height: 172px; background: var(--stage); border-radius: 10px; overflow: hidden; --dur: 6s; }
+.rx-rules .stage .replay { position: absolute; top: 4px; right: 4px; z-index: 9; width: 22px; height: 22px; padding: 0; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.rx-rules .stage:hover .replay, .rx-rules .stage .replay:focus-visible { opacity: 1; }
+.rx-rules .stage:not(.live) .w, .rx-rules .stage:not(.live) .wh, .rx-rules .stage:not(.live) .ap, .rx-rules .stage:not(.live) .vn { animation-play-state: paused; }
+
+.rx-rules .room { position: absolute; top: 10px; height: 120px; border: 2px solid var(--c); border-radius: 11px; background: color-mix(in srgb, var(--c) 9%, transparent); }
+.rx-rules .room.l { left: 3%; width: 44%; }
+.rx-rules .room.r { left: 53%; width: 44%; }
+.rx-rules .room.wide { left: 3%; width: 90%; }
+.rx-rules .room.top { height: 56px; }
+.rx-rules .room.bot { top: 74px; height: 56px; }
+.rx-rules .room .nm { position: absolute; z-index: 1; top: 3px; left: 8px; font: 600 11px/1.4 var(--sans); color: var(--c); white-space: nowrap; }
+.rx-rules .room .veil { position: absolute; inset: -2px; border-radius: 11px; border: 2px solid var(--r-dead); background: color-mix(in srgb, var(--r-dead) 22%, var(--stage)); }
+.rx-rules .room .veil.gone { border-color: transparent; background: color-mix(in srgb, var(--stage) 85%, transparent); }
+.rx-rules .room .veil ~ .nm { color: var(--muted); }
+
+.rx-rules .port { position: absolute; left: var(--x); top: var(--y); width: 28px; height: 18px; margin: -9px 0 0 -14px; border-radius: 4px; background: var(--surface); border: 2px solid var(--fg); z-index: 2; }
+.rx-rules .port::before { content: ""; position: absolute; left: 4px; right: 4px; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: var(--fg); }
+.rx-rules .port .lb { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 4px; font: 10px/1 var(--mono); color: var(--muted); }
+.rx-rules .port .lock { position: absolute; inset: -2px; border-radius: 4px; border: 2px solid var(--o-err); background: linear-gradient(var(--o-err), var(--o-err)) center / calc(100% - 6px) 5px no-repeat, var(--surface); }
+.rx-rules .port .lock::before { content: ""; position: absolute; right: -8px; top: -9px; width: 10px; height: 8px; border-radius: 2px; background: var(--o-err); }
+.rx-rules .port .lock::after { content: ""; position: absolute; right: -6px; top: -15px; width: 6px; height: 7px; border: 2px solid var(--o-err); border-bottom: 0; border-radius: 4px 4px 0 0; }
+
+.rx-rules .env { position: absolute; left: var(--x); top: var(--y); width: 18px; height: 12px; margin: -6px 0 0 -9px; background: var(--surface); border: 1.5px solid var(--c, var(--fg)); border-radius: 2px; z-index: 3; }
+.rx-rules .env::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 0; border-left: 7.5px solid transparent; border-right: 7.5px solid transparent; border-top: 5px solid var(--c, var(--fg)); }
+.rx-rules .env[data-n]::after { content: attr(data-n); position: absolute; left: 100%; top: -7px; margin-left: 1px; font: 700 9px/1 var(--mono); color: var(--c, var(--fg)); }
+
+.rx-rules .thr { position: absolute; left: var(--x); top: var(--y); width: 20px; height: 20px; margin: -10px 0 0 -10px; z-index: 4; }
+.rx-rules .thr .fill, .rx-rules .thr .dead, .rx-rules .thr .blk, .rx-rules .thr .blk .ring { position: absolute; inset: 0; border-radius: 50%; }
+.rx-rules .thr .fill { background: var(--c); }
+.rx-rules .thr .fill.off { display: none; }
+.rx-rules .thr .blk { opacity: 0; border-radius: 0; }
+.rx-rules .thr .blk.on { opacity: 1; }
+.rx-rules .thr .blk .ring { border: 2.5px solid var(--c); }
+.rx-rules .thr .blk .zz { position: absolute; left: 15px; bottom: 11px; font: italic 700 10px/1 var(--sans); color: var(--c); white-space: nowrap; animation: rxr-zz 1.8s ease-in-out infinite; }
+.rx-rules .thr .blk .cap { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 14px; font: 9.5px/1.3 var(--mono); color: var(--fg); white-space: nowrap; }
+.rx-rules .thr .dead { background: var(--r-dead); opacity: 0; }
+.rx-rules .thr .dead::after { content: "✕"; position: absolute; inset: 0; display: grid; place-items: center; font: 700 11px/1 var(--sans); color: var(--surface); }
+.rx-rules .thr .lb { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 2px; font: 10px/1 var(--mono); color: var(--muted); }
+.rx-rules .thr .blk.ap, .rx-rules .thr .blk.wh, .rx-rules .thr .dead.ap { opacity: 1; }
+.rx-rules .thr .fill.vn, .rx-rules .thr .fill.w { opacity: 0; }
+
+.rx-rules .ping { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; border: 2px solid var(--c, var(--fg)); z-index: 3; }
+
+.rx-rules .obj { position: absolute; left: var(--x); top: var(--y); width: 36px; height: 24px; margin: -12px 0 0 -18px; border-radius: 6px; background: var(--surface); border: 2px solid var(--c); display: grid; place-items: center; font: 600 10px/1 var(--mono); color: var(--fg); z-index: 3; }
+.rx-rules .obj.shell { border-style: dashed; border-color: var(--r-dead); color: var(--r-dead); background: transparent; }
+.rx-rules .obj .lb { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 3px; font: 9.5px/1 var(--mono); color: var(--muted); font-weight: 400; white-space: nowrap; }
+
+.rx-rules .res { position: absolute; left: var(--x); top: var(--y); transform: translate(-50%, -50%); font: 600 10.5px/1.7 var(--mono); padding: 0 7px; border-radius: 999px; color: var(--bg); background: var(--o-ok); white-space: nowrap; z-index: 5; }
+.rx-rules .res.nil { background: var(--o-nil); }
+.rx-rules .res.blocks { background: var(--o-blocks); }
+.rx-rules .res.killed { background: var(--o-killed); }
+.rx-rules .res.exit { background: var(--o-exit); }
+.rx-rules .res.err { background: var(--o-err); }
+.rx-rules .res.err::after { content: ""; position: absolute; inset: -3px; border-radius: 999px; border: 2px solid var(--o-err); animation: rxr-flash 1s ease-out infinite; }
+
+.rx-rules .call { position: absolute; left: var(--x); top: var(--y); transform: translate(-50%, -50%); font: 10.5px/1.6 var(--mono); padding: 0 6px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); color: var(--fg); white-space: nowrap; z-index: 5; }
+
+.rx-rules .beam { position: absolute; left: min(var(--x0), var(--x1)); top: var(--y); width: calc(max(var(--x0), var(--x1)) - min(var(--x0), var(--x1))); border-top: 2px dashed var(--c, var(--o-blocks)); z-index: 1; }
+.rx-rules .beam .lbl { position: absolute; left: 50%; top: 0; transform: translate(-50%, -50%); font: 9.5px/1.4 var(--mono); padding: 0 5px; background: var(--stage); color: var(--muted); white-space: nowrap; }
+
+.rx-rules .strip { position: absolute; left: 0; right: 0; bottom: 0; height: 32px; padding: 0 8px; display: flex; gap: 5px; align-items: center; overflow: hidden; }
+.rx-rules .strip .rx-badge { background: var(--surface); font-size: 10px; line-height: 1.6; padding: 0 5px; }
+
+.rx-rules .w, .rx-rules .wh, .rx-rules .ap, .rx-rules .vn { animation-duration: var(--dur); animation-timing-function: linear; animation-iteration-count: infinite; }
+.rx-rules .w, .rx-rules .wh { animation-delay: calc((var(--s) - 1) * var(--dur)); }
+.rx-rules .w { opacity: 0; }
+.rx-rules .wh { opacity: 1; }
+.rx-rules .vn { opacity: 0; }
+.rx-rules .ap { opacity: 1; }
+.rx-rules .fly { left: var(--x1); top: var(--y1); }
+
+.rx-rules .show10 { animation-name: rxr-show10; } .rx-rules .show12 { animation-name: rxr-show12; } .rx-rules .show15 { animation-name: rxr-show15; } .rx-rules .show18 { animation-name: rxr-show18; } .rx-rules .show20 { animation-name: rxr-show20; } .rx-rules .show25 { animation-name: rxr-show25; } .rx-rules .show30 { animation-name: rxr-show30; } .rx-rules .show35 { animation-name: rxr-show35; } .rx-rules .show40 { animation-name: rxr-show40; } .rx-rules .show55 { animation-name: rxr-show55; } .rx-rules .show60 { animation-name: rxr-show60; }
+.rx-rules .hide55 { animation-name: rxr-hide55; } .rx-rules .hide60 { animation-name: rxr-hide60; }
+.rx-rules .fly8 { animation-name: rxr-fly8; } .rx-rules .fly10 { animation-name: rxr-fly10; } .rx-rules .fly12 { animation-name: rxr-fly12; } .rx-rules .fly15 { animation-name: rxr-fly15; } .rx-rules .fly18 { animation-name: rxr-fly18; } .rx-rules .fly20 { animation-name: rxr-fly20; }
+.rx-rules .ap5 { animation-name: rxr-ap5; } .rx-rules .ap10 { animation-name: rxr-ap10; } .rx-rules .ap15 { animation-name: rxr-ap15; } .rx-rules .ap20 { animation-name: rxr-ap20; } .rx-rules .ap25 { animation-name: rxr-ap25; } .rx-rules .ap30 { animation-name: rxr-ap30; } .rx-rules .ap35 { animation-name: rxr-ap35; } .rx-rules .ap40 { animation-name: rxr-ap40; } .rx-rules .ap45 { animation-name: rxr-ap45; } .rx-rules .ap50 { animation-name: rxr-ap50; } .rx-rules .ap55 { animation-name: rxr-ap55; } .rx-rules .ap60 { animation-name: rxr-ap60; } .rx-rules .ap65 { animation-name: rxr-ap65; } .rx-rules .ap70 { animation-name: rxr-ap70; } .rx-rules .ap75 { animation-name: rxr-ap75; } .rx-rules .ap80 { animation-name: rxr-ap80; } .rx-rules .ap85 { animation-name: rxr-ap85; } .rx-rules .ap90 { animation-name: rxr-ap90; }
+.rx-rules .vn5 { animation-name: rxr-vn5; } .rx-rules .vn15 { animation-name: rxr-vn15; } .rx-rules .vn20 { animation-name: rxr-vn20; } .rx-rules .vn30 { animation-name: rxr-vn30; } .rx-rules .vn45 { animation-name: rxr-vn45; } .rx-rules .vn55 { animation-name: rxr-vn55; } .rx-rules .vn75 { animation-name: rxr-vn75; }
+
+@keyframes rxr-show10 { 0% { opacity: 0; } 1.5%, 8.5% { opacity: 1; } 10%, 100% { opacity: 0; } }
+@keyframes rxr-show12 { 0% { opacity: 0; } 1.5%, 10.5% { opacity: 1; } 12%, 100% { opacity: 0; } }
+@keyframes rxr-show15 { 0% { opacity: 0; } 1.5%, 13.5% { opacity: 1; } 15%, 100% { opacity: 0; } }
+@keyframes rxr-show18 { 0% { opacity: 0; } 1.5%, 16.5% { opacity: 1; } 18%, 100% { opacity: 0; } }
+@keyframes rxr-show20 { 0% { opacity: 0; } 1.5%, 18.5% { opacity: 1; } 20%, 100% { opacity: 0; } }
+@keyframes rxr-show25 { 0% { opacity: 0; } 1.5%, 23.5% { opacity: 1; } 25%, 100% { opacity: 0; } }
+@keyframes rxr-show30 { 0% { opacity: 0; } 1.5%, 28.5% { opacity: 1; } 30%, 100% { opacity: 0; } }
+@keyframes rxr-show35 { 0% { opacity: 0; } 1.5%, 33.5% { opacity: 1; } 35%, 100% { opacity: 0; } }
+@keyframes rxr-show40 { 0% { opacity: 0; } 1.5%, 38.5% { opacity: 1; } 40%, 100% { opacity: 0; } }
+@keyframes rxr-show55 { 0% { opacity: 0; } 1.5%, 53.5% { opacity: 1; } 55%, 100% { opacity: 0; } }
+@keyframes rxr-show60 { 0% { opacity: 0; } 1.5%, 58.5% { opacity: 1; } 60%, 100% { opacity: 0; } }
+@keyframes rxr-hide55 { 0% { opacity: 1; } 1.5%, 53.5% { opacity: 0; } 55%, 100% { opacity: 1; } }
+@keyframes rxr-hide60 { 0% { opacity: 1; } 1.5%, 58.5% { opacity: 0; } 60%, 100% { opacity: 1; } }
+
+@keyframes rxr-fly8 { 0% { left: var(--x0); top: var(--y0); opacity: 0; } 1% { opacity: 1; } 7% { left: var(--x1); top: var(--y1); opacity: 1; } 8%, 100% { left: var(--x1); top: var(--y1); opacity: 0; } }
+@keyframes rxr-fly10 { 0% { left: var(--x0); top: var(--y0); opacity: 0; } 1% { opacity: 1; } 9% { left: var(--x1); top: var(--y1); opacity: 1; } 10%, 100% { left: var(--x1); top: var(--y1); opacity: 0; } }
+@keyframes rxr-fly12 { 0% { left: var(--x0); top: var(--y0); opacity: 0; } 1% { opacity: 1; } 11% { left: var(--x1); top: var(--y1); opacity: 1; } 12%, 100% { left: var(--x1); top: var(--y1); opacity: 0; } }
+@keyframes rxr-fly15 { 0% { left: var(--x0); top: var(--y0); opacity: 0; } 1% { opacity: 1; } 13.5% { left: var(--x1); top: var(--y1); opacity: 1; } 15%, 100% { left: var(--x1); top: var(--y1); opacity: 0; } }
+@keyframes rxr-fly18 { 0% { left: var(--x0); top: var(--y0); opacity: 0; } 1% { opacity: 1; } 16.5% { left: var(--x1); top: var(--y1); opacity: 1; } 18%, 100% { left: var(--x1); top: var(--y1); opacity: 0; } }
+@keyframes rxr-fly20 { 0% { left: var(--x0); top: var(--y0); opacity: 0; } 1% { opacity: 1; } 18.5% { left: var(--x1); top: var(--y1); opacity: 1; } 20%, 100% { left: var(--x1); top: var(--y1); opacity: 0; } }
+
+@keyframes rxr-ap5 { 0%, 5% { opacity: 0; } 7%, 100% { opacity: 1; } }
+@keyframes rxr-ap10 { 0%, 10% { opacity: 0; } 12%, 100% { opacity: 1; } }
+@keyframes rxr-ap15 { 0%, 15% { opacity: 0; } 17%, 100% { opacity: 1; } }
+@keyframes rxr-ap20 { 0%, 20% { opacity: 0; } 22%, 100% { opacity: 1; } }
+@keyframes rxr-ap25 { 0%, 25% { opacity: 0; } 27%, 100% { opacity: 1; } }
+@keyframes rxr-ap30 { 0%, 30% { opacity: 0; } 32%, 100% { opacity: 1; } }
+@keyframes rxr-ap35 { 0%, 35% { opacity: 0; } 37%, 100% { opacity: 1; } }
+@keyframes rxr-ap40 { 0%, 40% { opacity: 0; } 42%, 100% { opacity: 1; } }
+@keyframes rxr-ap45 { 0%, 45% { opacity: 0; } 47%, 100% { opacity: 1; } }
+@keyframes rxr-ap50 { 0%, 50% { opacity: 0; } 52%, 100% { opacity: 1; } }
+@keyframes rxr-ap55 { 0%, 55% { opacity: 0; } 57%, 100% { opacity: 1; } }
+@keyframes rxr-ap60 { 0%, 60% { opacity: 0; } 62%, 100% { opacity: 1; } }
+@keyframes rxr-ap65 { 0%, 65% { opacity: 0; } 67%, 100% { opacity: 1; } }
+@keyframes rxr-ap70 { 0%, 70% { opacity: 0; } 72%, 100% { opacity: 1; } }
+@keyframes rxr-ap75 { 0%, 75% { opacity: 0; } 77%, 100% { opacity: 1; } }
+@keyframes rxr-ap80 { 0%, 80% { opacity: 0; } 82%, 100% { opacity: 1; } }
+@keyframes rxr-ap85 { 0%, 85% { opacity: 0; } 87%, 100% { opacity: 1; } }
+@keyframes rxr-ap90 { 0%, 90% { opacity: 0; } 92%, 100% { opacity: 1; } }
+@keyframes rxr-vn5 { 0%, 5% { opacity: 1; } 7%, 100% { opacity: 0; } }
+@keyframes rxr-vn15 { 0%, 15% { opacity: 1; } 17%, 100% { opacity: 0; } }
+@keyframes rxr-vn20 { 0%, 20% { opacity: 1; } 22%, 100% { opacity: 0; } }
+@keyframes rxr-vn30 { 0%, 30% { opacity: 1; } 32%, 100% { opacity: 0; } }
+@keyframes rxr-vn45 { 0%, 45% { opacity: 1; } 47%, 100% { opacity: 0; } }
+@keyframes rxr-vn55 { 0%, 55% { opacity: 1; } 57%, 100% { opacity: 0; } }
+@keyframes rxr-vn75 { 0%, 75% { opacity: 1; } 77%, 100% { opacity: 0; } }
+
+@keyframes rxr-zz { 0% { transform: translateY(0); opacity: 0; } 30%, 60% { opacity: 1; } 100% { transform: translateY(-9px); opacity: 0; } }
+@keyframes rxr-flash { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.35); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .rx-rules .stage .replay { display: none; }
+  .rx-rules .stage .still { opacity: 1 !important; }
+  .rx-rules .stage .still-off { opacity: 0 !important; }
+  .rx-rules .thr .blk .zz { animation: none; opacity: .8; transform: none; }
+  .rx-rules .res.err::after { display: none; }
+}

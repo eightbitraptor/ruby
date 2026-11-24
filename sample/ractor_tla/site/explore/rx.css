@@ -1,0 +1,88 @@
+/* Tokens and components of the Ractor widgets.  It defines no page chrome
+   and none of --bg, --surface, --fg, --muted, --border, --accent: the host
+   page provides those (site/style.css or explore/common.css). */
+
+:root {
+  --sunken: #eef0f4;
+  --shadow: 0 1px 2px rgb(20 20 40 / .06), 0 6px 24px rgb(20 20 40 / .08);
+
+  --r-main: #6366f1;
+  --r-worker: #0d9488;
+  --r-worker2: #d97706;
+  --r-dead: #9ca3af;
+
+  --o-ok: #16a34a;
+  --o-nil: #6b7280;
+  --o-blocks: #2563eb;
+  --o-runs: #0891b2;
+  --o-err: #dc2626;
+  --o-killed: #be123c;
+  --o-exit: #9333ea;
+
+  --radius: 14px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+  --speed: 1;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sunken: #0d0f15;
+    --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 8px 28px rgb(0 0 0 / .35);
+    --r-main: #818cf8;
+    --r-worker: #2dd4bf;
+    --r-worker2: #fbbf24;
+    --r-dead: #6b7280;
+    --o-ok: #4ade80;
+    --o-nil: #9ca3af;
+    --o-blocks: #60a5fa;
+    --o-runs: #22d3ee;
+    --o-err: #f87171;
+    --o-killed: #fb7185;
+    --o-exit: #c084fc;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --speed: 0; }
+  .rx-widget *, .rx-widget *::before, .rx-widget *::after,
+  .rx-anim *, .rx-anim *::before, .rx-anim *::after { animation-duration: 0s !important; transition-duration: 0s !important; }
+}
+
+.rx-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+
+.rx-btn { font: inherit; font-size: 14px; padding: .35rem .8rem; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer; transition: border-color .15s, background .15s, transform .1s; }
+.rx-btn:hover { border-color: var(--accent); }
+.rx-btn:active { transform: translateY(1px); }
+.rx-btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+.rx-btn:disabled { opacity: .45; cursor: default; }
+.rx-select { font: inherit; font-size: 14px; padding: .3rem .6rem; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); }
+
+.rx-badge { display: inline-flex; align-items: center; gap: .3rem; font: 12px/1.7 var(--mono); padding: 0 .55rem; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.rx-badge.ok { color: var(--o-ok); }
+.rx-badge.nil { color: var(--o-nil); }
+.rx-badge.blocks { color: var(--o-blocks); }
+.rx-badge.runs { color: var(--o-runs); }
+.rx-badge.err { color: var(--o-err); }
+.rx-badge.killed { color: var(--o-killed); }
+.rx-badge.exit { color: var(--o-exit); }
+
+.rx-ractor.main { --c: var(--r-main); }
+.rx-ractor.worker { --c: var(--r-worker); }
+.rx-ractor.worker2 { --c: var(--r-worker2); }
+.rx-ractor.dead { --c: var(--r-dead); }
+
+.rx-muted { color: var(--muted); }
+.rx-kicker { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+.rx-widget { font-family: var(--sans); position: relative; z-index: 0; }
+
+/* Marks of lifecycle.js on the site's state diagrams. */
+figure[data-rx-nodes] svg g.node.rx-here :is(path, polygon, ellipse) { stroke: var(--o-blocks); stroke-width: 4; fill: color-mix(in srgb, var(--o-blocks) 16%, transparent); }
+figure[data-rx-nodes] svg g.node.rx-here text { font-weight: 700; }
+figure[data-rx-nodes] svg g.node.rx-here { animation: rx-here 1.6s ease-in-out infinite; }
+figure[data-rx-nodes] svg g.edge.rx-step path { stroke: var(--o-blocks); stroke-width: 3; }
+figure[data-rx-nodes] svg g.edge.rx-step polygon { stroke: var(--o-blocks); fill: var(--o-blocks); }
+figure[data-rx-nodes] svg g.edge.rx-step text { fill: var(--o-blocks); font-weight: 700; }
+figure.rx-marked > figcaption::after { content: "  ● current state"; color: var(--o-blocks); font-size: 12px; font-weight: 600; }
+@keyframes rx-here { 50% { opacity: .55; } }

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ractor models: visualisation prototypes</title>
+<link rel="stylesheet" href="rx.css">
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="index.css">
+</head>
+<body>
+<header class="rx-top">
+  <a class="brand" href="index.html">Ractor models</a>
+  <nav>
+    <a class="here" href="index.html">Overview</a>
+    <a href="theatre.html">Theatre</a>
+    <a href="explorer.html">Explorer</a>
+    <a href="multiverse.html">Multiverse</a>
+    <a href="rules.html">Rules</a>
+    <a href="timeline.html">Timelines</a>
+  </nav>
+</header>
+<main class="rx-page">
+  <section class="hero">
+    <div>
+      <p class="rx-kicker">Prototypes</p>
+      <h1>Five ways to show what the Ractor models say</h1>
+      <p class="rx-lede">Each page below draws the same TLA+ models in a different way. The readers know neither TLA+ nor Ractors. Every state and every step on these pages comes from the state graphs that TLC checked.</p>
+    </div>
+    <div class="hero-stage" aria-hidden="true">
+      <div class="room main"><span>main</span><i class="port">P1</i><b class="thread sleeping">T1</b></div>
+      <div class="room worker"><span>worker</span><b class="thread">T3</b></div>
+      <i class="envelope"></i>
+    </div>
+  </section>
+
+  <section class="facts" id="facts"></section>
+
+  <section class="gallery">
+    <article class="card">
+      <a class="preview" href="theatre.html" tabindex="-1"><iframe src="theatre.html" title="Theatre preview" loading="lazy" tabindex="-1"></iframe></a>
+      <div class="body">
+        <h2><a href="theatre.html">Theatre</a></h2>
+        <p>Short animated stories. Each story plays one path through a model: a thread waits, a message arrives, a port closes, a worker ends. A caption explains each step and shows the Ruby call.</p>
+        <dl><dt>Teaches</dt><dd>What Ractors, ports, and blocking calls do.</dd><dt>Best for</dt><dd>A first visit, talks, and the top of each model page.</dd></dl>
+      </div>
+    </article>
+    <article class="card">
+      <a class="preview" href="explorer.html" tabindex="-1"><iframe src="explorer.html" title="Explorer preview" loading="lazy" tabindex="-1"></iframe></a>
+      <div class="body">
+        <h2><a href="explorer.html">Explorer</a></h2>
+        <p>You choose what happens next. The page lists every call that is possible in the current state. You guess the outcome, then watch it. A meter shows how much of the state space you saw.</p>
+        <dl><dt>Teaches</dt><dd>That a model is a set of states and allowed steps; where the specification leaves CRuby a choice.</dd><dt>Best for</dt><dd>Readers who learn by trying.</dd></dl>
+      </div>
+    </article>
+    <article class="card">
+      <a class="preview" href="multiverse.html" tabindex="-1"><iframe src="multiverse.html" title="Multiverse preview" loading="lazy" tabindex="-1"></iframe></a>
+      <div class="body">
+        <h2><a href="multiverse.html">Multiverse</a></h2>
+        <p>The whole state graph grows level by level, the way TLC explores it. Then the paths that ran on CRuby light up one by one until every transition is covered.</p>
+        <dl><dt>Teaches</dt><dd>What model checking and replay mean, and why the result is exhaustive within the bounds.</dd><dt>Best for</dt><dd>Explaining the method, not the API.</dd></dl>
+      </div>
+    </article>
+    <article class="card">
+      <a class="preview" href="rules.html" tabindex="-1"><iframe src="rules.html" title="Rules preview" loading="lazy" tabindex="-1"></iframe></a>
+      <div class="body">
+        <h2><a href="rules.html">Rule cards</a></h2>
+        <p>One card per rule, with a small looping animation, the outcome, the Ruby that triggers it, and whether the documentation states the rule.</p>
+        <dl><dt>Teaches</dt><dd>The rules themselves, at a glance.</dd><dt>Best for</dt><dd>Reference use, and links from documentation and issues.</dd></dl>
+      </div>
+    </article>
+    <article class="card">
+      <a class="preview" href="timeline.html" tabindex="-1"><iframe src="timeline.html" title="Timelines preview" loading="lazy" tabindex="-1"></iframe></a>
+      <div class="body">
+        <h2><a href="timeline.html">Timelines</a></h2>
+        <p>Swimlanes for the worker pool: each of the 80 schedules plays as jobs move between main and two workers. A second view splits the timeline at <code>fork</code>.</p>
+        <dl><dt>Teaches</dt><dd>Order and interleaving: what can run before what.</dd><dt>Best for</dt><dd>Protocols with several Ractors, and process-level events.</dd></dl>
+      </div>
+    </article>
+  </section>
+
+  <section class="compare rx-panel">
+    <h2>How the prototypes compare</h2>
+    <table>
+      <thead><tr><th>Page</th><th>Reader effort</th><th>Shows the state space</th><th>Shows the Ruby</th><th>Interaction</th></tr></thead>
+      <tbody>
+        <tr><td>Theatre</td><td>Low: watch</td><td>One path at a time</td><td>Yes, per step</td><td>Play, pause, step</td></tr>
+        <tr><td>Explorer</td><td>Medium: choose</td><td>Paths you choose</td><td>Yes, per step</td><td>Every possible step</td></tr>
+        <tr><td>Multiverse</td><td>Low: watch</td><td>All of it</td><td>On demand</td><td>Play, inspect a state</td></tr>
+        <tr><td>Rule cards</td><td>Low: scan</td><td>No</td><td>Yes, per rule</td><td>Filter, reveal</td></tr>
+        <tr><td>Timelines</td><td>Low: watch</td><td>All 80 pool schedules</td><td>Some steps</td><td>Pick a schedule, scrub</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+<script src="data/RactorPorts.js"></script>
+<script src="data/RactorBlocking.js"></script>
+<script src="data/RactorOrder.js"></script>
+<script src="data/RactorProcess.js"></script>
+<script src="data/RactorPool.js"></script>
+<script src="common.js"></script>
+<script>
+  (function () {
+    const names = ["RactorPorts", "RactorBlocking", "RactorOrder", "RactorProcess"];
+    const models = names.map((n) => RX.load(n));
+    const states = models.reduce((s, m) => s + m.counts.core_states, 0);
+    const transitions = models.reduce((s, m) => s + m.transitions.length, 0);
+    const replays = models.reduce((s, m) => s + m.counts.paths, 0);
+    const pool = window.RACTOR_MODELS.RactorPool;
+    const facts = [
+      [states, "states shown on these pages"],
+      [transitions, "possible steps between them"],
+      [replays, "CRuby replays of those steps, all passed"],
+      [pool.schedules.length, "worker-pool schedules, each replayed"],
+    ];
+    document.getElementById("facts").innerHTML = facts
+      .map(([n, label]) => `<div class="rx-panel"><b>${n.toLocaleString("en")}</b><span>${label}</span></div>`).join("");
+  })();
+</script>
+</body>
+</html>

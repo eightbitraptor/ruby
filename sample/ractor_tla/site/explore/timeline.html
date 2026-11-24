@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Timelines · Ractor models</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="rx.css">
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="timeline.css">
+</head>
+<body>
+<header class="rx-top">
+  <a class="brand" href="index.html">Ractor models</a>
+  <nav>
+    <a href="index.html">Overview</a>
+    <a href="theatre.html">Theatre</a>
+    <a href="explorer.html">Explorer</a>
+    <a href="multiverse.html">Multiverse</a>
+    <a href="rules.html">Rules</a>
+    <a class="here" href="timeline.html">Timelines</a>
+  </nav>
+</header>
+
+<main class="rx-page">
+  <h1>Timelines</h1>
+  <p class="rx-lede">Two models, drawn as time moving left to right. A Ractor is a Ruby actor with its own threads and objects. Ractors talk through ports: anyone can send to a port, only its owner can receive from it. Each lane below is one Ractor or one thread.</p>
+
+  <h2>1. A worker pool, one schedule at a time</h2>
+  <p>Main owns a FIFO of three jobs and one result port per worker (<code>R1</code>, <code>R2</code>). Each worker owns its default port <code>D</code>. Main sends jobs, workers process them and send results to main's result ports, main collects them with <code>Ractor.select</code>, runs one global GC, then stops and observes each worker. The three jobs travel in three different ways: job 1 is <strong>shared</strong> (both sides refer to the same frozen object), job 2 is <strong>copied</strong> (the worker gets a deep copy), job 3 is <strong>moved</strong> (main loses it).</p>
+  <div data-rx-widget="timeline" data-view="pool" data-braid="open"></div>
+
+  <h2>2. <code>fork</code> splits the process</h2>
+  <p>Main has two Ractors: main itself, with threads <em>main thread</em> and <em>T1</em>, and a worker with thread <em>T2</em>. T1 and T2 block in <code>receive</code>, main registers an <code>at_exit</code> handler, then forks. The child process keeps only the thread that called <code>fork</code>. The other threads are gone: they do not wake up and no <code>ensure</code> clause runs. The child sees the worker as terminated.</p>
+  <div data-rx-widget="timeline" data-view="fork"></div>
+</main>
+
+<script src="data/RactorPool.js"></script>
+<script src="data/RactorProcess.js"></script>
+<script src="common.js"></script>
+<script src="timeline.js"></script>
+<script src="widgets.js"></script>
+</body>
+</html>

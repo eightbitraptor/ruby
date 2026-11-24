@@ -1,0 +1,41 @@
+/* Page chrome of the stand-alone prototype pages in explore/.  Link rx.css
+   first: it holds the widget tokens and components. */
+
+:root {
+  --bg: #fbfbfd;
+  --surface: #ffffff;
+  --fg: #1d2030;
+  --muted: #646a80;
+  --border: #dfe2ea;
+  --accent: #4f46e5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11131a;
+    --surface: #181b24;
+    --fg: #e6e8f0;
+    --muted: #9aa0b4;
+    --border: #2a2f3d;
+    --accent: #818cf8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--sans); }
+a { color: var(--accent); }
+code, kbd { font: 13px/1.4 var(--mono); }
+code { background: var(--sunken); padding: .05rem .35rem; border-radius: 5px; }
+
+.rx-top { display: flex; align-items: center; gap: 1rem; padding: .7rem 1.4rem; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 10; }
+.rx-top .brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+.rx-top nav { display: flex; gap: .25rem; flex-wrap: wrap; }
+.rx-top nav a { padding: .2rem .65rem; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 14px; }
+.rx-top nav a:hover, .rx-top nav a.here { background: var(--sunken); color: var(--fg); }
+.rx-page { max-width: 1240px; margin: 0 auto; padding: 1.5rem 1.4rem 3rem; }
+.rx-lede { color: var(--muted); font-size: 1.1rem; max-width: 62ch; }

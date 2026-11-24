@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multiverse · Ractor models</title>
+<link rel="stylesheet" href="rx.css">
+<link rel="stylesheet" href="common.css">
+<link rel="stylesheet" href="multiverse.css">
+</head>
+<body>
+<header class="rx-top">
+  <a class="brand" href="index.html">Ractor models</a>
+  <nav>
+    <a href="index.html">Overview</a>
+    <a href="theatre.html">Theatre</a>
+    <a href="explorer.html">Explorer</a>
+    <a href="multiverse.html" class="here">Multiverse</a>
+    <a href="rules.html">Rules</a>
+    <a href="timeline.html">Timelines</a>
+  </nav>
+</header>
+
+<main class="rx-page">
+  <div class="rx-kicker">Model checking, watched</div>
+  <h1 style="margin:.1rem 0 .4rem">Every possible future</h1>
+  <p class="rx-lede" style="margin:0 0 1.2rem;max-width:72ch">A model checker does not run a program once. It follows every call that any Ractor could make next, in every order, until it has seen every state that can happen. This page shows that search for one Ractor model, then shows CRuby running every arrow the search found.</p>
+  <div data-rx-widget="multiverse" data-model="RactorPorts"></div>
+</main>
+
+<script src="data/RactorPorts.js"></script>
+<script src="data/RactorTermination.js"></script>
+<script src="data/RactorTransfer.js"></script>
+<script src="data/RactorIsolation.js"></script>
+<script src="data/RactorLocal.js"></script>
+<script src="data/RactorBlocking.js"></script>
+<script src="data/RactorOrder.js"></script>
+<script src="data/RactorProcess.js"></script>
+<script src="common.js"></script>
+<script src="multiverse.js"></script>
+<script src="widgets.js"></script>
+</body>
+</html>

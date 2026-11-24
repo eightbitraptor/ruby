@@ -1,0 +1,56 @@
+.hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 2rem; align-items: center; margin: 1rem 0 1.5rem; }
+.hero h1 { font-size: 2.3rem; line-height: 1.15; margin: .3rem 0 .8rem; }
+@media (max-width: 900px) { .hero { grid-template-columns: 1fr; } }
+
+.hero-stage { position: relative; height: 210px; display: flex; gap: 3.5rem; justify-content: center; align-items: center; }
+.hero-stage .room { position: relative; width: 150px; height: 150px; border-radius: 18px; border: 2px solid var(--c); background: color-mix(in srgb, var(--c) 9%, var(--surface)); }
+.hero-stage .room.main { --c: var(--r-main); }
+.hero-stage .room.worker { --c: var(--r-worker); }
+.hero-stage .room > span { position: absolute; top: 8px; left: 12px; font-weight: 600; font-size: 13px; color: var(--c); }
+.hero-stage .port { position: absolute; right: -15px; top: 56px; width: 30px; height: 38px; border-radius: 6px; border: 2px solid var(--c); background: var(--surface); font: 600 11px/34px var(--mono); font-style: normal; text-align: center; color: var(--muted); }
+.hero-stage .thread { position: absolute; left: 50%; top: 62px; transform: translateX(-50%); width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font: 600 12px var(--mono); color: white; background: var(--c); }
+.hero-stage .thread.sleeping { animation: hero-sleep 4s infinite; }
+.hero-stage .thread.sleeping::after { content: "z z"; position: absolute; top: -18px; right: -14px; font: 600 12px var(--mono); color: var(--o-blocks); animation: hero-z 4s infinite; }
+.hero-stage .envelope { position: absolute; width: 22px; height: 15px; border-radius: 3px; background: var(--r-worker); left: calc(50% + 62px); top: 96px; animation: hero-fly 4s infinite; }
+.hero-stage .envelope::before { content: ""; position: absolute; inset: 0; background: linear-gradient(160deg, transparent 48%, rgb(255 255 255 / .7) 50%, transparent 52%), linear-gradient(20deg, transparent 48%, rgb(255 255 255 / .7) 50%, transparent 52%); }
+
+@keyframes hero-fly {
+  0%, 20% { transform: translate(0, 0); opacity: 0; }
+  25% { opacity: 1; }
+  50% { transform: translate(-110px, -12px); opacity: 1; }
+  62% { transform: translate(-178px, -12px) scale(.8); opacity: 1; }
+  70%, 100% { transform: translate(-178px, -12px) scale(.6); opacity: 0; }
+}
+@keyframes hero-sleep {
+  0%, 60% { background: transparent; color: var(--c); box-shadow: inset 0 0 0 2px var(--c); }
+  66% { background: var(--o-ok); color: white; box-shadow: 0 0 0 8px color-mix(in srgb, var(--o-ok) 25%, transparent); }
+  80%, 100% { background: var(--c); color: white; box-shadow: none; }
+}
+@keyframes hero-z {
+  0% { opacity: 0; transform: translateY(4px); }
+  20%, 50% { opacity: 1; transform: translateY(-4px); }
+  60%, 100% { opacity: 0; }
+}
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .9rem; margin-bottom: 2rem; }
+.facts > div { padding: .8rem 1rem; }
+.facts b { display: block; font-size: 1.7rem; font-variant-numeric: tabular-nums; }
+.facts span { color: var(--muted); font-size: 13px; }
+
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1.2rem; }
+.card { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; transition: transform .2s, border-color .2s; }
+.card:hover { transform: translateY(-2px); border-color: var(--accent); }
+.preview { position: relative; display: block; height: 210px; overflow: hidden; background: var(--sunken); border-bottom: 1px solid var(--border); }
+.preview iframe { position: absolute; left: 0; top: 0; width: 1280px; height: 800px; border: 0; transform: scale(.31); transform-origin: 0 0; pointer-events: none; }
+.card .body { padding: .2rem 1.2rem 1.1rem; }
+.card h2 { margin: .7rem 0 .3rem; font-size: 1.25rem; }
+.card h2 a { color: var(--fg); text-decoration: none; }
+.card p { margin: .3rem 0 .7rem; }
+.card dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .8rem; margin: 0; font-size: 14px; }
+.card dt { color: var(--muted); }
+.card dd { margin: 0; }
+
+.compare { margin-top: 2rem; padding: .2rem 1.4rem 1rem; }
+.compare table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.compare th, .compare td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--border); }
+.compare th { color: var(--muted); font-weight: 600; }
