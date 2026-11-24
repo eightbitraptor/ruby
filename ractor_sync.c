@@ -1878,6 +1878,12 @@ ractor_selector_add(VALUE selv, VALUE rpv)
     struct ractor_selector *s = RACTOR_SELECTOR_PTR(selv);
     const struct ractor_port *rp = RACTOR_PORT_PTR(rpv);
 
+    /* ractor_try_receive looks the port up by id in the calling Ractor's table, so a
+     * port created elsewhere would alias the caller's port with the same id. */
+    if (rp->r != GET_RACTOR()) {
+        rb_raise(rb_eRactorError, "only allowed from the creator Ractor of this port");
+    }
+
     if (st_lookup(s->ports, (st_data_t)rpv, NULL)) {
         rb_raise(rb_eArgError, "already added");
     }
@@ -1972,6 +1978,28 @@ ractor_selector_wait_i(st_data_t key, st_data_t val, st_data_t data)
     }
 }
 
+static int
+ractor_selector_closed_i(st_data_t key, st_data_t val, st_data_t data)
+{
+    struct ractor_selector_wait_data *p = (struct ractor_selector_wait_data *)data;
+    const struct ractor_port *rp = (const struct ractor_port *)val;
+
+    if (ractor_get_queue(p->cr, ractor_port_id(rp), false) == NULL) {
+        rb_raise(rb_eRactorClosedError, "The port was already closed");
+    }
+    return ST_CONTINUE;
+}
+
+/* A closed, drained port raises before any message is taken, whatever the argument
+ * order and whether or not pending messages were delivered to the port queues yet.
+ * Without the first pass the answer depended on which port the scan met first. */
+static void
+ractor_selector_scan(struct ractor_selector *s, struct ractor_selector_wait_data *data)
+{
+    st_foreach(s->ports, ractor_selector_closed_i, (st_data_t)data);
+    st_foreach(s->ports, ractor_selector_wait_i, (st_data_t)data);
+}
+
 static VALUE
 ractor_selector__wait(rb_execution_context_t *ec, VALUE selector, const rb_hrtime_t *end)
 {
@@ -1985,7 +2013,7 @@ ractor_selector__wait(rb_execution_context_t *ec, VALUE selector, const rb_hrtim
     };
 
     while (1) {
-        st_foreach(s->ports, ractor_selector_wait_i, (st_data_t)&data);
+        ractor_selector_scan(s, &data);
 
         if (data.found) {
             return rb_ary_new_from_args(2, data.rpv, data.v);
@@ -1994,7 +2022,7 @@ ractor_selector__wait(rb_execution_context_t *ec, VALUE selector, const rb_hrtim
             return Qnil;
         }
         else if (ractor_deadline_passed_p(end)) {
-            st_foreach(s->ports, ractor_selector_wait_i, (st_data_t)&data);
+            ractor_selector_scan(s, &data);
             return data.found ? rb_ary_new_from_args(2, data.rpv, data.v) : Qnil;
         }
     }

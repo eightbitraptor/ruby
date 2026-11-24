@@ -1516,6 +1516,51 @@ class TestRactor < Test::Unit::TestCase
     RUBY
   end
 
+  # Ractor.select looks each port up in the calling Ractor's table, so a port created by
+  # another Ractor must be rejected like Port#receive, not resolved to the caller's own
+  # port with the same id.  Port ids count per Ractor, so `mine` and `foreign` both get
+  # the first id after the default port; another port created first in either Ractor
+  # breaks that alignment and the test then no longer exercises the alias.
+  def test_select_rejects_foreign_port
+    assert_separately([], __FILE__, __LINE__, <<-'RUBY')
+      Warning[:experimental] = false
+      mine = Ractor::Port.new
+      r = Ractor.new { Ractor.main.send(Ractor::Port.new); Ractor.receive }
+      foreign = Ractor.receive
+      mine << :secret
+      e = assert_raise(Ractor::Error) { Ractor.select(foreign, timeout: 0) }
+      assert_equal "only allowed from the creator Ractor of this port", e.message
+      assert_raise(Ractor::Error) { Ractor.select(mine, foreign, timeout: 0) }
+      assert_equal :secret, mine.receive(timeout: 0)
+      r << :done
+      r.join
+    RUBY
+  end
+
+  # A closed, drained port raises before any message is taken, in either argument order and
+  # whether the close or the send came first; a closed port that still holds messages is ready.
+  def test_select_closed_port_wins
+    assert_separately([], __FILE__, __LINE__, <<-'RUBY')
+      Warning[:experimental] = false
+      ready, closed = Ractor::Port.new, Ractor::Port.new
+      closed.close
+      ready << :msg
+      assert_raise(Ractor::ClosedError) { Ractor.select(ready, closed, timeout: 0) }
+      assert_raise(Ractor::ClosedError) { Ractor.select(closed, ready, timeout: 0) }
+      ready2, closed2 = Ractor::Port.new, Ractor::Port.new
+      ready2 << :msg
+      closed2.close
+      assert_raise(Ractor::ClosedError) { Ractor.select(ready2, closed2, timeout: 0) }
+      assert_equal [ready, :msg], Ractor.select(ready, timeout: 0)
+      assert_equal [ready2, :msg], Ractor.select(ready2, timeout: 0)
+      queued = Ractor::Port.new
+      queued << :kept
+      queued.close
+      assert_equal [queued, :kept], Ractor.select(queued, ready, timeout: 0)
+      assert_raise(Ractor::ClosedError) { Ractor.select(queued, ready, timeout: 0) }
+    RUBY
+  end
+
   def test_receive_timeout_racing_with_send
     assert_separately([], __FILE__, __LINE__, <<-'RUBY')
       Warning[:experimental] = false

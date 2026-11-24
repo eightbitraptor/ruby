@@ -298,8 +298,13 @@ class Ractor
   #    # r1 done
   #    # r0 done
   #
-  # Closing one of the given ports raises Ractor::ClosedError, whether it was
-  # closed before the call or while it waits.
+  # Each port must have been created by the current Ractor, as for Port#receive;
+  # a port created by another Ractor raises Ractor::Error.
+  #
+  # If any given port is closed and holds no message, the call raises
+  # Ractor::ClosedError even when another port has a message, whether the port
+  # was closed before the call or while it waits. A closed port that still
+  # holds messages is ready like an open one.
   #
   # The following example is almost equivalent to <code>ractors.map(&:value)</code> except the thread
   # is unblocked when any of the ractors has terminated as opposed to waiting for their termination in
